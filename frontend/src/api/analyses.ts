@@ -204,3 +204,49 @@ export async function getAnalysisDetail(
 
   return resp.json() as Promise<AnalysisDetail>;
 }
+
+// ---------------------------------------------------------------------------
+// Types — List (B-032, FR-HIST-01)
+// ---------------------------------------------------------------------------
+
+export interface AnalysisListItem {
+  id: string;
+  status: AnalysisStatus;
+  exercise_type: string;
+  exercise_variant: string;
+  confidence_score: number | null;
+  created_at: string;
+}
+
+export interface AnalysisListResponse {
+  items: AnalysisListItem[];
+  total: number;
+}
+
+/**
+ * GET /api/v1/analyses
+ * Returns paginated reverse-chronological list of user's analyses.
+ * Requirements: FR-HIST-01
+ */
+export async function listAnalyses(
+  page = 1,
+  pageSize = 20,
+): Promise<AnalysisListResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  const resp = await fetch(`${API_BASE}/api/v1/analyses?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    const message =
+      body.error?.message ?? body.detail ?? "Failed to fetch analyses";
+    throw new Error(message);
+  }
+
+  return resp.json() as Promise<AnalysisListResponse>;
+}
