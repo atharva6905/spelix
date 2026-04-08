@@ -17,19 +17,19 @@ Check `backlog.md` for tasks marked with no shared dependencies. Parallelize whe
 
 - Tasks touching `models/`, `schemas/`, or `alembic/` — one agent owns these
 - Tasks with dependency arrows in the implementation plan
-- More than 3 simultaneous agents on the 2GB droplet constraint (MediaPipe peak ~350MB RAM)
+- More than 7 simultaneous agents (Claude Code hard limit)
 - Any task that runs `alembic upgrade head` or modifies DB schema
 
 ## Dispatch Procedure
 
-1. Read `backlog.md` to identify the next batch of `todo` tasks with `Parallel: Yes` and no unmet dependencies
+1. Read `backlog.md` to identify the next batch of `todo` tasks with no unmet dependencies
 2. Announce the dispatch plan to the user before spawning:
 
 ```
-Dispatching Block N — 3 background agents with worktree isolation:
-  Agent A: B-0XX (title) → files
-  Agent B: B-0XX (title) → files
-  Agent C: B-0XX (title) → files
+Dispatching Batch N — X background agents with worktree isolation:
+  Agent 1: B-0XX (title) → files
+  Agent 2: B-0XX (title) → files
+  ...
 
 Monitor: /tasks to see progress. Shift+Up/Down to cycle agents.
 I'll continue working on [sequential task or wait for results].
@@ -43,7 +43,7 @@ I'll continue working on [sequential task or wait for results].
 
 4. After dispatching, the main agent tells the user:
 ```
-3 agents dispatched in background. Use these to monitor:
+X agents dispatched in background. Use these to monitor:
   /tasks         — see all agent status + progress
   Shift+Up/Down  — cycle through agent sessions
   Ctrl+T         — shared task list
@@ -87,39 +87,21 @@ INSTRUCTIONS:
 TDD GATE (must pass before committing): [specific test criteria]
 ```
 
-## Parallel Dispatch Blocks (Phase 0)
+## Block Reference (Phase 0)
 
-These are the pre-planned parallel dispatch points from the implementation plan:
+Blocks 1-3 are complete. Blocks 4-9 map to Prompt A and Prompt B sessions.
 
-### Block 1 (after B-002):
-- Agent A: B-003 (status transitions) → `backend/app/services/status.py`
-- Agent B: B-004 (repositories) → `backend/app/repositories/`
-- Agent C: B-005 (JWT auth) → `backend/app/api/deps.py`
-
-### Block 2 (after B-001):
-- Agent A: B-006 (RLS policies) → `backend/alembic/versions/`
-- Agent B: B-007 (frontend auth) → `frontend/src/`
-
-### Block 3 (Week 2):
-- Agent A: B-012 (quality gates) → `backend/app/cv/quality_gates.py`
-- Agent B: B-013 (upload page) → `frontend/src/pages/UploadPage.tsx`
-- Agent C: B-014 (status page) → `frontend/src/pages/AnalysisStatusPage.tsx`
-
-### Block 4 (Week 3):
-- Agent A: B-016 (signal processing) → `backend/app/cv/signal_processing.py`
-- Agent B: B-019 (confidence scoring) → `backend/app/cv/confidence.py`
-- Agent C: B-020 (barbell detection) → `backend/app/cv/barbell_detection.py`
-
-### Block 5 (Week 4):
-- Agent A: B-023 (coaching service) → `backend/app/services/coaching.py`
-- Agent B: B-025 (thresholds config) → `config/thresholds_v0.json`
-- Agent C: B-026 (results page) → `frontend/src/pages/ResultsPage.tsx`
-
-### Block 6 (Week 5):
-- Agent A: B-033 (admin API) → `backend/app/api/v1/admin.py`
-- Agent B: B-035 (PDF generation) → `backend/app/services/pdf.py`
-- Agent C: B-036 + B-037 (CSV export + account deletion) → `backend/app/services/export.py`
-- Agent D: B-038 (cleanup cron) → `backend/app/workers/cleanup.py`
+| Block | After | Tasks | Agents | Status |
+|-------|-------|-------|--------|--------|
+| 1 | B-002 | B-003, B-004, B-005 | 3 | ✅ DONE |
+| 2 | B-002 | B-006, B-007 | 2 | ✅ DONE |
+| 3 | B-014 | B-012, B-013, B-014 | 3 | ✅ DONE |
+| 4 | B-014 | B-015, B-016, B-019, B-020, B-023+025, B-027+028+029, B-033 | 7 | Prompt A Batch 1 |
+| 5 | Block 4 | B-017, B-026, B-034, B-036, B-037, B-038, B-039 | 7 | Prompt A Batch 2 |
+| 6 | Block 5 | B-018, B-040 | 2 | Prompt A Batch 3 |
+| 7 | Block 6 | B-021 → B-022 → B-024 (sequential) | 1 | Prompt B Steps 1-3 |
+| 8 | Block 7 | B-030, B-035, B-032 | 3 | Prompt B Step 4 |
+| 9 | Block 8 | B-031 → B-041 → B-042 (sequential) | 1 | Prompt B Steps 5-7 |
 
 ## Post-Merge Checklist
 

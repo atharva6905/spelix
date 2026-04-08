@@ -10,7 +10,7 @@ Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at mi
 - **Database**: Supabase Postgres (public schema only; auth schema is Supabase-managed)
 - **Storage/Auth/Realtime**: Supabase (Storage for artifacts, Auth for JWT, Realtime for status push)
 - **AI (Phase 0)**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching — no RAG, no vision yet
-- **Frontend**: React 19, Vite 7, TypeScript strict, Tailwind CSS 3, shadcn/ui, Recharts
+- **Frontend**: React 19, Vite 8, TypeScript strict, Tailwind CSS 4, shadcn/ui, Recharts
 - **Infra**: DigitalOcean 2GB droplet behind Caddy, Vercel for frontend, Qdrant Cloud (Phase 2+)
 
 ## Structure
@@ -61,8 +61,8 @@ spelix/
 docker compose up -d                    # Start full dev environment
 docker compose up backend -d            # Backend only
 cd frontend && npm run dev              # Frontend only
-pytest tests/unit/test_quality_gates.py -x  # Single test file
-alembic revision --autogenerate -m "desc" && alembic upgrade head  # Migration
+uv run pytest tests/unit/test_quality_gates.py -x  # Single test file
+uv run alembic revision --autogenerate -m "desc" && alembic upgrade head  # Migration
 docker compose exec redis redis-cli llen arq:queue  # Inspect ARQ queue
 docker compose ps && docker compose exec redis redis-cli ping      # Health check
 ```
@@ -94,7 +94,7 @@ JSONB columns: `summary_json`, `quality_gate_result`, `metrics_json`, `structure
  
 - Sub-agents use Sonnet 4.6 (set via CLAUDE_CODE_SUBAGENT_MODEL env var)
 - All sub-agents run with **worktree isolation** — each gets its own git branch and working directory, auto-cleaned on completion
-- Maximum 3 concurrent sub-agents (2GB RAM constraint — MediaPipe peak ~350MB)
+- Maximum 7 for local dev (Claude Code hard limit), 3 for production droplet (2GB RAM constraint — MediaPipe peak ~350MB)
  
 ### When to Dispatch Parallel Sub-Agents
  
