@@ -70,6 +70,57 @@ export interface AnalysisStatusResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Types — Detail (B-026, FR-RESL-01a–05)
+// ---------------------------------------------------------------------------
+
+export interface CoachingIssue {
+  rep_number: number;
+  joint: string;
+  description: string;
+  severity: "High" | "Medium" | "Low";
+}
+
+export interface CoachingOutput {
+  summary: string;
+  strengths: string[];
+  issues: CoachingIssue[];
+  correction_plan: string[];
+  disclaimer: string;
+}
+
+export interface CoachingResultDetail {
+  structured_output_json: CoachingOutput | null;
+  created_at: string;
+}
+
+export interface RepMetricDetail {
+  rep_index: number;
+  start_frame: number;
+  end_frame: number;
+  confidence_score: number | null;
+  metrics_json: Record<string, unknown> | null;
+}
+
+export interface AnalysisDetail {
+  id: string;
+  status: AnalysisStatus;
+  exercise_type: string;
+  exercise_variant: string;
+  confidence_score: number | null;
+  video_path: string | null;
+  annotated_video_path: string | null;
+  plot_path: string | null;
+  pdf_path: string | null;
+  tags: string[] | null;
+  quality_gate_result: Record<string, unknown> | null;
+  summary_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+  coaching_result: CoachingResultDetail | null;
+  rep_metrics: RepMetricDetail[];
+}
+
+// ---------------------------------------------------------------------------
 // Auth helper
 // ---------------------------------------------------------------------------
 
@@ -129,4 +180,27 @@ export async function getAnalysisStatus(
   }
 
   return resp.json() as Promise<AnalysisStatusResponse>;
+}
+
+/**
+ * GET /api/v1/analyses/{id}
+ * Returns full analysis detail including coaching result and rep metrics.
+ * Requirements: FR-RESL-01a–05, FR-RESL-08, FR-RESL-10–11
+ */
+export async function getAnalysisDetail(
+  id: string,
+): Promise<AnalysisDetail> {
+  const token = await getAuthToken();
+  const resp = await fetch(`${API_BASE}/api/v1/analyses/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    const message =
+      body.error?.message ?? body.detail ?? "Failed to fetch analysis";
+    throw new Error(message);
+  }
+
+  return resp.json() as Promise<AnalysisDetail>;
 }

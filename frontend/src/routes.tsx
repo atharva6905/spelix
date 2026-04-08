@@ -5,6 +5,7 @@ import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 import HomePage from "@/pages/HomePage";
 import LoginPage from "@/pages/LoginPage";
 import ProfilePage from "@/pages/ProfilePage";
+import ResultsPage from "@/pages/ResultsPage";
 import SignupPage from "@/pages/SignupPage";
 import UploadPage from "@/pages/UploadPage";
 
@@ -30,6 +31,14 @@ const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AnalysisStatusPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/results/:id",
+    element: (
+      <RequireAuth>
+        <ResultsPage />
       </RequireAuth>
     ),
   },

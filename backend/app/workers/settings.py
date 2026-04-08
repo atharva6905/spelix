@@ -13,8 +13,10 @@ from __future__ import annotations
 import os
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from app.workers.analysis_worker import process_analysis
+from app.workers.cleanup import cleanup_expired_artifacts
 
 
 async def on_startup(ctx: dict) -> None:  # noqa: ARG001
@@ -40,5 +42,8 @@ class WorkerSettings:
     redis_settings: RedisSettings = RedisSettings.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
 
     functions = [process_analysis]
+    cron_jobs = [
+        cron(cleanup_expired_artifacts, hour=3, minute=0),  # 03:00 UTC nightly
+    ]
     on_startup = on_startup
     on_shutdown = on_shutdown
