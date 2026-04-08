@@ -4,9 +4,9 @@
 |----|-------|--------|-------|---------|------|------|-------|
 | B-001 | Project scaffold + Docker Compose | done | 0 | NFR-OPER-01, NFR-SECU-11, NFR-SECU-12 | M | — | Health endpoint, CORS, Redis |
 | B-002 | SQLAlchemy models + migration 001 | done | 0 | Sec 7.2, 7.3 | L | B-001 | 4 tables, CHECK constraint, indexes |
-| B-003 | Status transition guard | todo | 0 | Sec 5.2a | S | B-002 | Pure function, TDD first |
-| B-004 | Repository layer | todo | 0 | Sec 5.1, NFR-MAIN-08 | M | B-002 | 4 repos, AsyncSession DI |
-| B-005 | Supabase JWT auth dependency | todo | 0 | FR-AUTH-02, FR-AUTH-08, NFR-SECU-05 | S | B-001 | get_current_user, admin check |
+| B-003 | Status transition guard | done | 0 | Sec 5.2a | S | B-002 | Pure function, TDD first |
+| B-004 | Repository layer | done | 0 | Sec 5.1, NFR-MAIN-08 | M | B-002 | 4 repos, AsyncSession DI |
+| B-005 | Supabase JWT auth dependency | done | 0 | FR-AUTH-02, FR-AUTH-08, NFR-SECU-05 | S | B-001 | get_current_user, admin check |
 | B-006 | Supabase RLS policies | todo | 0 | FR-AUTH-06, NFR-SECU-01, NFR-SECU-06 | S | B-002 | Raw SQL in migration 002 |
 | B-007 | Frontend auth + routes | todo | 0 | FR-AUTH-01, FR-AUTH-04, FR-AUTH-05 | M | B-001 | Login, signup, RequireAuth |
 | B-008 | Profile API + onboarding page | todo | 0 | FR-PROF-01–05 | M | B-004, B-005 | Required + optional body stats |
