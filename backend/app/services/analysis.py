@@ -260,3 +260,185 @@ class AnalysisService:
         # Transition status in DB
         updated = await self._repo.update_status(analysis_id, "quality_gate_pending")
         return updated
+
+    # ---------------------------------------------------------------------------
+    # CRUD methods (B-027, B-028, B-029)
+    # ---------------------------------------------------------------------------
+
+    async def get_analysis_status(
+        self,
+        analysis_id: UUID,
+        user_id: UUID,
+    ) -> Analysis:
+        """Return the analysis for status polling (B-027, FR-RESL-13).
+
+        Validates ownership and raises 404/403 as appropriate.
+        """
+        analysis = await self._repo.get_by_id(analysis_id)
+
+        if analysis is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": {
+                        "code": "ANALYSIS_NOT_FOUND",
+                        "message": "Analysis not found.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        if analysis.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "You do not own this analysis.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        return analysis
+
+    async def get_analysis_detail(
+        self,
+        analysis_id: UUID,
+        user_id: UUID,
+    ) -> Analysis:
+        """Return full analysis detail with eagerly loaded relationships (B-029).
+
+        Validates ownership and raises 404/403 as appropriate.
+        """
+        analysis = await self._repo.get_by_id_with_relations(analysis_id)
+
+        if analysis is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": {
+                        "code": "ANALYSIS_NOT_FOUND",
+                        "message": "Analysis not found.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        if analysis.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "You do not own this analysis.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        return analysis
+
+    async def list_analyses(
+        self,
+        user_id: UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Analysis]:
+        """Return analyses for a user in reverse chronological order (B-029, FR-HIST-01)."""
+        return await self._repo.get_by_user(user_id, limit=limit, offset=offset)
+
+    async def delete_analysis(
+        self,
+        analysis_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        """Delete an analysis and all its Storage artifacts (B-028, FR-UPLD-10-11).
+
+        Validates ownership and raises 404/403 as appropriate.
+        Deletes non-null artifact paths from Storage before removing the DB row.
+        """
+        analysis = await self._repo.get_by_id(analysis_id)
+
+        if analysis is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": {
+                        "code": "ANALYSIS_NOT_FOUND",
+                        "message": "Analysis not found.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        if analysis.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "You do not own this analysis.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        # Delete Storage artifacts for each non-null path
+        artifact_paths = [
+            analysis.video_path,
+            analysis.annotated_video_path,
+            analysis.plot_path,
+            analysis.pdf_path,
+        ]
+        for path in artifact_paths:
+            if path is not None:
+                try:
+                    await self._storage.delete_file(path)
+                except Exception:
+                    # Log but don't block deletion — storage may already be gone
+                    pass
+
+        await self._repo.delete(analysis_id)
+
+    async def update_analysis(
+        self,
+        analysis_id: UUID,
+        user_id: UUID,
+        tags: list[str] | None = None,
+    ) -> Analysis:
+        """Update mutable fields on an analysis (B-028, FR-UPLD-10).
+
+        Currently supports updating tags only.
+        Validates ownership and raises 404/403 as appropriate.
+        """
+        analysis = await self._repo.get_by_id(analysis_id)
+
+        if analysis is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": {
+                        "code": "ANALYSIS_NOT_FOUND",
+                        "message": "Analysis not found.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        if analysis.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "FORBIDDEN",
+                        "message": "You do not own this analysis.",
+                        "detail": None,
+                    }
+                },
+            )
+
+        if tags is not None:
+            analysis.tags = tags
+
+        return await self._repo.update(analysis)

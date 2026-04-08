@@ -89,6 +89,28 @@ class StorageService:
         return SignedUploadResult(url=signed_url, expires_at=expires_at)
 
 
+    async def delete_file(self, path: str) -> None:
+        """Delete a file from Supabase Storage.
+
+        Parameters
+        ----------
+        path:
+            Storage path to delete (e.g. ``videos/{analysis_id}/{filename}``).
+
+        Raises
+        ------
+        RuntimeError
+            If no Supabase client has been configured.
+        """
+        if self._client is None:
+            raise RuntimeError(
+                "StorageService has no Supabase client. "
+                "Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables."
+            )
+
+        await self._client.storage.from_(self._bucket).remove([path])
+
+
 def get_storage_path(analysis_id: UUID, filename: str) -> str:
     """Return the canonical Storage path for an analysis video.
 
