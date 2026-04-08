@@ -177,12 +177,29 @@ async def test_happy_path_status_transitions():
 
     mock_repo.update.side_effect = capture_update
 
+    async def mock_run_pipeline(aid: Any, repo: Any, redis: Any) -> None:
+        """Simulate the full pipeline status transitions."""
+        from app.services.status import transition as _transition
+
+        a = await repo.get_by_id(aid)
+        a.status = _transition(a.status, "quality_gate_pending")
+        await repo.update(a)
+        a.status = _transition(a.status, "processing")
+        await repo.update(a)
+        a.status = _transition(a.status, "coaching")
+        await repo.update(a)
+        a.status = _transition(a.status, "completed")
+        await repo.update(a)
+
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
         return_value=mock_repo,
     ), patch(
         "app.workers.analysis_worker.async_session",
-    ) as mock_session_factory:
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        side_effect=mock_run_pipeline,
+    ):
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -324,7 +341,10 @@ async def test_heartbeat_written_during_job():
         return_value=mock_repo,
     ), patch(
         "app.workers.analysis_worker.async_session",
-    ) as mock_session_factory:
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        new_callable=AsyncMock,
+    ):
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)

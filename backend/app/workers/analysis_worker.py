@@ -1,21 +1,33 @@
-"""
-ARQ worker — analysis pipeline entry point (B-011 skeleton).
+"""ARQ worker — analysis pipeline entry point (B-011 skeleton, B-022 wired).
 
 Implements FR-UPLD-18 (async processing), NFR-RELI-01 through NFR-RELI-04
 (reliability: idempotent, error handling, retry limit, heartbeat),
 NFR-OPER-02 (operator heartbeat visibility).
 
-Each pipeline step is a stub with a comment; real logic wired in B-012–B-024.
+Pipeline: download → quality gates → pose extraction → smoothing → rep
+detection → metric extraction → confidence → barbell detection → artifacts
+→ upload → cleanup → coaching → completed.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Any
 
+
+import anthropic  # noqa: F401 — used at runtime in _run_pipeline
+
+from app.config import ThresholdConfig  # noqa: F401
+from app.cv.artifact_generation import cleanup_temp_files
 from app.db import async_session
+from app.models.coaching_result import CoachingResult  # noqa: F401
 from app.repositories.analysis import AnalysisRepository
+from app.repositories.coaching_result import CoachingResultRepository  # noqa: F401
+from app.repositories.rep_metric import RepMetricRepository
+from app.services.coaching import CoachingService  # noqa: F401
+from app.services.pipeline import QualityGateRejection, run_cv_pipeline
 from app.services.status import transition
 
 logger = logging.getLogger(__name__)
@@ -29,8 +41,23 @@ _HEARTBEAT_TTL = 90  # seconds
 
 
 # ---------------------------------------------------------------------------
-# Internal pipeline stub — extracted so tests can patch it cleanly
+# Internal pipeline — wired to real CV pipeline (B-022)
 # ---------------------------------------------------------------------------
+
+
+def _build_supabase_client() -> Any | None:
+    """Build a Supabase client from env vars, or None if unconfigured."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    if not url or not key:
+        return None
+    try:
+        from supabase import create_client
+
+        return create_client(url, key)
+    except Exception as e:
+        logger.warning("Failed to create Supabase client: %s", e)
+        return None
 
 
 async def _run_pipeline(
@@ -38,85 +65,95 @@ async def _run_pipeline(
     repo: AnalysisRepository,
     redis: Any,
 ) -> None:
-    """
-    Execute the full analysis pipeline, updating status at each stage.
-
-    Each step is a stub for B-011. Real implementations are wired in later tasks:
-      B-012: quality gate (body visibility + framing)
-      B-013: pose extraction (MediaPipe BlazePose Heavy)
-      B-014: rep detection state machine
-      B-015: metric extraction
-      B-016: scoring
-      B-017: artifact generation (annotated MP4, PNG plot)
-      B-018: coaching (Claude Sonnet 4.6 via instructor)
-      B-019: summary_json + confidence_score write-back
+    """Execute the full analysis pipeline, updating status at each stage.
 
     Status transition sequence (SRS Section 5.2a):
-      queued → quality_gate_pending → processing → coaching → completed
+      queued → quality_gate_pending → (quality_gate_rejected | processing)
+      → coaching → completed
     """
     analysis = await repo.get_by_id(analysis_id)
     if analysis is None:
         raise ValueError(f"Analysis {analysis_id} not found in DB")
 
-    # ------------------------------------------------------------------ #
-    # Transition 1: queued → quality_gate_pending
-    # ------------------------------------------------------------------ #
-    analysis.status = transition(analysis.status, "quality_gate_pending")
-    await repo.update(analysis)
-    await _write_heartbeat(redis)
+    # Build dependencies
+    storage_client = _build_supabase_client()
+    rep_metric_repo = RepMetricRepository(repo._db)
 
-    # ------------------------------------------------------------------ #
-    # Step 1: Download video from Supabase Storage (stub)
-    # Real: fetch signed URL, stream to /tmp/spelix/{analysis_id}.mp4
-    # ------------------------------------------------------------------ #
-    # TODO(B-012): download video
-    # video_path = f"/tmp/spelix/{analysis_id}.mp4"
+    try:
+        # ------------------------------------------------------------------ #
+        # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
+        # ------------------------------------------------------------------ #
+        pipeline_result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=storage_client,
+            redis=redis,
+            write_heartbeat=_write_heartbeat,
+        )
 
-    # ------------------------------------------------------------------ #
-    # Step 2: Run quality gates (stub — always passes for now)
-    # Real: body visibility gate + framing gate (backend/CLAUDE.md)
-    # On rejection: analysis.status = transition(analysis.status, "quality_gate_rejected")
-    # ------------------------------------------------------------------ #
-    # TODO(B-012): quality gates
+        # ------------------------------------------------------------------ #
+        # Transition: processing → coaching (B-024)
+        # ------------------------------------------------------------------ #
+        analysis = await repo.get_by_id(analysis_id)
+        if analysis is None:
+            raise ValueError(f"Analysis {analysis_id} disappeared during pipeline")
 
-    # ------------------------------------------------------------------ #
-    # Transition 2: quality_gate_pending → processing
-    # ------------------------------------------------------------------ #
-    analysis.status = transition(analysis.status, "processing")
-    await repo.update(analysis)
-    await _write_heartbeat(redis)
+        analysis.status = transition(analysis.status, "coaching")
+        await repo.update(analysis)
+        await _write_heartbeat(redis)
 
-    # ------------------------------------------------------------------ #
-    # Step 3: Run CV pipeline — pose extraction, rep detection, metrics (stub)
-    # Real: await loop.run_in_executor(None, run_cv_pipeline, video_path, ...)
-    # ------------------------------------------------------------------ #
-    # TODO(B-013 through B-017): CV pipeline
+        # ------------------------------------------------------------------ #
+        # Coaching: call Claude Sonnet via CoachingService (B-024)
+        # ------------------------------------------------------------------ #
+        coaching_repo = CoachingResultRepository(repo._db)
+        thresholds = ThresholdConfig()
 
-    # ------------------------------------------------------------------ #
-    # Transition 3: processing → coaching
-    # ------------------------------------------------------------------ #
-    analysis.status = transition(analysis.status, "coaching")
-    await repo.update(analysis)
-    await _write_heartbeat(redis)
+        # Build rep metrics dicts for coaching prompt
+        rep_metric_repo = RepMetricRepository(repo._db)
+        db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
+        rep_metrics_dicts = [
+            {
+                "rep_number": rm.rep_index + 1,
+                **(rm.metrics_json or {}),
+            }
+            for rm in db_rep_metrics
+        ]
 
-    # ------------------------------------------------------------------ #
-    # Step 4: Run coaching via Claude Sonnet 4.6 (stub)
-    # Real: instructor-wrapped anthropic call; result → coaching_results table
-    # ------------------------------------------------------------------ #
-    # TODO(B-018): LLM coaching
+        client = anthropic.AsyncAnthropic()
+        coaching_svc = CoachingService(client)
 
-    # ------------------------------------------------------------------ #
-    # Step 5: Cleanup temp files (stub)
-    # Real: os.unlink(video_path); delete Storage copy (not after quality gate —
-    #       only after CV pipeline completes per CLAUDE.md architecture notes)
-    # ------------------------------------------------------------------ #
-    # TODO(B-019): cleanup
+        coaching_output = await coaching_svc.generate_coaching(
+            exercise_type=analysis.exercise_type,
+            exercise_variant=analysis.exercise_variant,
+            rep_metrics=rep_metrics_dicts,
+            confidence_score=analysis.confidence_score or 0.0,
+            thresholds=thresholds,
+        )
 
-    # ------------------------------------------------------------------ #
-    # Transition 4: coaching → completed
-    # ------------------------------------------------------------------ #
-    analysis.status = transition(analysis.status, "completed")
-    await repo.update(analysis)
+        # Store coaching result in DB
+        coaching_result = CoachingResult(
+            analysis_id=analysis_id,
+            structured_output_json=coaching_output.model_dump(),
+            stream_complete=True,
+            cove_verified=False,
+        )
+        await coaching_repo.create(coaching_result)
+
+        await _write_heartbeat(redis)
+
+        # ------------------------------------------------------------------ #
+        # Transition: coaching → completed
+        # ------------------------------------------------------------------ #
+        analysis.status = transition(analysis.status, "completed")
+        await repo.update(analysis)
+
+    except QualityGateRejection:
+        # Expected flow — analysis was already transitioned to
+        # quality_gate_rejected inside run_cv_pipeline
+        logger.info(
+            "Analysis %s rejected by quality gates", analysis_id,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +181,11 @@ def _is_terminal(status: str, retry_count: int) -> bool:
 
 
 async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
-    """
-    ARQ job: run the full analysis pipeline for the given analysis_id.
+    """ARQ job: run the full analysis pipeline for the given analysis_id.
 
     Idempotent — safe to enqueue multiple times. If the analysis is already
     in a terminal state (completed, quality_gate_rejected, or failed with
     retry_count >= 3), the job returns immediately without touching the DB.
-
-    Args:
-        ctx:         ARQ context dict, must contain 'redis' key.
-        analysis_id: UUID of the analyses row to process.
     """
     redis = ctx["redis"]
 
@@ -207,10 +239,11 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
             analysis.retry_count = (analysis.retry_count or 0) + 1
 
             # Force status → failed for any non-terminal state.
-            # transition() only allows processing/coaching → failed per SRS 5.2a, but
-            # exceptions can fire before those transitions occur (e.g. during download).
-            # Emergency error recovery bypasses the guard; terminal states are left as-is.
             if analysis.status not in _TERMINAL_STATES:
                 analysis.status = "failed"
 
             await repo.update(analysis)
+
+        finally:
+            # Always clean up temp files
+            cleanup_temp_files(analysis_id)

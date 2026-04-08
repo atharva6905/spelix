@@ -1,0 +1,399 @@
+"""CV pipeline orchestration — full analysis pipeline (B-022).
+
+Executes the complete CV pipeline: download → quality gates → pose extraction →
+smoothing → rep detection → metric extraction → confidence scoring → barbell
+detection → artifact generation → upload → cleanup.
+
+All CPU-bound work runs via ``loop.run_in_executor(None, fn)``.
+
+Requirements: FR-UPLD-15, FR-UPLD-18, all FR-CVPL, all FR-REPM, all FR-BDET
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from typing import Any
+
+import numpy as np
+
+from app.cv.artifact_generation import (
+    cleanup_temp_files,
+    generate_angle_plot,
+    generate_annotated_video,
+    get_artifact_storage_path,
+    get_temp_dir,
+    upload_artifact,
+)
+from app.cv.barbell_detection import compute_bar_path_from_landmarks
+from app.cv.confidence import compute_session_confidence
+from app.cv.metric_extraction import extract_rep_metrics
+from app.cv.pose_extraction import extract_landmarks
+from app.cv.quality_gates import run_quality_gates
+from app.cv.rep_detection import detect_reps
+from app.cv.signal_processing import compute_angle_timeseries
+from app.models.analysis import Analysis
+from app.models.rep_metric import RepMetric
+from app.repositories.analysis import AnalysisRepository
+from app.repositories.rep_metric import RepMetricRepository
+from app.services.status import transition
+
+logger = logging.getLogger(__name__)
+
+# Storage bucket name
+_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "videos")
+
+
+# ---------------------------------------------------------------------------
+# Pipeline dataclass for intermediate results
+# ---------------------------------------------------------------------------
+
+
+class PipelineResult:
+    """Holds intermediate CV pipeline results for downstream consumption."""
+
+    __slots__ = (
+        "landmarks_per_frame",
+        "fps",
+        "frame_width",
+        "frame_height",
+        "angle_timeseries",
+        "reps",
+        "rep_metrics",
+        "session_confidence",
+        "bar_path",
+        "annotated_video_storage_path",
+        "plot_storage_path",
+    )
+
+    def __init__(self) -> None:
+        self.landmarks_per_frame: list[np.ndarray] = []
+        self.fps: float = 30.0
+        self.frame_width: int = 0
+        self.frame_height: int = 0
+        self.angle_timeseries: dict[str, np.ndarray] = {}
+        self.reps: list = []
+        self.rep_metrics: list = []
+        self.session_confidence: float = 0.0
+        self.bar_path: dict | None = None
+        self.annotated_video_storage_path: str | None = None
+        self.plot_storage_path: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Video download
+# ---------------------------------------------------------------------------
+
+
+async def download_video(
+    storage_client: Any,
+    bucket: str,
+    video_path: str,
+    local_path: str,
+) -> str:
+    """Download video from Supabase Storage to local path.
+
+    Parameters
+    ----------
+    storage_client:
+        Supabase client.
+    bucket:
+        Storage bucket name.
+    video_path:
+        Storage path of the video.
+    local_path:
+        Local destination path.
+
+    Returns
+    -------
+    str
+        The *local_path*.
+    """
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    data = await storage_client.storage.from_(bucket).download(video_path)
+    with open(local_path, "wb") as f:
+        f.write(data)
+    return local_path
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+
+async def run_cv_pipeline(
+    analysis: Analysis,
+    repo: AnalysisRepository,
+    rep_metric_repo: RepMetricRepository,
+    storage_client: Any,
+    redis: Any,
+    write_heartbeat: Any,
+) -> PipelineResult:
+    """Execute the full CV pipeline for an analysis.
+
+    Status transitions handled:
+      queued → quality_gate_pending → (quality_gate_rejected | processing)
+
+    Parameters
+    ----------
+    analysis:
+        The Analysis ORM object (must be in ``queued`` status).
+    repo:
+        Analysis repository for status updates.
+    rep_metric_repo:
+        RepMetric repository for batch insert.
+    storage_client:
+        Supabase client for Storage operations (or None in tests).
+    redis:
+        Redis connection for heartbeat writes.
+    write_heartbeat:
+        Async callable to write heartbeat.
+
+    Returns
+    -------
+    PipelineResult
+        Intermediate results for coaching stage consumption.
+
+    Raises
+    ------
+    QualityGateRejection
+        If the video fails quality gates.
+    """
+    loop = asyncio.get_event_loop()
+    result = PipelineResult()
+    analysis_id = analysis.id
+    exercise_type = analysis.exercise_type
+    exercise_variant = analysis.exercise_variant
+
+    # ------------------------------------------------------------------ #
+    # Transition: queued → quality_gate_pending
+    # ------------------------------------------------------------------ #
+    analysis.status = transition(analysis.status, "quality_gate_pending")
+    await repo.update(analysis)
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 1: Download video from Supabase Storage
+    # ------------------------------------------------------------------ #
+    tmp_dir = get_temp_dir(analysis_id)
+    video_local = os.path.join(tmp_dir, f"{analysis_id}.mp4")
+
+    if storage_client is not None and analysis.video_path:
+        await download_video(
+            storage_client, _BUCKET, analysis.video_path, video_local,
+        )
+    else:
+        # In test mode, video_path may already be a local path
+        if analysis.video_path and os.path.isfile(analysis.video_path):
+            video_local = analysis.video_path
+
+    # ------------------------------------------------------------------ #
+    # Step 2: Pose extraction (CPU-bound)
+    # ------------------------------------------------------------------ #
+    landmarks_per_frame, fps, frame_width, frame_height = await loop.run_in_executor(
+        None, extract_landmarks, video_local,
+    )
+    result.landmarks_per_frame = landmarks_per_frame
+    result.fps = fps
+    result.frame_width = frame_width
+    result.frame_height = frame_height
+
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 3: Quality gates
+    # ------------------------------------------------------------------ #
+    gate_result = await loop.run_in_executor(
+        None, run_quality_gates, landmarks_per_frame, frame_width, frame_height,
+    )
+
+    analysis.quality_gate_result = {
+        "passed": gate_result.passed,
+        "status": gate_result.status,
+        "checks": [
+            {
+                "passed": c.passed,
+                "name": c.name,
+                "level": c.level,
+                "metric_value": c.metric_value,
+                "threshold": c.threshold,
+                "user_message": c.user_message,
+            }
+            for c in gate_result.checks
+        ],
+    }
+    await repo.update(analysis)
+
+    if not gate_result.passed:
+        analysis.status = transition(analysis.status, "quality_gate_rejected")
+        await repo.update(analysis)
+        raise QualityGateRejection(
+            f"Quality gate rejected: {gate_result.status}"
+        )
+
+    # ------------------------------------------------------------------ #
+    # Transition: quality_gate_pending → processing
+    # ------------------------------------------------------------------ #
+    analysis.status = transition(analysis.status, "processing")
+    await repo.update(analysis)
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 4: Angle timeseries + smoothing (CPU-bound)
+    # ------------------------------------------------------------------ #
+    angle_timeseries = await loop.run_in_executor(
+        None, compute_angle_timeseries, landmarks_per_frame, exercise_type,
+    )
+    result.angle_timeseries = angle_timeseries
+
+    # ------------------------------------------------------------------ #
+    # Step 5: Rep detection (CPU-bound)
+    # ------------------------------------------------------------------ #
+    # Get the primary angle series for rep detection
+    if exercise_type.lower() == "bench":
+        primary_key = "elbow_angle"
+    else:
+        primary_key = "hip_angle"
+
+    primary_series = angle_timeseries.get(primary_key, np.array([]))
+
+    reps = await loop.run_in_executor(
+        None,
+        detect_reps,
+        primary_series,
+        landmarks_per_frame,
+        exercise_type,
+        exercise_variant,
+        fps,
+    )
+    result.reps = reps
+
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 6: Per-rep metric extraction (CPU-bound)
+    # ------------------------------------------------------------------ #
+    rep_metrics = await loop.run_in_executor(
+        None,
+        extract_rep_metrics,
+        reps,
+        landmarks_per_frame,
+        angle_timeseries,
+        exercise_type,
+        exercise_variant,
+        fps,
+    )
+    result.rep_metrics = rep_metrics
+
+    # ------------------------------------------------------------------ #
+    # Step 7: Confidence scoring
+    # ------------------------------------------------------------------ #
+    rep_confidences = [r.confidence_score for r in reps]
+    session_confidence = compute_session_confidence(rep_confidences)
+    result.session_confidence = session_confidence
+
+    analysis.confidence_score = session_confidence
+    await repo.update(analysis)
+
+    # ------------------------------------------------------------------ #
+    # Step 8: Write rep metrics to DB
+    # ------------------------------------------------------------------ #
+    if rep_metrics:
+        db_metrics = [
+            RepMetric(
+                analysis_id=analysis_id,
+                rep_index=rm.rep_index,
+                start_frame=rm.start_frame,
+                end_frame=rm.end_frame,
+                confidence_score=reps[rm.rep_index].confidence_score if rm.rep_index < len(reps) else None,
+                metrics_json=rm.metrics,
+            )
+            for rm in rep_metrics
+        ]
+        await rep_metric_repo.create_batch(db_metrics)
+
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 9: Barbell detection (CPU-bound)
+    # ------------------------------------------------------------------ #
+    bar_path = await loop.run_in_executor(
+        None,
+        compute_bar_path_from_landmarks,
+        landmarks_per_frame,
+        exercise_type,
+    )
+    result.bar_path = bar_path
+
+    # ------------------------------------------------------------------ #
+    # Step 10: Artifact generation (CPU-bound)
+    # ------------------------------------------------------------------ #
+    annotated_path = os.path.join(tmp_dir, "annotated.mp4")
+    plot_path = os.path.join(tmp_dir, "angles.png")
+
+    await loop.run_in_executor(
+        None,
+        generate_annotated_video,
+        video_local,
+        landmarks_per_frame,
+        reps,
+        exercise_type,
+        angle_timeseries,
+        annotated_path,
+    )
+
+    await loop.run_in_executor(
+        None,
+        generate_angle_plot,
+        angle_timeseries,
+        fps,
+        exercise_type,
+        plot_path,
+    )
+
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 11: Upload artifacts to Supabase Storage
+    # ------------------------------------------------------------------ #
+    if storage_client is not None:
+        annotated_storage = get_artifact_storage_path(analysis_id, "annotated.mp4")
+        plot_storage = get_artifact_storage_path(analysis_id, "angles.png")
+
+        await upload_artifact(storage_client, _BUCKET, annotated_path, annotated_storage)
+        await upload_artifact(storage_client, _BUCKET, plot_path, plot_storage)
+
+        analysis.annotated_video_path = annotated_storage
+        analysis.plot_path = plot_storage
+        await repo.update(analysis)
+
+        result.annotated_video_storage_path = annotated_storage
+        result.plot_storage_path = plot_storage
+
+    # ------------------------------------------------------------------ #
+    # Step 12: Delete video from Storage (lifecycle: after pipeline)
+    # ------------------------------------------------------------------ #
+    if storage_client is not None and analysis.video_path:
+        try:
+            await storage_client.storage.from_(_BUCKET).remove([analysis.video_path])
+        except Exception as e:
+            logger.warning("Failed to delete source video from Storage: %s", e)
+
+    # ------------------------------------------------------------------ #
+    # Step 13: Delete local temp files
+    # ------------------------------------------------------------------ #
+    cleanup_temp_files(analysis_id)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class QualityGateRejection(Exception):
+    """Raised when a video fails quality gates — not an error, expected flow."""
+
+    pass
