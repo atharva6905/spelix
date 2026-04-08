@@ -16,25 +16,25 @@
 | B-012 | Quality gates | done | 0 | FR-CVPL-03–11 | M | — | Body visibility, framing, warnings |
 | B-013 | Upload page (frontend) | done | 0 | FR-XDET-01–02, FR-XDET-05, FR-XDET-08–09, FR-UPLD-01–09 | L | B-007 | TUS upload, filming guidance |
 | B-014 | Analysis status page (frontend) | done | 0 | FR-RESL-13, NFR-RELI-06 | M | B-007 | Realtime sub, polling fallback |
-| B-015 | MediaPipe pose extraction | todo | 0 | FR-CVPL-01, FR-CVPL-02, FR-CVPL-12–13 | M | B-001 | Exact config, sigmoid guard |
-| B-016 | Savitzky-Golay + angle calc | todo | 0 | FR-CVPL-14 | S | — | Pure math functions |
+| B-015 | MediaPipe pose extraction | done | 0 | FR-CVPL-01, FR-CVPL-02, FR-CVPL-12–13 | M | B-001 | Exact config, sigmoid guard |
+| B-016 | Savitzky-Golay + angle calc | done | 0 | FR-CVPL-14 | S | — | Pure math functions |
 | B-017 | Rep detection state machine | todo | 0 | FR-CVPL-15, FR-REPM-01, FR-REPM-05 | L | B-016 | Per-exercise thresholds, hysteresis |
 | B-018 | Per-rep metric extraction | todo | 0 | FR-REPM-02–03, Sec 3.7 | XL | B-017 | 3 exercise analyzers, all metrics |
-| B-019 | Phase 0 confidence scoring | todo | 0 | FR-CVPL-16, FR-RESL-08, FR-REPM-04 | S | — | Mean visibility, label mapping |
-| B-020 | Barbell detection + tracking | todo | 0 | FR-BDET-01–07 | M | — | OpenCV contour, graceful null |
+| B-019 | Phase 0 confidence scoring | done | 0 | FR-CVPL-16, FR-RESL-08, FR-REPM-04 | S | — | Mean visibility, label mapping |
+| B-020 | Barbell detection + tracking | done | 0 | FR-BDET-01–07 | M | — | OpenCV contour, graceful null |
 | B-021 | Annotated video + artifacts | todo | 0 | FR-CVPL-19, FR-UPLD-15, FR-XPRT-01 | L | B-018, B-020 | Skeleton overlay, plot, upload |
 | B-022 | Wire CV pipeline in worker | todo | 0 | FR-UPLD-15, FR-UPLD-18 | L | B-011–B-021 | Full pipeline integration |
-| B-023 | Phase 0 coaching service | todo | 0 | FR-RESL-03, Appendix D | M | — | Claude Sonnet, instructor, mock in tests |
+| B-023 | Phase 0 coaching service | done | 0 | FR-RESL-03, Appendix D | M | — | Claude Sonnet, instructor, mock in tests |
 | B-024 | Wire coaching in worker | todo | 0 | Status 5.2a | M | B-022, B-023 | processing→coaching→completed |
-| B-025 | Thresholds config file | todo | 0 | FR-SCOR-00 | S | — | JSON file, named constants |
+| B-025 | Thresholds config file | done | 0 | FR-SCOR-00 | S | — | JSON file, named constants |
 | B-026 | Results page (frontend) | todo | 0 | FR-RESL-01a–05, FR-RESL-08, FR-RESL-10–11, FR-SCOR-09–10 | XL | B-007 | Video, coaching, metrics, disclaimer |
-| B-027 | Status poll endpoint | todo | 0 | FR-RESL-13 | S | B-004 | GET /analyses/{id}/status |
-| B-028 | Analysis CRUD (delete/rename/tags) | todo | 0 | FR-UPLD-10–11, FR-XPRT-05 | M | B-004 | Cascade delete + Storage cleanup |
-| B-029 | List + get analysis endpoints | todo | 0 | FR-HIST-01 | S | B-004 | Reverse chronological, user-filtered |
+| B-027 | Status poll endpoint | done | 0 | FR-RESL-13 | S | B-004 | GET /analyses/{id}/status |
+| B-028 | Analysis CRUD (delete/rename/tags) | done | 0 | FR-UPLD-10–11, FR-XPRT-05 | M | B-004 | Cascade delete + Storage cleanup |
+| B-029 | List + get analysis endpoints | done | 0 | FR-HIST-01 | S | B-004 | Reverse chronological, user-filtered |
 | B-030 | Summary metrics computation | todo | 0 | FR-HIST-04 | M | B-024 | Write summary_json after completion |
 | B-031 | History insights endpoints | todo | 0 | FR-HIST-02–03 | M | B-030 | Rolling avg, personal best, global |
 | B-032 | History page (frontend) | todo | 0 | FR-HIST-01–03, FR-HIST-06 | L | B-031 | List, insights, Recharts trends |
-| B-033 | Admin API endpoints | todo | 0 | FR-ADMN-01–05 | M | B-005 | Admin role check, health panel |
+| B-033 | Admin API endpoints | done | 0 | FR-ADMN-01–05 | M | B-005 | Admin role check, health panel |
 | B-034 | Admin page (frontend) | todo | 0 | FR-ADMN-01–05 | M | B-033 | User mgmt, analysis log, health |
 | B-035 | PDF report generation | todo | 0 | FR-XPRT-02–03 | L | B-024 | WeasyPrint, HTML template, background job |
 | B-036 | CSV data export | todo | 0 | FR-XPRT-04, NFR-SECU-07 | S | B-004 | GDPR Article 20 |
