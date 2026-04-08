@@ -1,7 +1,6 @@
 ---
 name: test
 description: Run full test suite with coverage
-allowed-tools: Bash
 ---
 Run the test suite:
 1. `cd backend && uv run pytest --cov=app --cov-report=term-missing -x`

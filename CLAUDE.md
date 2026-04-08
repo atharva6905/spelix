@@ -127,6 +127,34 @@ After all sub-agents complete and their worktrees are merged:
 2. Run `/test` — catch any integration issues
 3. Update `backlog.md` and `memory.md`
 
+## Git Conventions
+ 
+### Commit Messages
+Use conventional commits. No co-authored-by, no emoji prefixes, no "Generated with Claude" footers.
+ 
+Format:
+```
+type(scope): short description
+ 
+Optional body with context if needed.
+```
+ 
+Types: `feat`, `fix`, `test`, `refactor`, `chore`, `docs`
+Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, `ci`
+ 
+Examples:
+- `feat(cv): add quality gate body visibility check`
+- `test(cv): unit tests for rep detection state machine`
+- `feat(api): POST /analyses upload endpoint with signed URL`
+- `chore: scaffold project structure and dependencies`
+- `fix(worker): handle sigmoid on pre-logit MediaPipe visibility`
+ 
+### Commit Behavior
+- **Main agent**: always ask for confirmation before committing (git commit is NOT auto-approved)
+- **Sub-agents in worktrees**: commit freely without confirmation — their work is reviewed at merge time
+- **When to commit**: after each TDD gate passes (test green = commit point)
+- **Commit scope**: one logical change per commit. Don't bundle unrelated changes.
+
 ## Gotchas
 
 - MediaPipe: `model_complexity=2, static_image_mode=True, min_detection_confidence=0.5, min_tracking_confidence=0.5, num_threads=1` — exact config, no deviation

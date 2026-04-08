@@ -1,7 +1,6 @@
 ---
 name: status
 description: Show system health
-allowed-tools: Bash
 ---
 1. `docker compose -f docker-compose.dev.yml ps` — show service states
 2. `redis-cli -h localhost info keyspace` — show ARQ queue depth

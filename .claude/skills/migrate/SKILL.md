@@ -1,8 +1,7 @@
 ---
 name: migrate
 description: Create and review an Alembic migration
-argument-hint: [description]
-allowed-tools: Bash, Read, Write
+argument-hint: "description of the migration"
 ---
 1. Run: `cd backend && uv run alembic revision --autogenerate -m "$1"`
 2. Read the generated migration file in `alembic/versions/`
