@@ -3,6 +3,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1 import api_v1_router
+
 app = FastAPI(title="Spelix API", version="0.1.0")
 
 # CORS per NFR-SECU-11: explicit origins only, no wildcard in production
@@ -35,6 +37,8 @@ app.add_middleware(
         "Upload-Length",
     ],
 )
+
+app.include_router(api_v1_router)
 
 
 @app.get("/health")
