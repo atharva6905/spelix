@@ -19,7 +19,7 @@
 | B-015 | MediaPipe pose extraction | done | 0 | FR-CVPL-01, FR-CVPL-02, FR-CVPL-12–13 | M | B-001 | Exact config, sigmoid guard |
 | B-016 | Savitzky-Golay + angle calc | done | 0 | FR-CVPL-14 | S | — | Pure math functions |
 | B-017 | Rep detection state machine | done | 0 | FR-CVPL-15, FR-REPM-01, FR-REPM-05 | L | B-016 | Per-exercise thresholds, hysteresis |
-| B-018 | Per-rep metric extraction | todo | 0 | FR-REPM-02–03, Sec 3.7 | XL | B-017 | 3 exercise analyzers, all metrics |
+| B-018 | Per-rep metric extraction | done | 0 | FR-REPM-02–03, Sec 3.7 | XL | B-017 | 3 exercise analyzers, all metrics |
 | B-019 | Phase 0 confidence scoring | done | 0 | FR-CVPL-16, FR-RESL-08, FR-REPM-04 | S | — | Mean visibility, label mapping |
 | B-020 | Barbell detection + tracking | done | 0 | FR-BDET-01–07 | M | — | OpenCV contour, graceful null |
 | B-021 | Annotated video + artifacts | todo | 0 | FR-CVPL-19, FR-UPLD-15, FR-XPRT-01 | L | B-018, B-020 | Skeleton overlay, plot, upload |
@@ -41,6 +41,6 @@
 | B-037 | Account deletion | done | 0 | FR-AUTH-07, FR-XPRT-05, NFR-SECU-08 | M | B-004 | Full cascade purge |
 | B-038 | Artifact cleanup cron | done | 0 | FR-UPLD-15, FR-UPLD-19 | S | B-011 | Nightly, 7-day retention |
 | B-039 | Error boundaries (frontend) | done | 0 | NFR-USAB-09 | S | B-007 | Component-level recovery |
-| B-040 | OpenAPI type generation | todo | 0 | NFR-MAIN-07 | S | B-029 | openapi-typescript |
+| B-040 | OpenAPI type generation | done | 0 | NFR-MAIN-07 | S | B-029 | openapi-typescript |
 | B-041 | E2E integration test | todo | 0 | NFR-MAIN-04 | L | all | Full flow with fixture video |
 | B-042 | CI pipeline (GitHub Actions) | todo | 0 | NFR-MAIN-01, NFR-MAIN-05–06 | M | all | ruff, pyright, pytest, vitest, coverage |
