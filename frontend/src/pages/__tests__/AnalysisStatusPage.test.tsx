@@ -3,20 +3,29 @@ import { render, screen, act } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 
-// Mock the supabase module
-const mockUnsubscribe = vi.fn().mockResolvedValue({ error: null });
-const mockSubscribe = vi.fn().mockReturnValue({ unsubscribe: mockUnsubscribe });
-const mockOn = vi.fn();
-const mockChannel = vi.fn();
+// Use vi.hoisted so mocks are available when vi.mock factories run (hoisted above imports)
+const {
+  mockUnsubscribe,
+  mockSubscribe,
+  mockOn,
+  mockChannel,
+  channelInstance,
+} = vi.hoisted(() => {
+  const mockUnsubscribe = vi.fn().mockResolvedValue({ error: null });
+  const mockSubscribe = vi.fn().mockReturnValue({ unsubscribe: mockUnsubscribe });
+  const mockOn = vi.fn();
+  const mockChannel = vi.fn();
 
-// Build the channel mock chain
-const channelInstance = {
-  on: mockOn,
-  subscribe: mockSubscribe,
-  unsubscribe: mockUnsubscribe,
-};
-mockOn.mockReturnValue(channelInstance);
-mockChannel.mockReturnValue(channelInstance);
+  const channelInstance = {
+    on: mockOn,
+    subscribe: mockSubscribe,
+    unsubscribe: mockUnsubscribe,
+  };
+  mockOn.mockReturnValue(channelInstance);
+  mockChannel.mockReturnValue(channelInstance);
+
+  return { mockUnsubscribe, mockSubscribe, mockOn, mockChannel, channelInstance };
+});
 
 vi.mock("@/lib/supabase", () => ({
   supabase: {
