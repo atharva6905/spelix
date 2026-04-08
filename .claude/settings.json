@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env*)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const f=d.tool_input?.file_path||d.tool_input?.path||''; if(f.endsWith('.py')){const{execSync}=require('child_process'); try{execSync('ruff check --fix '+f,{stdio:'pipe'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}\"",
+            "statusMessage": "Running ruff check --fix..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const f=d.tool_input?.file_path||d.tool_input?.path||''; if(f.endsWith('.py')){const{execSync}=require('child_process'); try{execSync('pyright '+f,{stdio:'pipe'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}\"",
+            "statusMessage": "Running pyright..."
+          },
+          {
+            "type": "command",
+            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const f=d.tool_input?.file_path||d.tool_input?.path||''; if(f.endsWith('.ts')||f.endsWith('.tsx')){const{execSync}=require('child_process'); try{execSync('npx tsc --noEmit',{stdio:'pipe',cwd:'frontend'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}\"",
+            "statusMessage": "Running tsc --noEmit..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const c=d.tool_input?.command||''; if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process'); try{execSync('(git diff --cached; git diff) | grep -iE \\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\"\",{stdio:'pipe'}); process.exit(2)}catch(e){process.exit(0)}}\"",
+            "statusMessage": "Checking for secrets..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd backend && ruff check . --quiet; cd ../frontend && npx tsc --noEmit --quiet 2>&1 | head -20",
+            "statusMessage": "Running final checks..."
+          }
+        ]
+      }
+    ]
+  }
+}
