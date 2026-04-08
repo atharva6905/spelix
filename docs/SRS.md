@@ -966,7 +966,7 @@ The project follows a strict TDD discipline throughout all phases:
 
 ### 6.1 User Interfaces
 
-- Technology: React 19 + Vite 7 + TypeScript + Tailwind CSS + shadcn/ui
+- Technology: React 19 + Vite 8 + TypeScript + Tailwind CSS + shadcn/ui
 
 - Pages: Landing/Login, Onboarding (body stats), Dashboard, Upload, Processing Status, Results, Account Settings, Admin Dashboard
 
@@ -1031,7 +1031,7 @@ The project follows a strict TDD discipline throughout all phases:
 
 *Figure 7.1 — Spelix ERD. All eight tables, their fields, and relationship cardinalities. Generated from the canonical schema definition.*
 
-![Spelix ERD](erd.png)
+![Spelix ERD](diagrams/erd.png)
 
 ### 7.2 Table Descriptions
 

@@ -34,8 +34,25 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process');try{execSync('(git diff --cached; git diff) | grep -iE \\\\\\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\\\\\"',{stdio:'pipe'});process.exit(2)}catch(e){process.exit(0)}}}catch(e){}})\"",
-            "statusMessage": "Checking for secrets..."
+            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';const cl=c.toLowerCase();const B=[['rm -rf /','wipe root'],['rm -rf .','wipe cwd'],['rm -rf ~','wipe home'],['rm -rf *','wipe glob'],['rm -rf C:','wipe drive'],['rmdir /s /q','windows recursive nuke'],['del /s /q /f','windows force nuke'],['git push --force','force push'],['git push -f ','force push'],['git push origin main','direct push to main'],['git push origin master','direct push to master'],['git reset --hard','hard reset loses work'],['git clean -fd','delete untracked files'],['docker compose down -v','destroy volumes'],['docker system prune -a','prune everything'],['drop table','drop table'],['drop database','drop database'],['truncate ','truncate table'],['alembic downgrade base','wipe all migrations'],['npm publish','publish package'],['supabase db reset','reset database'],['chmod 777','world-writable'],['chmod -r 777','recursive world-writable'],['cat .env','read secrets via bash'],['type .env','read secrets via bash'],['curl|sh','pipe to shell'],['curl |sh','pipe to shell'],['curl | sh','pipe to shell'],['wget|sh','pipe to shell'],['wget |sh','pipe to shell'],['wget | sh','pipe to shell'],['curl|bash','pipe to shell'],['curl | bash','pipe to shell'],['wget|bash','pipe to shell'],['wget | bash','pipe to shell'],['> .env','overwrite env file'],['>> .env','append to env file']];for(const [p,r] of B){if(cl.includes(p)){process.stderr.write('\\n\\u{1F6AB} BLOCKED: '+r+' \\u2014 command: '+c+'\\n');process.exit(2)}}}catch(e){}})\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';const cl=c.toLowerCase();const W=[['rm -r','recursive delete'],['rm -f','force delete'],['rmdir','remove directory'],['git reset','git reset'],['git checkout -- .','discard all changes'],['git stash drop','drop stash'],['alembic downgrade','downgrade migration'],['delete from','SQL delete rows'],['printenv','print all env vars']];for(const [p,r] of W){if(cl.includes(p)){process.stderr.write('\\n\\u{26A0}\\u{FE0F}  CAUTION: '+r+' \\u2014 '+c+'\\n');break}}process.exit(0)}catch(e){}})\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process');try{execSync('(git diff --cached; git diff) | grep -iE \\\\\\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\\\\\"',{stdio:'pipe'});process.stderr.write('\\n\\u{1F6AB} BLOCKED: secrets detected in staged changes\\n');process.exit(2)}catch(e){process.exit(0)}}}catch(e){}})\""
           }
         ]
       }

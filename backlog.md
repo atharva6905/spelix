@@ -13,9 +13,9 @@
 | B-009 | Upload API (POST /analyses + /start) | done | 0 | FR-UPLD-07, FR-UPLD-16, FR-UPLD-17 | L | B-004, B-005 | Signed URL, enqueue ARQ |
 | B-010 | Rate limiting middleware | done | 0 | NFR-SECU-10 | S | B-009 | slowapi + Redis, 10/user/day |
 | B-011 | ARQ worker skeleton | done | 0 | FR-UPLD-18, NFR-RELI-01–04, NFR-OPER-02 | M | B-003, B-004 | Heartbeat, idempotent, retry |
-| B-012 | Quality gates | todo | 0 | FR-CVPL-03–11 | M | — | Body visibility, framing, warnings |
-| B-013 | Upload page (frontend) | todo | 0 | FR-XDET-01–02, FR-XDET-05, FR-XDET-08–09, FR-UPLD-01–09 | L | B-007 | TUS upload, filming guidance |
-| B-014 | Analysis status page (frontend) | todo | 0 | FR-RESL-13, NFR-RELI-06 | M | B-007 | Realtime sub, polling fallback |
+| B-012 | Quality gates | done | 0 | FR-CVPL-03–11 | M | — | Body visibility, framing, warnings |
+| B-013 | Upload page (frontend) | done | 0 | FR-XDET-01–02, FR-XDET-05, FR-XDET-08–09, FR-UPLD-01–09 | L | B-007 | TUS upload, filming guidance |
+| B-014 | Analysis status page (frontend) | done | 0 | FR-RESL-13, NFR-RELI-06 | M | B-007 | Realtime sub, polling fallback |
 | B-015 | MediaPipe pose extraction | todo | 0 | FR-CVPL-01, FR-CVPL-02, FR-CVPL-12–13 | M | B-001 | Exact config, sigmoid guard |
 | B-016 | Savitzky-Golay + angle calc | todo | 0 | FR-CVPL-14 | S | — | Pure math functions |
 | B-017 | Rep detection state machine | todo | 0 | FR-CVPL-15, FR-REPM-01, FR-REPM-05 | L | B-016 | Per-exercise thresholds, hysteresis |
