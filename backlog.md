@@ -10,9 +10,9 @@
 | B-006 | Supabase RLS policies | done | 0 | FR-AUTH-06, NFR-SECU-01, NFR-SECU-06 | S | B-002 | Raw SQL in migration 002 |
 | B-007 | Frontend auth + routes | done | 0 | FR-AUTH-01, FR-AUTH-04, FR-AUTH-05 | M | B-001 | Login, signup, RequireAuth |
 | B-008 | Profile API + onboarding page | done | 0 | FR-PROF-01–05 | M | B-004, B-005 | Required + optional body stats |
-| B-009 | Upload API (POST /analyses + /start) | todo | 0 | FR-UPLD-07, FR-UPLD-16, FR-UPLD-17 | L | B-004, B-005 | Signed URL, enqueue ARQ |
-| B-010 | Rate limiting middleware | todo | 0 | NFR-SECU-10 | S | B-009 | slowapi + Redis, 10/user/day |
-| B-011 | ARQ worker skeleton | todo | 0 | FR-UPLD-18, NFR-RELI-01–04, NFR-OPER-02 | M | B-003, B-004 | Heartbeat, idempotent, retry |
+| B-009 | Upload API (POST /analyses + /start) | done | 0 | FR-UPLD-07, FR-UPLD-16, FR-UPLD-17 | L | B-004, B-005 | Signed URL, enqueue ARQ |
+| B-010 | Rate limiting middleware | done | 0 | NFR-SECU-10 | S | B-009 | slowapi + Redis, 10/user/day |
+| B-011 | ARQ worker skeleton | done | 0 | FR-UPLD-18, NFR-RELI-01–04, NFR-OPER-02 | M | B-003, B-004 | Heartbeat, idempotent, retry |
 | B-012 | Quality gates | todo | 0 | FR-CVPL-03–11 | M | — | Body visibility, framing, warnings |
 | B-013 | Upload page (frontend) | todo | 0 | FR-XDET-01–02, FR-XDET-05, FR-XDET-08–09, FR-UPLD-01–09 | L | B-007 | TUS upload, filming guidance |
 | B-014 | Analysis status page (frontend) | todo | 0 | FR-RESL-13, NFR-RELI-06 | M | B-007 | Realtime sub, polling fallback |

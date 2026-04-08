@@ -10,12 +10,10 @@ Rate limiting (10/user/day) is added in B-010.
 Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17
 """
 
-from __future__ import annotations
-
 import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user
@@ -26,6 +24,7 @@ from app.schemas.analysis import (
     AnalysisCreateResponse,
     AnalysisStartResponse,
 )
+from app.rate_limit import limiter
 from app.services.analysis import AnalysisService
 from app.services.storage import StorageService
 
@@ -76,7 +75,10 @@ def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
     response_model=AnalysisCreateResponse,
     summary="Create analysis and get signed upload URL",
 )
+@limiter.limit("10/day")
 async def create_analysis(
+    request: Request,
+    response: Response,
     body: AnalysisCreate,
     user: CurrentUser = Depends(get_current_user),
     service: AnalysisService = Depends(_get_service),
