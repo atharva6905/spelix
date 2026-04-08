@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import RequireAuth from "@/components/RequireAuth";
+import AdminPage from "@/pages/AdminPage";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 import HomePage from "@/pages/HomePage";
 import LoginPage from "@/pages/LoginPage";
@@ -29,6 +30,14 @@ const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <AnalysisStatusPage />
+      </RequireAuth>
+    ),
+  },
+  {
+    path: "/admin",
+    element: (
+      <RequireAuth>
+        <AdminPage />
       </RequireAuth>
     ),
   },
