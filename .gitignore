@@ -1,5 +1,10 @@
-# Claude Code local settings
+# Claude Code
 .claude/settings.local.json
+.claude/worktrees/
+
+# Node / Frontend
+node_modules/
+dist/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
