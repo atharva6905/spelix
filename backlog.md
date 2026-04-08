@@ -2,7 +2,7 @@
 
 | ID | Title | Status | Phase | SRS IDs | Size | Deps | Notes |
 |----|-------|--------|-------|---------|------|------|-------|
-| B-001 | Project scaffold + Docker Compose | todo | 0 | NFR-OPER-01, NFR-SECU-11, NFR-SECU-12 | M | — | Health endpoint, CORS, Redis |
+| B-001 | Project scaffold + Docker Compose | done | 0 | NFR-OPER-01, NFR-SECU-11, NFR-SECU-12 | M | — | Health endpoint, CORS, Redis |
 | B-002 | SQLAlchemy models + migration 001 | todo | 0 | Sec 7.2, 7.3 | L | B-001 | 4 tables, CHECK constraint, indexes |
 | B-003 | Status transition guard | todo | 0 | Sec 5.2a | S | B-002 | Pure function, TDD first |
 | B-004 | Repository layer | todo | 0 | Sec 5.1, NFR-MAIN-08 | M | B-002 | 4 repos, AsyncSession DI |

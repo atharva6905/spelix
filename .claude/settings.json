@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const c=d.tool_input?.command||''; if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process'); try{execSync('(git diff --cached; git diff) | grep -iE \\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\"\",{stdio:'pipe'}); process.exit(2)}catch(e){process.exit(0)}}\"",
+            "command": "node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); const c=d.tool_input?.command||''; if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process'); try{execSync('(git diff --cached; git diff) | grep -iE \\\\\\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\\\\\"\\\",{stdio:'pipe'}); process.exit(2)}catch(e){process.exit(0)}}\"",
             "statusMessage": "Checking for secrets..."
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd backend && ruff check . --quiet; cd ../frontend && npx tsc --noEmit --quiet 2>&1 | head -20",
+            "command": "cd backend && uv run ruff check . --quiet; cd ../frontend && npx tsc --noEmit --quiet 2>&1 | head -20",
             "statusMessage": "Running final checks..."
           }
         ]

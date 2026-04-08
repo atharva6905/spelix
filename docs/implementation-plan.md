@@ -7,6 +7,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 **Duration estimate**: 4–5 weeks at focused effort.
 **Dependency order**: infra → models → auth → profile → upload API → CV pipeline → coaching → results UI → history → admin → PDF → polish.
 **Convention**: All backend commands use `uv run <cmd>` (auto-activates `backend/.venv/`). The local `.venv` is required — Claude Code hooks (ruff, pyright) and pytest run locally, not in Docker.
+**Convention**: Before writing code against ANY library for the first time, query Context7 MCP (`resolve` tool) for current docs. This is mandatory — not optional. Stale API usage is a defect. Key lookups: SQLAlchemy 2.0, ARQ, Vite 8, Tailwind 4, shadcn/ui v4, Supabase-js v2, MediaPipe, instructor, React Router v6.
 
 ---
 
@@ -14,13 +15,15 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-001 — Project scaffold and Docker Compose
 **What**: Create all directories, `pyproject.toml`, `docker-compose.dev.yml` (Redis only), `.env.example`, `backend/app/main.py` (minimal FastAPI app with CORS + health endpoint), `frontend/` Vite scaffold.
+**Context7 lookups before coding**: FastAPI (CORS middleware config), Vite 8 (project init + config format), Tailwind CSS 4 (installation + @theme setup), shadcn/ui (v4 init command).
 **SRS**: NFR-OPER-01, NFR-SECU-11, NFR-SECU-12
-**Files**: `docker-compose.dev.yml`, `backend/pyproject.toml`, `backend/app/main.py`, `backend/app/config.py`, `frontend/package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, `.env.example`, `.nvmrc`, `.python-version`
+**Files**: `docker-compose.dev.yml`, `backend/pyproject.toml`, `backend/app/main.py`, `backend/app/config.py`, `frontend/package.json`, `frontend/vite.config.ts`, `frontend/tsconfig.json`, `.env.example`, `.nvmrc`, `.python-version`, `.mcp.json`
 **Parallel**: No — everything depends on this.
 **TDD gate**: `GET /health` returns `{"status":"ok"}`. `docker compose up -d` starts Redis. `npm run dev` renders React stub. `pytest backend/tests/unit/test_health.py` passes.
 
 ### B-002 — SQLAlchemy models and Alembic migration 001
 **What**: Define `analyses`, `user_profiles`, `rep_metrics`, `coaching_results` models. Status CHECK constraint. All JSONB columns. Required indexes. Alembic env.py configured for async. Run migration against Supabase.
+**Context7 lookups before coding**: SQLAlchemy 2.0 (async session, Mapped types, DeclarativeBase), Alembic (async env.py setup), asyncpg (connection config).
 **SRS**: Section 7.2, 7.3 — all column types and indexes as specified. Status values: queued/quality_gate_pending/quality_gate_rejected/processing/coaching/completed/failed.
 **Files**: `backend/app/models/analysis.py`, `backend/app/models/user_profile.py`, `backend/app/models/rep_metric.py`, `backend/app/models/coaching_result.py`, `backend/app/models/__init__.py`, `backend/app/db.py`, `backend/alembic/env.py`, `backend/alembic.ini`, `backend/alembic/versions/001_initial_schema.py`
 **Parallel**: No — all service code depends on models.
@@ -56,6 +59,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-007 — Frontend auth (Supabase client + routes)
 **What**: Supabase client init (`@supabase/supabase-js`), login/signup pages, `RequireAuth` wrapper, React Router setup, session persistence.
+**Context7 lookups before coding**: @supabase/supabase-js v2 (createClient, auth.getSession, onAuthStateChange), React Router v6 (createBrowserRouter, Outlet, Navigate).
 **SRS**: FR-AUTH-01, FR-AUTH-04, FR-AUTH-05, FR-AUTH-07.
 **Files**: `frontend/src/lib/supabase.ts`, `frontend/src/components/RequireAuth.tsx`, `frontend/src/pages/LoginPage.tsx`, `frontend/src/pages/SignupPage.tsx`, `frontend/src/routes.tsx`, `frontend/src/App.tsx`
 **Parallel**: Yes — can run alongside B-003 through B-006.
@@ -88,6 +92,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-011 — ARQ worker skeleton
 **What**: `process_analysis` async function. WorkerSettings per SRS. Heartbeat key. Status transition sequence. Error handling with retry_count. Idempotent check at start.
+**Context7 lookups before coding**: ARQ (WorkerSettings, job definition, RedisSettings, cron jobs).
 **SRS**: FR-UPLD-18, NFR-RELI-01 through NFR-RELI-04, NFR-OPER-02.
 **Files**: `backend/app/workers/analysis_worker.py`, `backend/app/workers/settings.py`, `backend/tests/unit/test_worker_skeleton.py`
 **Parallel**: No — depends on B-003, B-004.
@@ -102,6 +107,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-013 — Upload page (frontend)
 **What**: Exercise type + variant dropdowns. Filming guidance per exercise. Upload button disabled until both selected (FR-XDET-09). TUS upload to Supabase Storage signed URL. Progress indicator. Duration toggle (40s/2min). Call POST /analyses then POST /analyses/{id}/start.
+**Context7 lookups before coding**: @supabase/supabase-js v2 (Storage createSignedUploadUrl, TUS upload), tus-js-client (if separate package needed), shadcn/ui (Select, Button, Progress components).
 **SRS**: FR-XDET-01, FR-XDET-02, FR-XDET-05, FR-XDET-08, FR-XDET-09, FR-UPLD-01 through FR-UPLD-09, FR-UPLD-12, FR-RESL-12, NFR-USAB-01.
 **Files**: `frontend/src/pages/UploadPage.tsx`, `frontend/src/components/UploadForm.tsx`, `frontend/src/components/FilmingGuidance.tsx`, `frontend/src/api/analyses.ts`, `frontend/src/hooks/useUpload.ts`
 **Parallel**: Yes — can run alongside B-011/B-012.
@@ -109,6 +115,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-014 — Analysis status page (frontend)
 **What**: Subscribe to Supabase Realtime `postgres_changes` on `analyses` filtered by id. User-facing status labels from Appendix B. Reconnection indicator + polling fallback (10s). On `quality_gate_rejected`: show corrective guidance from quality_gate_result.
+**Context7 lookups before coding**: @supabase/supabase-js v2 (Realtime channel API, postgres_changes subscription, channel lifecycle).
 **SRS**: FR-RESL-13, FR-CVPL-03 (rejected UI), NFR-RELI-06, NFR-PERF-03.
 **Files**: `frontend/src/pages/AnalysisStatusPage.tsx`, `frontend/src/hooks/useAnalysisStatus.ts`, `frontend/src/components/AnalysisStatus.tsx`
 **Parallel**: Yes — can run alongside B-012.
@@ -120,6 +127,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-015 — MediaPipe pose extraction
 **What**: Extract 33 landmarks per frame. Exact config: `model_complexity=2, static_image_mode=True, min_detection_confidence=0.5, min_tracking_confidence=0.5, num_threads=1`. Apply sigmoid if values outside [0,1]. Run in executor.
+**Context7 lookups before coding**: MediaPipe (Python Pose API, solutions.pose, landmark indexing, visibility/presence fields).
 **SRS**: FR-CVPL-01, FR-CVPL-02, FR-CVPL-12, FR-CVPL-13.
 **Files**: `backend/app/cv/pose_extraction.py`, `backend/tests/unit/test_pose_extraction.py`
 **Parallel**: No — B-016+ depend on this.
@@ -180,6 +188,7 @@ Phase 0 ships: auth → profile → upload → CV pipeline → rep detection →
 
 ### B-023 — Phase 0 coaching service
 **What**: Claude Sonnet 4.6 call via instructor + Pydantic v2. CoachingOutput schema. System prompt + user turn from Appendix D. Error handling: 429→backoff, 401→fail, timeout 60s. Store in coaching_results.structured_output_json.
+**Context7 lookups before coding**: instructor (Pydantic v2 mode, Anthropic client integration, retry config), anthropic (Messages API, claude-sonnet-4-6 model string).
 **SRS**: FR-RESL-03 (Phase 0 sync), Appendix D (prompt template, schema, tone rules).
 **Files**: `backend/app/services/coaching.py`, `backend/app/schemas/coaching.py`, `backend/tests/unit/test_coaching.py`
 **Parallel**: Yes — can run alongside B-022.

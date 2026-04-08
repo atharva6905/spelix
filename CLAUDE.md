@@ -91,12 +91,41 @@ Status column: `VARCHAR(30)` with CHECK constraint listing all 7 valid values.
 JSONB columns: `summary_json`, `quality_gate_result`, `metrics_json`, `structured_output_json`, `agent_trace_json`, `retrieved_sources_json`.
 
 ## Sub-Agent Routing
-
-- Parallel dispatch safe when: task owns a subtree with no shared files AND no shared state
-- Safe to parallelise: `backend/app/api/` vs `backend/app/cv/` vs `frontend/src/`
-- Never parallelise: anything touching `models.py`, `schemas.py`, or `alembic/` — one agent owns these, others read results
-- Sub-agents use Sonnet 4.6 (already set in env); escalate to Opus only for architecture decisions
-- Run `/phase` before spawning sub-agents to confirm current phase scope
+ 
+- Sub-agents use Sonnet 4.6 (set via CLAUDE_CODE_SUBAGENT_MODEL env var)
+- All sub-agents run with **worktree isolation** — each gets its own git branch and working directory, auto-cleaned on completion
+- Maximum 3 concurrent sub-agents (2GB RAM constraint — MediaPipe peak ~350MB)
+ 
+### When to Dispatch Parallel Sub-Agents
+ 
+Run `/parallel` (reads the parallel skill) when the next batch of tasks in `backlog.md` contains 2+ tasks with:
+- Status: `todo`
+- All dependencies satisfied (check `Deps` column)
+- Non-overlapping file paths
+ 
+The `/parallel` skill contains pre-planned dispatch blocks for Phase 0. Follow them.
+ 
+### Safe Parallelization Rules
+ 
+- **Safe to parallelise**: `backend/app/api/` vs `backend/app/cv/` vs `frontend/src/` — different directory subtrees
+- **Safe to parallelise**: any pure function task (quality gates, confidence, signal processing) — no shared state
+- **Never parallelise**: anything touching `models/`, `schemas/`, or `alembic/` — one agent owns these, others read results
+- **Never parallelise**: tasks with dependency arrows in the implementation plan
+ 
+### Sub-Agent Instructions Template
+ 
+When dispatching via Task tool, each sub-agent receives:
+1. "Read CLAUDE.md for project context"
+2. "Use Context7 MCP to look up current API docs before writing library code"
+3. The specific task description, file list, SRS requirement IDs, and TDD gate from the implementation plan
+4. "Write failing test first, then implement. Commit when TDD gate passes."
+ 
+### Post-Merge
+ 
+After all sub-agents complete and their worktrees are merged:
+1. Run `/check` — catch any cross-agent type conflicts
+2. Run `/test` — catch any integration issues
+3. Update `backlog.md` and `memory.md`
 
 ## Gotchas
 

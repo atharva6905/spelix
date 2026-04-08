@@ -25,6 +25,20 @@ redis-cli --version
 
 If any version is wrong, fix it before proceeding. Create `.python-version` with `3.12` and `.nvmrc` with `22`.
 
+### 1a. Install Global Dev Tools
+
+Ruff and pyright must be globally available because Claude Code hooks call them directly on every file write (not through `uv run`). Slash commands use `uv run` instead, but hooks need global access.
+
+```bash
+# Install ruff and pyright globally (hooks need these on PATH)
+uv tool install ruff
+uv tool install pyright
+
+# Verify they're on PATH
+ruff --version
+pyright --version
+```
+
 ## 2. Verify Claude Code Configuration
 
 ```bash
@@ -60,15 +74,62 @@ The local PC has GSD framework hooks (SessionStart, PostToolUse, PreToolUse). Th
 - `gsd-context-monitor.js` runs on PostToolUse — monitors context size. May suggest compaction. Follow its guidance.
 - `gsd-workflow-guard.js` — may enforce workflow patterns. If it blocks a legitimate write, note in memory.md.
 
-### 2d. Verify MCP Servers
+### 2d. MCP Servers (auto-connect via .mcp.json)
 
-Confirm these are connected:
-- [ ] GitHub MCP
-- [ ] Supabase MCP (will configure after project creation)
-- [ ] Playwright MCP
-- [ ] Context7 MCP
-- [ ] PostgreSQL MCP (will configure after Supabase)
-- [ ] Redis MCP (will configure after Docker up)
+MCPs are configured in `.mcp.json` at the repo root. Claude Code auto-connects them at every session start — no `claude mcp add` needed. The file is version-controlled so every session gets the same MCPs.
+
+**Copy `.mcp.json` to the repo root** (provided as a deliverable). It configures all 6 servers with Windows `cmd /c` wrappers for npx.
+
+**Required env vars** (set in your shell profile, NOT in `.env` — MCPs read from your shell environment):
+
+```powershell
+# PowerShell $PROFILE (or bash equivalent)
+
+# GitHub — create a PAT at https://github.com/settings/tokens (repo scope)
+$env:GITHUB_TOKEN = "ghp_xxxxxxxxxxxx"
+
+# Redis — works once Docker Compose is up
+$env:REDIS_URL = "redis://localhost:6379/0"
+
+# Supabase — get from https://supabase.com/dashboard/account/tokens
+# Set AFTER creating the Supabase project (step 3)
+$env:SUPABASE_ACCESS_TOKEN = "sbp_xxxxxxxxxxxx"
+$env:SUPABASE_PROJECT_REF = "xxxxxxxxxxxx"  # from project URL: supabase.com/dashboard/project/<this>
+
+# PostgreSQL — same connection string as DATABASE_URL
+$env:DATABASE_URL = "postgresql://postgres.xxxxx:password@aws-0-region.pooler.supabase.com:6543/postgres"
+```
+
+**Availability timeline:**
+| MCP | Available when | Env vars needed |
+|-----|---------------|-----------------|
+| Context7 | Immediately | None |
+| Playwright | Immediately | None |
+| GitHub | Immediately | `GITHUB_TOKEN` |
+| Redis | After step 7 (Docker up) | `REDIS_URL` |
+| Supabase | After step 3 (project created) | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF` |
+| PostgreSQL | After step 3 (project created) | `DATABASE_URL` |
+
+MCPs with missing env vars show errors at session start but don't block other MCPs. They auto-connect once vars are set and Claude Code is restarted.
+
+**Verify after restart:**
+```
+/mcp
+```
+Should show connected servers. Re-run after each new env var is set.
+
+**Context7 usage protocol — MANDATORY:**
+
+Before writing code that uses any library, the agent MUST query Context7 for current documentation. This prevents writing code against stale APIs (e.g., Vite 8's Rolldown config, Tailwind v4's CSS-first @theme, SQLAlchemy 2.0's select() API, shadcn/ui v4 changes).
+
+Libraries that MUST be looked up via Context7 before first use:
+- FastAPI, SQLAlchemy 2.0, Alembic (async env.py), ARQ, MediaPipe
+- Supabase-py, @supabase/supabase-js v2 (Realtime channel API)
+- React 19, Vite 8, Tailwind CSS 4, shadcn/ui v4
+- Recharts, React Router v6, instructor (Pydantic v2)
+
+This is not optional — it's the primary defense against stale training data.
+
 
 ## 3. Create Supabase Project
 
@@ -90,6 +151,17 @@ DATABASE_URL=postgresql+asyncpg://postgres.xxxxx:password@aws-0-region.pooler.su
 REDIS_URL=redis://localhost:6379/0
 ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+**Also set MCP env vars in your shell** (MCPs read from shell, not `.env`):
+```powershell
+# Add to PowerShell $PROFILE (or .bashrc on Linux/Mac)
+$env:SUPABASE_ACCESS_TOKEN = "sbp_..."     # from supabase.com/dashboard/account/tokens
+$env:SUPABASE_PROJECT_REF = "xxxxxxxxxxxx" # from project URL
+$env:DATABASE_URL = "postgresql://..."      # same as above but WITHOUT +asyncpg prefix
+$env:GITHUB_TOKEN = "ghp_..."              # from github.com/settings/tokens
+$env:REDIS_URL = "redis://localhost:6379/0"
+```
+Then restart Claude Code so MCPs pick up the new vars.
 
 ### 3a. Enable Supabase Features
 

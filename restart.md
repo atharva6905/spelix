@@ -34,6 +34,8 @@ cd frontend && npm run dev                         # UI
 redis-cli ping                                     # Verify Redis
 ```
 
+After restore, run `/mcp` to verify MCP servers are connected. If any show disconnected, check that shell env vars (`GITHUB_TOKEN`, `REDIS_URL`, `DATABASE_URL`, `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`) are set.
+
 ## Key File Locations
 
 - SRS (authoritative requirements): `docs/SRS.md`
@@ -46,3 +48,7 @@ redis-cli ping                                     # Verify Redis
 - Agent state: `memory.md`
 - Task list: `backlog.md`
 - Decision log: `decisions.md`
+
+## MCP Reminder
+
+Context7 MCP is installed. Before writing code against ANY library for the first time, use Context7 `resolve` tool to get current docs. This is mandatory — stale API usage is a defect.

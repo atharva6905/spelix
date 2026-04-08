@@ -1,0 +1,43 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "supabase": {
+      "command": "cmd",
+      "args": [
+        "/c", "npx", "-y", "@supabase/mcp-server-supabase@latest",
+        "--project-ref", "${SUPABASE_PROJECT_REF}"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "playwright": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@anthropic-ai/mcp-server-playwright"]
+    },
+    "context7": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@upstash/context7-mcp@latest"]
+    },
+    "postgres": {
+      "command": "cmd",
+      "args": [
+        "/c", "npx", "-y", "@modelcontextprotocol/server-postgres",
+        "${DATABASE_URL}"
+      ]
+    },
+    "redis": {
+      "command": "cmd",
+      "args": [
+        "/c", "npx", "-y", "@modelcontextprotocol/server-redis",
+        "${REDIS_URL}"
+      ]
+    }
+  }
+}
