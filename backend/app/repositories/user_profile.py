@@ -28,7 +28,7 @@ class UserProfileRepository:
         await self.db.refresh(profile)
         return profile
 
-    async def delete(self, id: uuid.UUID) -> None:
+    async def delete(self, id: UUID) -> None:
         result = await self.db.execute(
             select(UserProfile).where(UserProfile.id == id)
         )
