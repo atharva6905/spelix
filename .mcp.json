@@ -19,7 +19,7 @@
     },
     "playwright": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "@anthropic-ai/mcp-server-playwright"]
+      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"]
     },
     "context7": {
       "command": "cmd",
