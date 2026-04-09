@@ -22,6 +22,10 @@ import {
   type GlobalInsights,
 } from "@/api/insights";
 import InsightsPanel from "@/components/InsightsPanel";
+import {
+  getConfidenceCategory,
+  type ConfidenceCategory,
+} from "@/lib/confidence";
 
 // ---------------------------------------------------------------------------
 // Display helpers
@@ -63,15 +67,6 @@ const EXERCISE_VARIANT_LABELS: Record<string, string> = {
   sumo: "Sumo",
   romanian: "Romanian",
 };
-
-type ConfidenceCategory = "High" | "Moderate" | "Low" | "Very Low";
-
-function getConfidenceCategory(score: number): ConfidenceCategory {
-  if (score >= 0.8) return "High";
-  if (score >= 0.6) return "Moderate";
-  if (score >= 0.4) return "Low";
-  return "Very Low";
-}
 
 const CONFIDENCE_STYLES: Record<ConfidenceCategory, string> = {
   High: "bg-green-100 text-green-800",
