@@ -5,7 +5,7 @@ import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 
 // Use vi.hoisted so mocks are available when vi.mock factories run (hoisted above imports)
 const {
-  mockUnsubscribe,
+  mockUnsubscribe: _mockUnsubscribe,
   mockSubscribe,
   mockOn,
   mockChannel,

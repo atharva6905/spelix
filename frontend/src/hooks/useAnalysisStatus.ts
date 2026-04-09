@@ -52,7 +52,7 @@ export function useAnalysisStatus(
     useState<QualityGateResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, _setError] = useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
 
   // Refs to keep stable references without triggering re-renders

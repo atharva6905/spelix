@@ -64,8 +64,8 @@ export default function TrendChart({ data, type, label }: TrendChartProps) {
             />
             <YAxis tick={{ fontSize: 10 }} domain={[0, 1]} />
             <Tooltip
-              formatter={(value: number) => [value.toFixed(2), label]}
-              labelFormatter={(l: string) => new Date(l).toLocaleDateString()}
+              formatter={(value) => [typeof value === "number" ? value.toFixed(2) : String(value ?? ""), label]}
+              labelFormatter={(l) => new Date(String(l)).toLocaleDateString()}
             />
             <Line
               type="monotone"
@@ -89,8 +89,8 @@ export default function TrendChart({ data, type, label }: TrendChartProps) {
             />
             <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
             <Tooltip
-              formatter={(value: number) => [value, label]}
-              labelFormatter={(l: string) => new Date(l).toLocaleDateString()}
+              formatter={(value) => [String(value ?? ""), label]}
+              labelFormatter={(l) => new Date(String(l)).toLocaleDateString()}
             />
             <Bar dataKey="value" fill="#10b981" radius={[2, 2, 0, 0]} />
           </BarChart>
