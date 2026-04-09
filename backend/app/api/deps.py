@@ -8,9 +8,11 @@ Requirements: FR-AUTH-02, FR-AUTH-08, NFR-SECU-05
 """
 
 import os
+import time
 import uuid
 from typing import TypedDict
 
+import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
@@ -19,26 +21,42 @@ from jose import ExpiredSignatureError, JWTError, jwt
 # Configuration
 # ---------------------------------------------------------------------------
 
-_JWT_ALGORITHM = "HS256"
 _JWT_AUDIENCE = "authenticated"
 
 _http_bearer = HTTPBearer()
 
+# JWKS cache: fetched from Supabase and refreshed every 60 minutes
+_jwks_cache: dict | None = None
+_jwks_fetched_at: float = 0
+_JWKS_TTL_SECONDS = 3600
 
-def _get_jwt_secret() -> str:
-    """Return the Supabase JWT secret from the environment.
 
-    Raises RuntimeError immediately at startup if the env var is absent,
-    keeping the fail-fast contract (NFR-SECU-05).  The secret is never
-    logged or included in any exception message or HTTP response body.
-    """
-    secret = os.environ.get("SUPABASE_JWT_SECRET")
-    if not secret:
-        raise RuntimeError(
-            "SUPABASE_JWT_SECRET environment variable is not set. "
-            "This is required for JWT validation."
-        )
-    return secret
+def _get_supabase_url() -> str:
+    url = os.environ.get("SUPABASE_URL")
+    if not url:
+        raise RuntimeError("SUPABASE_URL environment variable is not set.")
+    return url.rstrip("/")
+
+
+def _get_jwks() -> dict:
+    """Fetch and cache the Supabase JWKS (public keys for JWT verification)."""
+    global _jwks_cache, _jwks_fetched_at
+
+    now = time.monotonic()
+    if _jwks_cache is not None and (now - _jwks_fetched_at) < _JWKS_TTL_SECONDS:
+        return _jwks_cache
+
+    jwks_url = f"{_get_supabase_url()}/auth/v1/.well-known/jwks.json"
+    resp = httpx.get(jwks_url, timeout=10)
+    resp.raise_for_status()
+    _jwks_cache = resp.json()
+    _jwks_fetched_at = now
+    return _jwks_cache
+
+
+def _get_jwt_secret() -> str | None:
+    """Return the legacy HS256 JWT secret if set, or None."""
+    return os.environ.get("SUPABASE_JWT_SECRET")
 
 
 # ---------------------------------------------------------------------------
@@ -81,18 +99,34 @@ async def get_current_user(
     )
 
     token = credentials.credentials
-    secret = _get_jwt_secret()
 
+    # Try JWKS-based verification first (ES256), fall back to legacy HS256
+    payload = None
     try:
+        jwks_data = _get_jwks()
         payload = jwt.decode(
             token,
-            secret,
-            algorithms=[_JWT_ALGORITHM],
+            jwks_data,
+            algorithms=["ES256", "RS256"],
             audience=_JWT_AUDIENCE,
         )
-    except ExpiredSignatureError:
-        raise invalid_credentials_exc
-    except JWTError:
+    except Exception:
+        # Fall back to legacy HS256 symmetric secret
+        secret = _get_jwt_secret()
+        if secret:
+            try:
+                payload = jwt.decode(
+                    token,
+                    secret,
+                    algorithms=["HS256"],
+                    audience=_JWT_AUDIENCE,
+                )
+            except (ExpiredSignatureError, JWTError):
+                raise invalid_credentials_exc
+        else:
+            raise invalid_credentials_exc
+
+    if payload is None:
         raise invalid_credentials_exc
 
     # Extract standard Supabase claims
