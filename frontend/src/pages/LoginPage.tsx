@@ -23,7 +23,7 @@ export default function LoginPage() {
     if (authError) {
       setError(authError.message);
     } else {
-      await navigate("/");
+      await navigate("/upload");
     }
   }
 

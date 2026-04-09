@@ -55,7 +55,17 @@ class _CreateResult:
 
 def _build_app(mock_service=None) -> FastAPI:
     """Build a FastAPI app with auth and optionally service overrides."""
+
+    from limits.storage import MemoryStorage
+
+    from app.rate_limit import limiter
+
     app = FastAPI()
+    # Use in-memory storage to avoid Redis dependency in unit tests
+    mem = MemoryStorage()
+    limiter._storage = mem
+    limiter._limiter.storage = mem
+    app.state.limiter = limiter
     app.include_router(router, prefix="/api/v1/analyses")
 
     async def _mock_user():

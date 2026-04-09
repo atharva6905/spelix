@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { supabase } from "@/lib/supabase";
 
 export default function SignupPage() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
 
   async function handleSubmit() {
     setError(null);
@@ -25,7 +25,7 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    const { error: authError } = await supabase.auth.signUp({
+    const { data, error: authError } = await supabase.auth.signUp({
       email,
       password,
     });
@@ -34,29 +34,13 @@ export default function SignupPage() {
 
     if (authError) {
       setError(authError.message);
+    } else if (data.session) {
+      // Email confirmation disabled — user is auto-logged in, go to profile onboarding
+      await navigate("/profile");
     } else {
-      setConfirmed(true);
+      // Email confirmation enabled (fallback) — show confirmation message
+      setError("Account created. Please check your email to confirm, then sign in.");
     }
-  }
-
-  if (confirmed) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-sm text-center">
-          <h2 className="text-xl font-semibold text-gray-900">Check your email</h2>
-          <p className="mt-2 text-sm text-gray-500">
-            We sent a confirmation link to <strong>{email}</strong>. Click it to activate your
-            account.
-          </p>
-          <Link
-            to="/login"
-            className="mt-6 inline-block text-sm font-medium text-blue-600 hover:text-blue-500"
-          >
-            Back to sign in
-          </Link>
-        </div>
-      </div>
-    );
   }
 
   return (

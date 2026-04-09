@@ -4,10 +4,14 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import RequireAuth from "@/components/RequireAuth";
 
 // Mock the supabase module
+const mockUnsubscribe = vi.fn();
 vi.mock("@/lib/supabase", () => ({
   supabase: {
     auth: {
       getSession: vi.fn(),
+      onAuthStateChange: vi.fn(() => ({
+        data: { subscription: { unsubscribe: mockUnsubscribe } },
+      })),
     },
   },
 }));

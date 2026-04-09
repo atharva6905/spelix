@@ -68,12 +68,16 @@ def client():
 
     app.dependency_overrides[_get_service] = _service_override
 
-    # Reset rate limiter storage between tests so counts don't leak
+    from limits.storage import MemoryStorage
+
     from app.rate_limit import limiter
 
-    limiter.reset()
-
+    # Swap to in-memory storage AFTER app startup to avoid Redis dependency
     with TestClient(app) as c:
+        mem = MemoryStorage()
+        limiter._storage = mem
+        limiter._limiter.storage = mem
+        limiter.reset()
         yield c
 
     app.dependency_overrides.clear()

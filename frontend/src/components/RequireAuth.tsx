@@ -16,6 +16,15 @@ export default function RequireAuth({ children }: RequireAuthProps) {
       setSession(data.session);
       setLoading(false);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session);
+        setLoading(false);
+      },
+    );
+
+    return () => subscription.unsubscribe();
   }, []);
 
   if (loading) {
