@@ -1,6 +1,7 @@
 # Claude Code
 .claude/settings.local.json
 .claude/worktrees/
+.playwright-mcp/
 
 # Node / Frontend
 node_modules/
