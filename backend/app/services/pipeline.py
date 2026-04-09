@@ -25,10 +25,14 @@ from app.cv.artifact_generation import (
     get_temp_dir,
     upload_artifact,
 )
-from app.cv.barbell_detection import compute_bar_path_from_landmarks
+from app.cv.barbell_detection import (
+    compute_bar_path,
+    compute_bar_path_from_landmarks,
+    track_barbell,
+)
 from app.cv.confidence import compute_session_confidence
 from app.cv.metric_extraction import extract_rep_metrics
-from app.cv.pose_extraction import extract_landmarks
+from app.cv.pose_extraction import extract_frames, extract_landmarks
 from app.cv.quality_gates import run_quality_gates
 from app.cv.rep_detection import detect_reps
 from app.cv.signal_processing import compute_angle_timeseries
@@ -204,7 +208,13 @@ async def run_cv_pipeline(
     # Step 3: Quality gates
     # ------------------------------------------------------------------ #
     gate_result = await loop.run_in_executor(
-        None, run_quality_gates, landmarks_per_frame, frame_width, frame_height,
+        None,
+        run_quality_gates,
+        landmarks_per_frame,
+        frame_width,
+        frame_height,
+        video_local,
+        exercise_type,
     )
 
     analysis.quality_gate_result = {
@@ -315,14 +325,35 @@ async def run_cv_pipeline(
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
-    # Step 9: Barbell detection (CPU-bound)
+    # Step 9: Barbell detection (pixel-based, with landmark fallback)
     # ------------------------------------------------------------------ #
-    bar_path = await loop.run_in_executor(
-        None,
-        compute_bar_path_from_landmarks,
-        landmarks_per_frame,
-        exercise_type,
-    )
+    frames = await loop.run_in_executor(None, extract_frames, video_local)
+    centroids = await loop.run_in_executor(None, track_barbell, frames)
+
+    # Determine detection rate
+    detected_count = sum(1 for c in centroids if c is not None)
+    detection_rate = detected_count / len(centroids) if centroids else 0.0
+
+    if detection_rate > 0.50:
+        bar_path = await loop.run_in_executor(
+            None,
+            compute_bar_path,
+            centroids,
+            result.frame_width,
+            result.frame_height,
+        )
+    else:
+        logger.warning(
+            "Barbell detected in only %.0f%% of frames for %s — using landmark proxy",
+            detection_rate * 100,
+            analysis_id,
+        )
+        bar_path = await loop.run_in_executor(
+            None,
+            compute_bar_path_from_landmarks,
+            landmarks_per_frame,
+            exercise_type,
+        )
     result.bar_path = bar_path
 
     # ------------------------------------------------------------------ #

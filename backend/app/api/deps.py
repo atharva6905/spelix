@@ -10,7 +10,8 @@ Requirements: FR-AUTH-02, FR-AUTH-08, NFR-SECU-05
 import os
 import time
 import uuid
-from typing import TypedDict
+from collections.abc import AsyncGenerator
+from typing import Any, TypedDict
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -147,6 +148,23 @@ async def get_current_user(
     role: str = user_metadata.get("role") or "user"
 
     return CurrentUser(id=user_id, email=email, role=role)
+
+
+async def get_redis() -> AsyncGenerator[Any, None]:
+    """Yield an async Redis client for dependency injection.
+
+    Uses redis.asyncio backed by the REDIS_URL environment variable.
+    The caller receives the client directly (not a generator) when used
+    with FastAPI's Depends().
+    """
+    import redis.asyncio as aioredis
+
+    url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+    client = aioredis.from_url(url, decode_responses=True)
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 def get_admin_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
