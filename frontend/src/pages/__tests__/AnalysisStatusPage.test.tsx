@@ -115,7 +115,7 @@ describe("AnalysisStatusPage", () => {
     });
 
     expect(
-      screen.getByText("Video quality check failed"),
+      screen.getByText("Video could not be processed"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
