@@ -49,9 +49,10 @@ def _get_jwks() -> dict:
     jwks_url = f"{_get_supabase_url()}/auth/v1/.well-known/jwks.json"
     resp = httpx.get(jwks_url, timeout=10)
     resp.raise_for_status()
-    _jwks_cache = resp.json()
+    data: dict = resp.json()
+    _jwks_cache = data
     _jwks_fetched_at = now
-    return _jwks_cache
+    return data
 
 
 def _get_jwt_secret() -> str | None:
