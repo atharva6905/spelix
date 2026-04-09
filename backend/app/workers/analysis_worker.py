@@ -83,7 +83,7 @@ async def _run_pipeline(
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
         # ------------------------------------------------------------------ #
-        pipeline_result = await run_cv_pipeline(
+        await run_cv_pipeline(
             analysis=analysis,
             repo=repo,
             rep_metric_repo=rep_metric_repo,

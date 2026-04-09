@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 from typing import Any, Optional
 
 from sqlalchemy import Boolean, CheckConstraint, Float, Index, Integer, String, Text, desc

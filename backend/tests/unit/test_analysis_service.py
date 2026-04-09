@@ -310,7 +310,7 @@ class TestCreateAnalysis:
         }
 
         service = AnalysisService(repo=repo, storage=mock_storage)
-        result = await service.create_analysis(
+        await service.create_analysis(
             user_id=user_id,
             exercise_type="deadlift",
             exercise_variant="sumo",

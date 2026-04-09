@@ -8,7 +8,6 @@ All LLM calls are mocked — never call real Anthropic API.
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -277,7 +276,6 @@ class TestCoachingService:
         mock_instructor.chat.completions.create = AsyncMock(side_effect=rate_limit_error)
 
         call_count = 0
-        original_sleep = asyncio.sleep
 
         async def mock_sleep(seconds: float) -> None:
             nonlocal call_count

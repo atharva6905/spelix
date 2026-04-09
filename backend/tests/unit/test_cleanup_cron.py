@@ -287,7 +287,6 @@ async def test_non_completed_analyses_skipped():
     mock_session.commit = AsyncMock()
 
     execute_calls: list[Any] = []
-    original_execute = mock_session.execute
 
     async def capture_execute(stmt: Any) -> Any:
         execute_calls.append(stmt)

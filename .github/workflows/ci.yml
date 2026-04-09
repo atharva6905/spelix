@@ -87,6 +87,10 @@ jobs:
         working-directory: backend
         run: uv sync
 
+      - name: Run Alembic migrations
+        working-directory: backend
+        run: uv run alembic upgrade head
+
       - name: Run tests with coverage
         working-directory: backend
         run: uv run pytest tests/ --cov=app --cov-report=term-missing --cov-fail-under=90 -x -q

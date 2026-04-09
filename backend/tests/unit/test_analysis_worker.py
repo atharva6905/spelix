@@ -242,7 +242,6 @@ async def test_error_handling_sets_failed_status():
 
     blast_count = 0
 
-    original_update = mock_repo.update.side_effect
 
     async def fail_on_processing(a: Any) -> Any:
         nonlocal blast_count

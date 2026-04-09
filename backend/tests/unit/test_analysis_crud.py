@@ -550,7 +550,7 @@ class TestUpdateAnalysisService:
         storage = AsyncMock()
         service = AnalysisService(repo=repo, storage=storage)
 
-        result = await service.update_analysis(analysis.id, user_id, tags=["pr"])
+        await service.update_analysis(analysis.id, user_id, tags=["pr"])
         # Tags should have been set on the model
         assert analysis.tags == ["pr"]
         repo.update.assert_called_once_with(analysis)
