@@ -17,6 +17,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty
 # CORS per NFR-SECU-11: explicit origins only, no wildcard in production
 _allowed_origins: list[str] = [
     "https://spelix.app",
+    "https://www.spelix.app",
 ]
 
 # Development origins
