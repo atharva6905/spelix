@@ -39,7 +39,7 @@ class WorkerSettings:
     max_jobs: int = 1
     keep_result: int = 0
 
-    redis_settings: RedisSettings = RedisSettings.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
+    redis_settings: RedisSettings = RedisSettings.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))  # type: ignore[attr-defined]
 
     functions = [process_analysis]
     cron_jobs = [

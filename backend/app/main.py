@@ -12,7 +12,7 @@ app = FastAPI(title="Spelix API", version="0.1.0")
 
 # Rate limiting (NFR-SECU-10)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 # CORS per NFR-SECU-11: explicit origins only, no wildcard in production
 _allowed_origins: list[str] = [

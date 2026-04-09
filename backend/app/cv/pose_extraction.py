@@ -72,7 +72,7 @@ def extract_landmarks(
 
     import mediapipe as mp
 
-    with mp.solutions.pose.Pose(
+    with mp.solutions.pose.Pose(  # type: ignore[attr-defined]
         model_complexity=2,
         static_image_mode=True,
         min_detection_confidence=0.5,

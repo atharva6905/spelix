@@ -77,7 +77,7 @@ async def _run_pipeline(
 
     # Build dependencies
     storage_client = _build_supabase_client()
-    rep_metric_repo = RepMetricRepository(repo._db)
+    rep_metric_repo = RepMetricRepository(repo.db)
 
     try:
         # ------------------------------------------------------------------ #
@@ -106,11 +106,11 @@ async def _run_pipeline(
         # ------------------------------------------------------------------ #
         # Coaching: call Claude Sonnet via CoachingService (B-024)
         # ------------------------------------------------------------------ #
-        coaching_repo = CoachingResultRepository(repo._db)
+        coaching_repo = CoachingResultRepository(repo.db)
         thresholds = ThresholdConfig()
 
         # Build rep metrics dicts for coaching prompt
-        rep_metric_repo = RepMetricRepository(repo._db)
+        rep_metric_repo = RepMetricRepository(repo.db)
         db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
         rep_metrics_dicts = [
             {

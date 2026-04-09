@@ -79,7 +79,7 @@ def smooth_signal(
     if len(values) < window:
         return values
 
-    return savgol_filter(values, window_length=window, polyorder=polyorder)
+    return savgol_filter(values, window_length=window, polyorder=polyorder)  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
