@@ -230,32 +230,25 @@ async def test_error_handling_sets_failed_status():
     - set status = 'failed'
     - write the error_message
     - increment retry_count
+
+    The initial idempotency check uses status='queued' (non-terminal, so the
+    job proceeds). The re-fetch inside the error handler returns status='processing'
+    to simulate the pipeline having advanced before crashing — 'processing → failed'
+    is a valid SRS transition.
     """
     analysis_id = uuid.uuid4()
-    analysis = make_analysis(status="queued", retry_count=0)
+    # First fetch: idempotency guard — status must be non-terminal so the job runs
+    analysis_queued = make_analysis(status="queued", retry_count=0, analysis_id=analysis_id)
+    # Second fetch (inside error handler): pipeline had advanced to 'processing'
+    analysis_processing = make_analysis(status="processing", retry_count=0, analysis_id=analysis_id)
     redis = AsyncMock()
     ctx = make_ctx(redis)
 
     mock_repo = AsyncMock()
-    mock_repo.get_by_id.return_value = analysis
-    mock_repo.update.return_value = analysis
+    # First call returns queued (idempotency check), second returns processing (error handler)
+    mock_repo.get_by_id.side_effect = [analysis_queued, analysis_processing]
+    mock_repo.update.return_value = analysis_processing
 
-    blast_count = 0
-
-
-    async def fail_on_processing(a: Any) -> Any:
-        nonlocal blast_count
-        blast_count += 1
-        # Raise on the second transition (quality_gate_pending → processing)
-        if a.status == "quality_gate_pending":
-            a.status = "quality_gate_pending"
-            return a
-        # Allow the first update through but explode on the second
-        if blast_count == 2:
-            raise RuntimeError("CV pipeline exploded")
-        return a
-
-    # Instead of that complex side_effect, patch _run_pipeline to raise
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
         return_value=mock_repo,
@@ -275,23 +268,28 @@ async def test_error_handling_sets_failed_status():
         await process_analysis(ctx, analysis_id)
 
     # After exception: status=failed, error_message set, retry_count incremented
-    assert analysis.status == "failed"
-    assert analysis.error_message is not None
-    assert "CV pipeline exploded" in analysis.error_message
-    assert analysis.retry_count == 1
+    assert analysis_processing.status == "failed"
+    assert analysis_processing.error_message is not None
+    assert "CV pipeline exploded" in analysis_processing.error_message
+    assert analysis_processing.retry_count == 1
 
 
 @pytest.mark.asyncio
 async def test_error_handling_retry_count_increments():
-    """retry_count should increment on each failure."""
+    """retry_count should increment on each failure.
+
+    First fetch: queued (non-terminal, job proceeds).
+    Second fetch (error handler): processing (valid source for → failed transition).
+    """
     analysis_id = uuid.uuid4()
-    analysis = make_analysis(status="queued", retry_count=1)
+    analysis_queued = make_analysis(status="queued", retry_count=1, analysis_id=analysis_id)
+    analysis_processing = make_analysis(status="processing", retry_count=1, analysis_id=analysis_id)
     redis = AsyncMock()
     ctx = make_ctx(redis)
 
     mock_repo = AsyncMock()
-    mock_repo.get_by_id.return_value = analysis
-    mock_repo.update.return_value = analysis
+    mock_repo.get_by_id.side_effect = [analysis_queued, analysis_processing]
+    mock_repo.update.return_value = analysis_processing
 
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
@@ -311,7 +309,66 @@ async def test_error_handling_retry_count_increments():
 
         await process_analysis(ctx, analysis_id)
 
-    assert analysis.retry_count == 2
+    assert analysis_processing.retry_count == 2
+    assert analysis_processing.status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# B-045: status transition guard in error handler
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_error_handler_uses_transition_not_direct_assignment():
+    """B-045: the error handler must call transition() rather than directly
+    assigning analysis.status = 'failed', so the guard is enforced.
+
+    We mock transition() and assert it is called with ("processing", "failed").
+    """
+    analysis_id = uuid.uuid4()
+    # Start in "processing" — a non-terminal state that should allow → "failed"
+    analysis = make_analysis(status="processing", retry_count=0)
+    redis = AsyncMock()
+    ctx = make_ctx(redis)
+
+    mock_repo = AsyncMock()
+    mock_repo.get_by_id.return_value = analysis
+    mock_repo.update.return_value = analysis
+
+    transition_calls: list[tuple[str, str]] = []
+
+    def recording_transition(current: str, target: str) -> str:
+        transition_calls.append((current, target))
+        # Delegate to real transition to also validate the call is valid
+        from app.services.status import transition as _real_transition
+
+        return _real_transition(current, target)
+
+    with patch(
+        "app.workers.analysis_worker.AnalysisRepository",
+        return_value=mock_repo,
+    ), patch(
+        "app.workers.analysis_worker.async_session",
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        side_effect=RuntimeError("pipeline exploded"),
+    ), patch(
+        "app.workers.analysis_worker.transition",
+        side_effect=recording_transition,
+    ):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory.return_value = mock_session
+
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, analysis_id)
+
+    # transition() must have been called to move status → "failed"
+    assert any(target == "failed" for _, target in transition_calls), (
+        f"transition() was never called with target='failed'. Calls: {transition_calls}"
+    )
     assert analysis.status == "failed"
 
 

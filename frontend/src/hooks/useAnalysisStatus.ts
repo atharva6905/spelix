@@ -18,8 +18,8 @@ import {
 
 export const STATUS_LABELS: Record<AnalysisStatus, string> = {
   queued: "Preparing to analyse…",
-  quality_gate_pending: "Checking video quality…",
-  quality_gate_rejected: "Video quality check failed",
+  quality_gate_pending: "Preparing to analyse…",
+  quality_gate_rejected: "Video could not be processed",
   processing: "Analysing your form…",
   coaching: "Generating coaching feedback…",
   completed: "Analysis complete",
