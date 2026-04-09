@@ -1,4 +1,4 @@
-"""ARQ worker — analysis pipeline entry point (B-011 skeleton, B-022 wired).
+"""ARQ worker — analysis pipeline entry point.
 
 Implements FR-UPLD-18 (async processing), NFR-RELI-01 through NFR-RELI-04
 (reliability: idempotent, error handling, retry limit, heartbeat),
@@ -16,19 +16,21 @@ import os
 import uuid
 from typing import Any
 
+import anthropic
 
-import anthropic  # noqa: F401 — used at runtime in _run_pipeline
-
-from app.config import ThresholdConfig  # noqa: F401
-from app.cv.artifact_generation import cleanup_temp_files
+from app.config import ThresholdConfig
+from app.cv.artifact_generation import (
+    cleanup_temp_files,
+)
 from app.db import async_session
-from app.models.coaching_result import CoachingResult  # noqa: F401
+from app.models.coaching_result import CoachingResult
 from app.repositories.analysis import AnalysisRepository
-from app.repositories.coaching_result import CoachingResultRepository  # noqa: F401
+from app.repositories.coaching_result import CoachingResultRepository
 from app.repositories.rep_metric import RepMetricRepository
-from app.services.coaching import CoachingService  # noqa: F401
+from app.services.coaching import CoachingService
 from app.services.pipeline import QualityGateRejection, run_cv_pipeline
 from app.services.status import transition
+from app.services.summary import SummaryService
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ _HEARTBEAT_TTL = 90  # seconds
 
 
 # ---------------------------------------------------------------------------
-# Internal pipeline — wired to real CV pipeline (B-022)
+# Internal pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -143,6 +145,26 @@ async def _run_pipeline(
         await _write_heartbeat(redis)
 
         # ------------------------------------------------------------------ #
+        # Summary metrics (B-030): compute and store summary_json
+        # ------------------------------------------------------------------ #
+        summary_svc = SummaryService(repo, rep_metric_repo)
+        await summary_svc.compute_and_store(analysis_id)
+        await _write_heartbeat(redis)
+
+        # ------------------------------------------------------------------ #
+        # PDF generation (B-035): render report, upload to Storage
+        # ------------------------------------------------------------------ #
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=coaching_output,
+            rep_metrics_dicts=rep_metrics_dicts,
+            storage_client=storage_client,
+            repo=repo,
+        )
+        await _write_heartbeat(redis)
+
+        # ------------------------------------------------------------------ #
         # Transition: coaching → completed
         # ------------------------------------------------------------------ #
         analysis.status = transition(analysis.status, "completed")
@@ -163,7 +185,7 @@ async def _run_pipeline(
 
 async def _write_heartbeat(redis: Any) -> None:
     """Write the operator heartbeat key with a 90-second TTL (NFR-OPER-02)."""
-    await redis.set(_HEARTBEAT_KEY, "1", ex=_HEARTBEAT_TTL)
+    await redis.set(_HEARTBEAT_KEY, "alive", ex=_HEARTBEAT_TTL)
 
 
 def _is_terminal(status: str, retry_count: int) -> bool:
@@ -173,6 +195,74 @@ def _is_terminal(status: str, retry_count: int) -> bool:
     if status == "failed" and retry_count >= 3:
         return True
     return False
+
+
+_STORAGE_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "videos")
+
+
+async def _generate_and_upload_pdf(
+    *,
+    analysis_id: uuid.UUID,
+    analysis: Any,
+    coaching_output: Any,
+    rep_metrics_dicts: list[dict],
+    storage_client: Any,
+    repo: AnalysisRepository,
+) -> None:
+    """Generate PDF report, upload to Storage, and write pdf_path to DB."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from app.cv.artifact_generation import (
+        get_artifact_storage_path,
+        get_temp_dir,
+        upload_artifact,
+    )
+    from app.cv.confidence import confidence_label
+    from app.services.pdf import PDFService
+
+    loop = asyncio.get_event_loop()
+    tmp_dir = get_temp_dir(analysis_id)
+    pdf_local = os.path.join(tmp_dir, "report.pdf")
+    plot_local = os.path.join(tmp_dir, "angles.png")
+
+    conf_score = analysis.confidence_score or 0.0
+    conf_label = confidence_label(conf_score)
+
+    coaching_dict = coaching_output.model_dump() if hasattr(coaching_output, "model_dump") else coaching_output
+
+    context = {
+        "date": datetime.now(UTC).strftime("%Y-%m-%d"),
+        "exercise_type": analysis.exercise_type,
+        "exercise_variant": analysis.exercise_variant,
+        "confidence_score": conf_score,
+        "confidence_label": conf_label,
+        "rep_count": len(rep_metrics_dicts),
+        "rep_metrics": rep_metrics_dicts,
+        "coaching": coaching_dict,
+        "plot_path": plot_local if os.path.isfile(plot_local) else None,
+        "quality_gate_result": analysis.quality_gate_result,
+        "disclaimer": (
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+    }
+
+    try:
+        pdf_svc = PDFService()
+        await loop.run_in_executor(None, pdf_svc.generate_pdf, context, pdf_local)
+
+        if storage_client is not None:
+            pdf_storage = get_artifact_storage_path(analysis_id, "report.pdf")
+            await upload_artifact(storage_client, _STORAGE_BUCKET, pdf_local, pdf_storage)
+            analysis.pdf_path = pdf_storage
+            await repo.update(analysis)
+            logger.info("PDF uploaded for analysis %s → %s", analysis_id, pdf_storage)
+        else:
+            analysis.pdf_path = pdf_local
+            await repo.update(analysis)
+    except Exception:
+        logger.exception("PDF generation failed for analysis %s — continuing", analysis_id)
 
 
 # ---------------------------------------------------------------------------

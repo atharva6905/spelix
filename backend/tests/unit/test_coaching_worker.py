@@ -152,6 +152,12 @@ async def test_coaching_wired_produces_completed_status():
         "app.workers.analysis_worker.ThresholdConfig",
     ), patch(
         "app.workers.analysis_worker.cleanup_temp_files",
+    ), patch(
+        "app.workers.analysis_worker.SummaryService",
+        return_value=AsyncMock(compute_and_store=AsyncMock(return_value={})),
+    ), patch(
+        "app.workers.analysis_worker._generate_and_upload_pdf",
+        new_callable=AsyncMock,
     ):
         # Configure coaching service mock
         mock_svc_instance = AsyncMock()

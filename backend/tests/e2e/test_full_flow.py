@@ -205,6 +205,9 @@ async def test_worker_full_pipeline_flow():
     mock_rep.metrics_json = {"depth_angle": 85.0, "knee_angle_at_depth": 90.0}
     mock_rep_repo.get_by_analysis.return_value = [mock_rep]
 
+    mock_summary_svc = AsyncMock()
+    mock_summary_svc.compute_and_store.return_value = {}
+
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
         return_value=mock_repo,
@@ -227,6 +230,12 @@ async def test_worker_full_pipeline_flow():
         "app.workers.analysis_worker.ThresholdConfig",
     ), patch(
         "app.workers.analysis_worker.cleanup_temp_files",
+    ), patch(
+        "app.workers.analysis_worker.SummaryService",
+        return_value=mock_summary_svc,
+    ), patch(
+        "app.workers.analysis_worker._generate_and_upload_pdf",
+        new_callable=AsyncMock,
     ):
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)

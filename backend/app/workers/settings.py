@@ -10,6 +10,8 @@ Configuration per CLAUDE.md / backend/CLAUDE.md:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 
 from arq.connections import RedisSettings
@@ -18,17 +20,39 @@ from arq.cron import cron
 from app.workers.analysis_worker import process_analysis
 from app.workers.cleanup import cleanup_expired_artifacts
 
+logger = logging.getLogger(__name__)
 
-async def on_startup(ctx: dict) -> None:  # noqa: ARG001
-    """Initialise shared resources that worker jobs can read from ctx."""
-    # DB session factory is imported directly in process_analysis via async_session.
-    # No additional startup work needed for the skeleton — real steps (B-012+) may
-    # add Supabase Storage client, threshold config load, etc. here.
+_HEARTBEAT_KEY = "spelix:worker:heartbeat"
+_HEARTBEAT_TTL = 90
+_HEARTBEAT_INTERVAL = 30
 
 
-async def on_shutdown(ctx: dict) -> None:  # noqa: ARG001
-    """Tear down shared resources on worker shutdown."""
-    # Placeholder — real cleanup (close HTTP clients, etc.) added in later tasks.
+async def _heartbeat_loop(redis: object) -> None:
+    """Write heartbeat every 30s with 90s TTL (NFR-OPER-02)."""
+    while True:
+        try:
+            await redis.set(_HEARTBEAT_KEY, "alive", ex=_HEARTBEAT_TTL)  # type: ignore[union-attr]
+        except Exception:
+            logger.warning("Failed to write worker heartbeat")
+        await asyncio.sleep(_HEARTBEAT_INTERVAL)
+
+
+async def on_startup(ctx: dict) -> None:
+    """Start continuous heartbeat loop."""
+    ctx["_heartbeat_task"] = asyncio.create_task(_heartbeat_loop(ctx["redis"]))
+    logger.info("Worker started — heartbeat loop active")
+
+
+async def on_shutdown(ctx: dict) -> None:
+    """Cancel heartbeat task on worker shutdown."""
+    task = ctx.get("_heartbeat_task")
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    logger.info("Worker shutdown — heartbeat loop stopped")
 
 
 class WorkerSettings:

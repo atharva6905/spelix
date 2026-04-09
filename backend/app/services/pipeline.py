@@ -19,7 +19,6 @@ from typing import Any
 import numpy as np
 
 from app.cv.artifact_generation import (
-    cleanup_temp_files,
     generate_angle_plot,
     generate_annotated_video,
     get_artifact_storage_path,
@@ -380,10 +379,8 @@ async def run_cv_pipeline(
         except Exception as e:
             logger.warning("Failed to delete source video from Storage: %s", e)
 
-    # ------------------------------------------------------------------ #
-    # Step 13: Delete local temp files
-    # ------------------------------------------------------------------ #
-    cleanup_temp_files(analysis_id)
+    # Local temp files are cleaned up by the worker's finally block,
+    # not here — PDF generation needs the local plot file after pipeline returns.
 
     return result
 
