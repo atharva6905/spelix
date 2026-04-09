@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "22"
   DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/spelix_test"
