@@ -35,7 +35,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: ["uv", "run", "arq", "app.workers.settings.WorkerSettings"]
+    command: ["uv", "run", "--no-dev", "python", "-m", "app.workers.settings"]
     env_file:
       - .env.prod
     depends_on:
