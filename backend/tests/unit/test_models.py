@@ -4,10 +4,10 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models import Analysis, CoachingResult, RepMetric, UserProfile, VALID_STATUSES, Base
+from app.models import Analysis, CoachingResult, RepMetric, UserProfile, VALID_STATUSES
 
 
 @pytest_asyncio.fixture

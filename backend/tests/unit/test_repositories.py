@@ -9,10 +9,9 @@ Run: cd backend && uv run pytest tests/unit/test_repositories.py -x -v
 """
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from uuid import UUID
 
-import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
