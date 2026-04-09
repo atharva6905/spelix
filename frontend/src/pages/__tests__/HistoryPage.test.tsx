@@ -111,14 +111,11 @@ describe("HistoryPage", () => {
 
   // TDD gate 1: list items appear
   it("test_list_renders — renders analysis list items", async () => {
-    vi.mocked(listAnalyses).mockResolvedValue({
-      items: [
-        makeListItem({ id: "a1", exercise_type: "squat", exercise_variant: "high_bar" }),
-        makeListItem({ id: "a2", exercise_type: "bench", exercise_variant: "flat", status: "processing", confidence_score: null }),
-        makeListItem({ id: "a3", exercise_type: "deadlift", exercise_variant: "conventional", confidence_score: 0.62 }),
-      ],
-      total: 3,
-    });
+    vi.mocked(listAnalyses).mockResolvedValue([
+      makeListItem({ id: "a1", exercise_type: "squat", exercise_variant: "high_bar" }),
+      makeListItem({ id: "a2", exercise_type: "bench", exercise_variant: "flat", status: "processing", confidence_score: null }),
+      makeListItem({ id: "a3", exercise_type: "deadlift", exercise_variant: "conventional", confidence_score: 0.62 }),
+    ]);
 
     renderHistoryPage();
 
@@ -148,7 +145,7 @@ describe("HistoryPage", () => {
   });
 
   it("renders empty state when no analyses", async () => {
-    vi.mocked(listAnalyses).mockResolvedValue({ items: [], total: 0 });
+    vi.mocked(listAnalyses).mockResolvedValue([]);
 
     renderHistoryPage();
 
@@ -179,10 +176,7 @@ describe("HistoryPage", () => {
   });
 
   it("shows insights placeholder when insights endpoints return 404", async () => {
-    vi.mocked(listAnalyses).mockResolvedValue({
-      items: [makeListItem()],
-      total: 1,
-    });
+    vi.mocked(listAnalyses).mockResolvedValue([makeListItem()]);
 
     renderHistoryPage();
 
@@ -199,10 +193,7 @@ describe("HistoryPage", () => {
   });
 
   it("shows insights when endpoints succeed", async () => {
-    vi.mocked(listAnalyses).mockResolvedValue({
-      items: [makeListItem()],
-      total: 1,
-    });
+    vi.mocked(listAnalyses).mockResolvedValue([makeListItem()]);
     vi.mocked(getExerciseInsights).mockResolvedValue(mockExerciseInsights);
     vi.mocked(getGlobalInsights).mockResolvedValue(mockGlobalInsights);
 

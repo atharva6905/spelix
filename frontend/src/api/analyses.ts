@@ -218,10 +218,7 @@ export interface AnalysisListItem {
   created_at: string;
 }
 
-export interface AnalysisListResponse {
-  items: AnalysisListItem[];
-  total: number;
-}
+export type AnalysisListResponse = AnalysisListItem[];
 
 /**
  * GET /api/v1/analyses
@@ -229,13 +226,13 @@ export interface AnalysisListResponse {
  * Requirements: FR-HIST-01
  */
 export async function listAnalyses(
-  page = 1,
-  pageSize = 20,
+  limit = 50,
+  offset = 0,
 ): Promise<AnalysisListResponse> {
   const token = await getAuthToken();
   const params = new URLSearchParams({
-    page: String(page),
-    page_size: String(pageSize),
+    limit: String(limit),
+    offset: String(offset),
   });
   const resp = await fetch(`${API_BASE}/api/v1/analyses?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },

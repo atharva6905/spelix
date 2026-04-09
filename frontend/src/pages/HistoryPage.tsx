@@ -222,7 +222,7 @@ export default function HistoryPage() {
       try {
         const data = await listAnalyses();
         if (!cancelled) {
-          setItems(data.items);
+          setItems(data);
         }
       } catch (err) {
         if (!cancelled) {
