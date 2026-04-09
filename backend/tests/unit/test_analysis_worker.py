@@ -432,3 +432,331 @@ async def test_heartbeat_written_during_job():
         assert "ex" in all_kwargs or "px" in all_kwargs, (
             f"Heartbeat set() call had no TTL. kwargs={all_kwargs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# B-067 / B-069: Heartbeat TTL exact value
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_ttl_is_90_seconds():
+    """Redis key 'spelix:worker:heartbeat' must be set with ex=90 exactly (NFR-OPER-02)."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis(status="queued")
+    redis = AsyncMock()
+    ctx = make_ctx(redis)
+
+    mock_repo = AsyncMock()
+    mock_repo.get_by_id.return_value = analysis
+    mock_repo.update.return_value = analysis
+
+    with patch(
+        "app.workers.analysis_worker.AnalysisRepository",
+        return_value=mock_repo,
+    ), patch(
+        "app.workers.analysis_worker.async_session",
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        new_callable=AsyncMock,
+    ):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory.return_value = mock_session
+
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, analysis_id)
+
+    calls = redis.set.call_args_list
+    heartbeat_calls = [
+        c for c in calls if c.args and c.args[0] == "spelix:worker:heartbeat"
+    ]
+    assert heartbeat_calls, "Heartbeat key was never written"
+    hb_call = heartbeat_calls[0]
+    assert hb_call.kwargs.get("ex") == 90, (
+        f"Expected ex=90, got ex={hb_call.kwargs.get('ex')}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# B-069: _build_supabase_client
+# ---------------------------------------------------------------------------
+
+
+def test_build_supabase_client_returns_client_when_env_set():
+    """_build_supabase_client returns a Supabase client when URL and key are set."""
+    mock_client = MagicMock()
+
+    # create_client is imported locally inside the function body via
+    # `from supabase import create_client`, so patch it at the source.
+    with patch.dict(
+        "os.environ",
+        {
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SERVICE_ROLE_KEY": "service-role-key-value",
+        },
+    ), patch(
+        "supabase.create_client",
+        return_value=mock_client,
+    ) as mock_create:
+        from app.workers.analysis_worker import _build_supabase_client
+
+        result = _build_supabase_client()
+
+    assert result is mock_client
+    mock_create.assert_called_once_with(
+        "https://example.supabase.co", "service-role-key-value"
+    )
+
+
+def test_build_supabase_client_returns_none_when_url_missing():
+    """_build_supabase_client returns None when SUPABASE_URL is absent."""
+    env_without_url = {k: v for k, v in __import__("os").environ.items()
+                       if k not in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")}
+    with patch.dict("os.environ", env_without_url, clear=True):
+        from app.workers.analysis_worker import _build_supabase_client
+
+        result = _build_supabase_client()
+
+    assert result is None
+
+
+def test_build_supabase_client_returns_none_when_key_missing():
+    """_build_supabase_client returns None when SUPABASE_SERVICE_ROLE_KEY is absent."""
+    env_without_key = {k: v for k, v in __import__("os").environ.items()
+                       if k not in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")}
+    env_without_key["SUPABASE_URL"] = "https://example.supabase.co"
+    with patch.dict("os.environ", env_without_key, clear=True):
+        from app.workers.analysis_worker import _build_supabase_client
+
+        result = _build_supabase_client()
+
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# B-069: analysis-disappeared guard in error handler
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_error_handler_returns_early_when_analysis_disappears():
+    """If repo.get_by_id returns None during error handling, function returns early
+    without crashing (analysis deleted mid-job scenario).
+    """
+    analysis_id = uuid.uuid4()
+    # First fetch (idempotency guard): non-terminal, job proceeds
+    analysis_queued = make_analysis(status="queued", retry_count=0, analysis_id=analysis_id)
+    redis = AsyncMock()
+    ctx = make_ctx(redis)
+
+    mock_repo = AsyncMock()
+    # First call returns the queued analysis; second call (in error handler) returns None
+    mock_repo.get_by_id.side_effect = [analysis_queued, None]
+
+    with patch(
+        "app.workers.analysis_worker.AnalysisRepository",
+        return_value=mock_repo,
+    ), patch(
+        "app.workers.analysis_worker.async_session",
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        side_effect=RuntimeError("pipeline crashed"),
+    ):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory.return_value = mock_session
+
+        from app.workers.analysis_worker import process_analysis
+
+        # Must not raise even though analysis disappeared mid-job
+        await process_analysis(ctx, analysis_id)
+
+    # update() must not have been called — nothing to update
+    mock_repo.update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# B-068: _generate_and_upload_pdf isolation
+#
+# All symbols used inside _generate_and_upload_pdf are imported locally
+# (inside the function body), so they must be patched at their SOURCE
+# module paths, not at app.workers.analysis_worker.*.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_success():
+    """Success path: PDF generated and uploaded; pdf_path set on analysis and repo updated."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = "high_bar"
+    analysis.confidence_score = 0.85
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {"summary": "Good form"}
+
+    storage_client = MagicMock()
+    pdf_storage_path = f"artifacts/{analysis_id}/report.pdf"
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value="/tmp/spelix/test",
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=pdf_storage_path,
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+    ) as mock_upload, patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=storage_client,
+            repo=mock_repo,
+        )
+
+    assert analysis.pdf_path == pdf_storage_path
+    mock_repo.update.assert_called_once_with(analysis)
+    mock_upload.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_generation_exception_does_not_propagate():
+    """PDF generation exception is caught/logged; does not propagate; analysis not marked failed."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "deadlift"
+    analysis.exercise_variant = "conventional"
+    analysis.confidence_score = 0.70
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value="/tmp/spelix/test",
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="Medium",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        # run_in_executor raises to simulate PDF generation failure
+        mock_loop.run_in_executor = AsyncMock(
+            side_effect=RuntimeError("WeasyPrint failed")
+        )
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        # Must not raise
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=MagicMock(),
+            repo=mock_repo,
+        )
+
+    # Analysis must not have been transitioned to failed
+    assert analysis.status != "failed"
+    # repo.update must not have been called (exception before the update)
+    mock_repo.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_upload_failure_keeps_local_path():
+    """When storage upload raises, exception is caught; pdf_path is set to local path."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "bench"
+    analysis.exercise_variant = "flat"
+    analysis.confidence_score = 0.60
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    storage_client = MagicMock()
+    tmp_dir = "/tmp/spelix/test"
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value=tmp_dir,
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("Supabase Storage unreachable"),
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=f"artifacts/{analysis_id}/report.pdf",
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="Medium",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        # Must not raise
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=storage_client,
+            repo=mock_repo,
+        )
+
+    # Exception is caught; analysis not failed
+    assert analysis.status != "failed"
