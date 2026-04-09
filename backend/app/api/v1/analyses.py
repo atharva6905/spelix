@@ -52,7 +52,7 @@ def _make_storage_service() -> StorageService:
     the module-level ``_get_service`` is patched directly.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
     if supabase_url and supabase_key:
 

@@ -524,3 +524,68 @@ class TestAdminService:
 
         assert len(results) == 1
         assert results[0].confidence_score == 0.30
+
+
+# ---------------------------------------------------------------------------
+# B-060: Admin health endpoint Redis injection
+# ---------------------------------------------------------------------------
+
+
+class TestAdminRedisInjection:
+    """Verify that _get_service passes Redis to AdminService (B-060)."""
+
+    def test_health_endpoint_receives_real_queue_depth(self, admin_client: TestClient):
+        """Health endpoint returns actual queue_depth from Redis, not hardcoded 0."""
+        health_data = {
+            "queue_depth": 3,
+            "worker_heartbeat": True,
+            "db_ok": True,
+        }
+
+        with patch("app.api.v1.admin.AdminService") as MockService:
+            instance = AsyncMock()
+            instance.get_health.return_value = health_data
+            MockService.return_value = instance
+
+            resp = admin_client.get("/api/v1/admin/health")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["queue_depth"] == 3
+        assert body["worker_heartbeat"] is True
+
+    @pytest.mark.asyncio
+    async def test_admin_service_get_health_with_redis_injected(self):
+        """AdminService.get_health reads actual queue depth when Redis is wired."""
+        from app.services.admin import AdminService
+
+        mock_db = AsyncMock()
+        mock_execute_result = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_execute_result)
+
+        mock_redis = AsyncMock()
+        mock_redis.llen = AsyncMock(return_value=5)
+        mock_redis.get = AsyncMock(return_value="1")
+
+        service = AdminService(db=mock_db, redis=mock_redis)
+        health = await service.get_health()
+
+        assert health["queue_depth"] == 5
+        assert health["worker_heartbeat"] is True
+        mock_redis.llen.assert_called_once_with("arq:queue")
+        mock_redis.get.assert_called_once_with("spelix:worker:heartbeat")
+
+    @pytest.mark.asyncio
+    async def test_admin_service_get_health_without_redis_returns_defaults(self):
+        """When Redis is None (not injected), queue_depth=0 and heartbeat=False."""
+        from app.services.admin import AdminService
+
+        mock_db = AsyncMock()
+        mock_execute_result = MagicMock()
+        mock_db.execute = AsyncMock(return_value=mock_execute_result)
+
+        service = AdminService(db=mock_db, redis=None)
+        health = await service.get_health()
+
+        assert health["queue_depth"] == 0
+        assert health["worker_heartbeat"] is False

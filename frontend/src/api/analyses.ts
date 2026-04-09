@@ -133,6 +133,11 @@ async function getAuthToken(): Promise<string> {
   return token;
 }
 
+export async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return { Authorization: `Bearer ${token}` };
+}
+
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
@@ -157,6 +162,25 @@ export async function createAnalysis(
   }
 
   return resp.json() as Promise<CreateAnalysisResponse>;
+}
+
+/**
+ * POST /api/v1/analyses/{id}/start
+ * Triggers the analysis pipeline after TUS upload completes.
+ * Requirements: FR-UPLD-08
+ */
+export async function startAnalysis(
+  id: string,
+): Promise<{ id: string; status: string }> {
+  const response = await fetch(`${API_BASE}/api/v1/analyses/${id}/start`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message ?? "Failed to start analysis");
+  }
+  return response.json() as Promise<{ id: string; status: string }>;
 }
 
 /**

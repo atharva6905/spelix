@@ -1,7 +1,8 @@
 """
 Quality gates for Phase 0 CV pipeline (FR-CVPL-03 through FR-CVPL-11).
 
-All functions are pure — no side effects, no DB, no IO.
+All functions are pure — no side effects, no DB, no IO (except check_video_file
+which shells out to ffprobe).
 Landmark arrays: shape (33, 5) per frame — [x, y, z, visibility, presence].
 
 MediaPipe gotcha: visibility/presence values may be pre-sigmoid logits
@@ -12,6 +13,7 @@ See GitHub #4411, #4462.
 from __future__ import annotations
 
 import math
+import subprocess
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +39,45 @@ _LANDMARK_VISIBLE_THRESHOLD: float = 0.50
 _COL_X = 0
 _COL_Y = 1
 _COL_VISIBILITY = 3
+
+# Video file gate — maximum duration in seconds (FR-UPLD-02)
+_MAX_VIDEO_DURATION_S: float = 120.0
+
+# Single-person gate — hip landmark jump threshold as fraction of frame width
+_HIP_JUMP_THRESHOLD: float = 0.15
+_HIP_LANDMARKS: list[int] = [23, 24]  # left hip, right hip
+_MAX_JUMP_COUNT: int = 2
+
+# Resolution gate — minimum dimension in pixels (FR-CVPL-07)
+_MIN_RESOLUTION_DIM: int = 720
+
+# Occlusion warning — per-exercise landmark map
+_EXERCISE_LANDMARKS: dict[str, dict[int, str]] = {
+    "squat": {
+        23: "left hip",
+        24: "right hip",
+        25: "left knee",
+        26: "right knee",
+        27: "left ankle",
+        28: "right ankle",
+    },
+    "deadlift": {
+        23: "left hip",
+        24: "right hip",
+        25: "left knee",
+        26: "right knee",
+        27: "left ankle",
+        28: "right ankle",
+    },
+    "bench": {
+        11: "left shoulder",
+        12: "right shoulder",
+        13: "left elbow",
+        14: "right elbow",
+        15: "left wrist",
+        16: "right wrist",
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +114,81 @@ class QualityGateResult:
 def sigmoid(x: float) -> float:
     """Numerically stable logistic sigmoid: 1 / (1 + exp(-x))."""
     return 1.0 / (1.0 + math.exp(-float(x)))
+
+
+# ---------------------------------------------------------------------------
+# Gate P0-00: Video file validation (FFprobe) — FR-UPLD-14, FR-UPLD-02
+# ---------------------------------------------------------------------------
+
+
+def check_video_file(video_path: str) -> GateCheckResult:
+    """Validate video file using FFprobe — check codec readability and duration.
+
+    Gate P0-00: FR-UPLD-14 (corrupt/unsupported), FR-UPLD-02 (duration max 120s).
+
+    Parameters
+    ----------
+    video_path:
+        Absolute path to the video file.
+
+    Returns
+    -------
+    GateCheckResult
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return GateCheckResult(
+                passed=False,
+                name="video_file_check",
+                level="error",
+                metric_value=0.0,
+                threshold=0.0,
+                user_message="Video file appears corrupt or unsupported. Please re-export and try again.",
+            )
+
+        duration = float(result.stdout.strip())
+        if duration > _MAX_VIDEO_DURATION_S:
+            return GateCheckResult(
+                passed=False,
+                name="video_duration",
+                level="error",
+                metric_value=duration,
+                threshold=_MAX_VIDEO_DURATION_S,
+                user_message=f"Video exceeds maximum duration of {int(_MAX_VIDEO_DURATION_S)} seconds.",
+            )
+
+        return GateCheckResult(
+            passed=True,
+            name="video_file_check",
+            level="error",
+            metric_value=duration,
+            threshold=_MAX_VIDEO_DURATION_S,
+            user_message="",
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return GateCheckResult(
+            passed=False,
+            name="video_file_check",
+            level="error",
+            metric_value=0.0,
+            threshold=0.0,
+            user_message="Video file appears corrupt or unsupported. Please re-export and try again.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +339,132 @@ def check_framing(
 
 
 # ---------------------------------------------------------------------------
+# Gate 3: Single person (FR-CVPL-06)
+# ---------------------------------------------------------------------------
+
+
+def check_single_person(
+    landmarks_per_frame: list[np.ndarray],
+    frame_width: int,
+) -> GateCheckResult:
+    """Reject if hip landmark centroids show discontinuous jumps suggesting
+    multiple people.
+
+    MediaPipe processes one person at a time — large centroid jumps indicate
+    tracking switched subjects.
+
+    Parameters
+    ----------
+    landmarks_per_frame:
+        List of (33, 5) arrays, one per frame.
+    frame_width:
+        Frame width in pixels.
+
+    Returns
+    -------
+    GateCheckResult
+    """
+    max_frames = min(10, len(landmarks_per_frame))
+
+    jump_count = 0
+    for i in range(1, max_frames):
+        prev = landmarks_per_frame[i - 1]
+        curr = landmarks_per_frame[i]
+        for lm_idx in _HIP_LANDMARKS:
+            prev_x = prev[lm_idx, _COL_X] * frame_width
+            curr_x = curr[lm_idx, _COL_X] * frame_width
+            if abs(curr_x - prev_x) > _HIP_JUMP_THRESHOLD * frame_width:
+                jump_count += 1
+                break
+
+    passed = jump_count < _MAX_JUMP_COUNT
+    return GateCheckResult(
+        passed=passed,
+        name="single_person",
+        level="error",
+        metric_value=float(jump_count),
+        threshold=float(_MAX_JUMP_COUNT),
+        user_message="" if passed else "Multiple people detected — please film alone.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gate 4: Minimum resolution (FR-CVPL-07)
+# ---------------------------------------------------------------------------
+
+
+def check_minimum_resolution(frame_width: int, frame_height: int) -> GateCheckResult:
+    """Reject if video resolution is below 720p (min dimension < 720).
+
+    Parameters
+    ----------
+    frame_width, frame_height:
+        Pixel dimensions of the source video frame.
+
+    Returns
+    -------
+    GateCheckResult
+    """
+    min_dim = min(frame_width, frame_height)
+    passed = min_dim >= _MIN_RESOLUTION_DIM
+    return GateCheckResult(
+        passed=passed,
+        name="resolution",
+        level="error",
+        metric_value=float(min_dim),
+        threshold=float(_MIN_RESOLUTION_DIM),
+        user_message="" if passed else "Video resolution too low — record at 720p or higher.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gate 5: Occlusion warnings (warning-level, non-rejecting)
+# ---------------------------------------------------------------------------
+
+
+def check_occlusion(
+    landmarks_per_frame: list[np.ndarray],
+    exercise_type: str,
+) -> list[GateCheckResult]:
+    """Check per-landmark visibility and generate warnings for occluded joints.
+
+    This gate never rejects — it produces warning-level results only.
+
+    Parameters
+    ----------
+    landmarks_per_frame:
+        List of (33, 5) arrays, one per frame.
+    exercise_type:
+        ``"squat"``, ``"bench"``, or ``"deadlift"``.
+
+    Returns
+    -------
+    list[GateCheckResult]
+        Warning results for any occluded joints (may be empty).
+    """
+    lm_map = _EXERCISE_LANDMARKS.get(exercise_type, _EXERCISE_LANDMARKS["squat"])
+    warnings: list[GateCheckResult] = []
+    for lm_idx, joint_name in lm_map.items():
+        visibilities = [sigmoid(float(frame[lm_idx, _COL_VISIBILITY])) for frame in landmarks_per_frame]
+        mean_vis = float(np.mean(visibilities)) if visibilities else 0.0
+        if mean_vis < _BODY_VISIBILITY_THRESHOLD:
+            warnings.append(
+                GateCheckResult(
+                    passed=True,  # Warning only — does not reject
+                    name=f"occlusion_{joint_name.replace(' ', '_')}",
+                    level="warning",
+                    metric_value=mean_vis,
+                    threshold=_BODY_VISIBILITY_THRESHOLD,
+                    user_message=(
+                        f"{joint_name.title()} alignment could not be assessed"
+                        " — barbell occluded keypoints."
+                    ),
+                )
+            )
+    return warnings
+
+
+# ---------------------------------------------------------------------------
 # Combined runner
 # ---------------------------------------------------------------------------
 
@@ -231,6 +473,8 @@ def run_quality_gates(
     landmarks_per_frame: list[np.ndarray],
     frame_width: int,
     frame_height: int,
+    video_path: str | None = None,
+    exercise_type: str = "squat",
 ) -> QualityGateResult:
     """
     Run all Phase 0 quality gates and return an aggregated result.
@@ -241,6 +485,12 @@ def run_quality_gates(
         List of (33, 5) arrays, one per frame.
     frame_width, frame_height:
         Pixel dimensions of the source video frame.
+    video_path:
+        Optional path to the video file.  When provided, FFprobe-based
+        file validation (duration + codec readability) runs first.
+    exercise_type:
+        Exercise type for occlusion warnings (``"squat"``, ``"bench"``,
+        ``"deadlift"``).  Defaults to ``"squat"``.
 
     Returns
     -------
@@ -248,10 +498,30 @@ def run_quality_gates(
         passed=True only if every gate with level="error" passed.
         status is "passed" or "rejected".
     """
+    checks: list[GateCheckResult] = []
+
+    # Optional: video file validation via FFprobe (runs first if path provided)
+    if video_path is not None:
+        file_check = check_video_file(video_path)
+        checks.append(file_check)
+        if not file_check.passed:
+            # Fail fast — no point running landmark-based gates on a bad file
+            return QualityGateResult(passed=False, status="rejected", checks=checks)
+
+    # Resolution gate (uses frame dimensions, not landmarks)
+    resolution_check = check_minimum_resolution(frame_width, frame_height)
+    checks.append(resolution_check)
+
+    # Landmark-based gates
     visibility_check = check_body_visibility(landmarks_per_frame)
     framing_check = check_framing(landmarks_per_frame, frame_width, frame_height)
+    single_person_check = check_single_person(landmarks_per_frame, frame_width)
 
-    checks = [visibility_check, framing_check]
+    checks.extend([visibility_check, framing_check, single_person_check])
+
+    # Occlusion warnings (non-rejecting)
+    occlusion_warnings = check_occlusion(landmarks_per_frame, exercise_type)
+    checks.extend(occlusion_warnings)
 
     # Overall pass only if no error-level gate failed
     overall_passed = all(c.passed for c in checks if c.level == "error")

@@ -8,28 +8,32 @@
  *               FR-SCOR-09–10, NFR-USAB-03
  */
 
+import { useState } from "react";
 import { useParams, Link } from "react-router";
 import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
 import type { CoachingIssue, RepMetricDetail } from "@/api/analyses";
+import {
+  getConfidenceCategory,
+  type ConfidenceCategory,
+} from "@/lib/confidence";
 
 // ---------------------------------------------------------------------------
 // Confidence helpers — never expose raw decimal (FR-SCOR-09–10, NFR-USAB-03)
 // ---------------------------------------------------------------------------
-
-type ConfidenceCategory = "High" | "Moderate" | "Low" | "Very Low";
-
-function getConfidenceCategory(score: number): ConfidenceCategory {
-  if (score >= 0.8) return "High";
-  if (score >= 0.6) return "Moderate";
-  if (score >= 0.4) return "Low";
-  return "Very Low";
-}
 
 const CONFIDENCE_STYLES: Record<ConfidenceCategory, string> = {
   High: "bg-green-100 text-green-800",
   Moderate: "bg-blue-100 text-blue-800",
   Low: "bg-yellow-100 text-yellow-800",
   "Very Low": "bg-red-100 text-red-800",
+};
+
+// Per-level guidance text — SRS FR-RESL-08
+const CONFIDENCE_GUIDANCE: Record<ConfidenceCategory, string | null> = {
+  High: "Results are reliable.",
+  Moderate: "Partial occlusion detected — some metrics may be less precise.",
+  Low: "Results may be unreliable — try better lighting or camera position.",
+  "Very Low": "Unable to score reliably — please re-record.",
 };
 
 // ---------------------------------------------------------------------------
@@ -121,7 +125,7 @@ function ConfidenceBadge({ score }: ConfidenceBadgeProps) {
 
   const category = getConfidenceCategory(score);
   const styleClass = CONFIDENCE_STYLES[category];
-  const isLowConfidence = category === "Low" || category === "Very Low";
+  const guidance = CONFIDENCE_GUIDANCE[category];
 
   return (
     <div className="space-y-2">
@@ -131,15 +135,19 @@ function ConfidenceBadge({ score }: ConfidenceBadgeProps) {
       >
         Confidence: {category}
       </span>
-      {isLowConfidence && (
+      {guidance !== null && (
         <div
-          role="alert"
-          className="rounded-md bg-yellow-50 px-4 py-3 text-sm text-yellow-800"
-          data-testid="low-confidence-banner"
+          role={category === "Low" || category === "Very Low" ? "alert" : undefined}
+          className={`rounded-md px-4 py-3 text-sm ${
+            category === "Low" || category === "Very Low"
+              ? "bg-yellow-50 text-yellow-800"
+              : category === "Moderate"
+                ? "bg-blue-50 text-blue-700"
+                : "bg-green-50 text-green-700"
+          }`}
+          data-testid="confidence-guidance"
         >
-          <strong>Heads up:</strong> The tracking confidence for this analysis
-          is {category.toLowerCase()}. Results may be less accurate — ensure
-          your full body is visible and well-lit when recording.
+          {guidance}
         </div>
       )}
     </div>
@@ -151,11 +159,17 @@ interface RepMetricsTableProps {
 }
 
 function RepMetricsTable({ repMetrics }: RepMetricsTableProps) {
+  const [sortAsc, setSortAsc] = useState(true);
+
   if (repMetrics.length === 0) {
     return (
       <p className="text-sm text-gray-500">No rep data available.</p>
     );
   }
+
+  const sortedMetrics = [...repMetrics].sort((a, b) =>
+    sortAsc ? a.rep_index - b.rep_index : b.rep_index - a.rep_index,
+  );
 
   return (
     <div className="overflow-x-auto">
@@ -163,7 +177,13 @@ function RepMetricsTable({ repMetrics }: RepMetricsTableProps) {
         <thead className="bg-gray-50">
           <tr>
             <th className="px-4 py-3 text-left font-medium text-gray-500">
-              Rep
+              <button
+                onClick={() => setSortAsc(!sortAsc)}
+                className="inline-flex items-center gap-1"
+                aria-sort={sortAsc ? "ascending" : "descending"}
+              >
+                Rep {sortAsc ? "▲" : "▼"}
+              </button>
             </th>
             <th className="px-4 py-3 text-left font-medium text-gray-500">
               Start Frame
@@ -177,7 +197,7 @@ function RepMetricsTable({ repMetrics }: RepMetricsTableProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
-          {repMetrics.map((rep) => {
+          {sortedMetrics.map((rep) => {
             const repConfidence =
               rep.confidence_score !== null
                 ? getConfidenceCategory(rep.confidence_score)
@@ -366,7 +386,7 @@ export default function ResultsPage() {
           of analysis.
         </div>
 
-        {/* Header — exercise type + variant (FR-RESL-01a) */}
+        {/* Header — exercise type + variant + rep count + timestamp (FR-RESL-01a) */}
         <div className="rounded-lg bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold text-gray-900">
             {exerciseTypeLabel}{" "}
@@ -377,8 +397,18 @@ export default function ResultsPage() {
           <p className="mt-1 text-sm text-gray-400">
             Analysis ID: {analysis.id}
           </p>
+          <p className="mt-1 text-sm text-gray-400">
+            {analysis.rep_metrics?.length ?? 0} reps ·{" "}
+            {new Date(analysis.created_at).toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
 
-          {/* Confidence badge (FR-SCOR-09–10, NFR-USAB-03) */}
+          {/* Confidence badge + per-level guidance (FR-SCOR-09–10, NFR-USAB-03, FR-RESL-08) */}
           <div className="mt-4">
             <ConfidenceBadge score={analysis.confidence_score} />
           </div>
@@ -399,6 +429,14 @@ export default function ResultsPage() {
             >
               Your browser does not support the video element.
             </video>
+            <a
+              href={analysis.annotated_video_path}
+              download
+              className="mt-2 inline-flex items-center text-sm text-blue-600 hover:underline"
+              data-testid="annotated-video-download"
+            >
+              Download annotated video
+            </a>
           </div>
         )}
 
@@ -465,6 +503,20 @@ export default function ResultsPage() {
               </a>
             )}
           </div>
+        </div>
+
+        {/* Three-tier disclaimer — SRS FR-RESL-11 */}
+        <div data-testid="three-tier-disclaimer" className="rounded-lg bg-white p-6 shadow-sm space-y-3">
+          <h2 className="text-sm font-semibold text-gray-600">Important Information</h2>
+          <p className="text-xs text-gray-500">
+            This analysis is for fitness and performance purposes only and is not medical advice. Consult a qualified healthcare professional before beginning or modifying any exercise program.
+          </p>
+          <p className="text-xs text-gray-500">
+            Generated by automated systems with inherent limitations. Results are probabilistic estimates, not clinical evaluations.
+          </p>
+          <p className="text-xs text-gray-500">
+            Physical exercise carries inherent risk. You assume responsibility for your exercise choices.
+          </p>
         </div>
 
         {/* Back link */}

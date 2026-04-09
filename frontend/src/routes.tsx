@@ -1,6 +1,7 @@
 import { createBrowserRouter } from "react-router";
 import RequireAuth from "@/components/RequireAuth";
 import AppLayout from "@/components/AppLayout";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import AdminPage from "@/pages/AdminPage";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 import HistoryPage from "@/pages/HistoryPage";
@@ -30,7 +31,9 @@ const router = createBrowserRouter([
   {
     element: (
       <RequireAuth>
-        <AppLayout />
+        <ErrorBoundary>
+          <AppLayout />
+        </ErrorBoundary>
       </RequireAuth>
     ),
     children: [

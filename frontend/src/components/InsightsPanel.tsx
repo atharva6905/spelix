@@ -10,19 +10,7 @@
 
 import type { ExerciseInsights, GlobalInsights } from "@/api/insights";
 import TrendChart, { type TrendChartDataPoint } from "@/components/TrendChart";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-type ConfidenceCategory = "High" | "Moderate" | "Low" | "Very Low";
-
-function getConfidenceCategory(score: number): ConfidenceCategory {
-  if (score >= 0.8) return "High";
-  if (score >= 0.6) return "Moderate";
-  if (score >= 0.4) return "Low";
-  return "Very Low";
-}
+import { getConfidenceCategory } from "@/lib/confidence";
 
 /**
  * Build TrendChart data points from a plain array of values.

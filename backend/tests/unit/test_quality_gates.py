@@ -6,6 +6,8 @@ Landmark array shape per frame: (33, 5) — [x, y, z, visibility, presence].
 """
 
 import math
+import subprocess
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -14,6 +16,10 @@ from app.cv.quality_gates import (
     QualityGateResult,
     check_body_visibility,
     check_framing,
+    check_minimum_resolution,
+    check_occlusion,
+    check_single_person,
+    check_video_file,
     run_quality_gates,
     sigmoid,
 )
@@ -351,10 +357,13 @@ class TestRunQualityGates:
         assert result.passed is False
         assert result.status == "rejected"
 
-    def test_checks_list_contains_both_gates(self):
+    def test_checks_list_contains_all_gates(self):
+        # resolution + body_visibility + framing + single_person = 4 error-level gates
         frames = _make_n_frames(visibility=0.9)
         result = run_quality_gates(frames, FRAME_WIDTH, FRAME_HEIGHT)
-        assert len(result.checks) == 2
+        assert len(result.checks) >= 4
+        error_checks = [c for c in result.checks if c.level == "error"]
+        assert len(error_checks) == 4
 
     def test_checks_list_type(self):
         frames = _make_n_frames(visibility=0.9)
@@ -381,3 +390,212 @@ class TestRunQualityGates:
             "visibility" in c.name.lower() or "body" in c.name.lower()
             for c in failed
         )
+
+
+# ---------------------------------------------------------------------------
+# check_video_file (B-051 — FFprobe gate)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckVideoFile:
+    def test_passes_when_duration_within_limit(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "30.0\n"
+        with patch("app.cv.quality_gates.subprocess.run", return_value=mock_result):
+            result = check_video_file("/fake/video.mp4")
+        assert result.passed is True
+        assert result.metric_value == 30.0
+
+    def test_rejects_when_duration_exceeds_limit(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "150.0\n"
+        with patch("app.cv.quality_gates.subprocess.run", return_value=mock_result):
+            result = check_video_file("/fake/video.mp4")
+        assert result.passed is False
+        assert result.metric_value == 150.0
+        assert "120" in result.user_message
+
+    def test_rejects_when_ffprobe_returns_nonzero(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        with patch("app.cv.quality_gates.subprocess.run", return_value=mock_result):
+            result = check_video_file("/fake/corrupt.mp4")
+        assert result.passed is False
+        assert "corrupt" in result.user_message.lower() or "unsupported" in result.user_message.lower()
+
+    def test_rejects_when_ffprobe_not_found(self):
+        with patch(
+            "app.cv.quality_gates.subprocess.run",
+            side_effect=FileNotFoundError("ffprobe not found"),
+        ):
+            result = check_video_file("/fake/video.mp4")
+        assert result.passed is False
+
+    def test_rejects_on_timeout(self):
+        with patch(
+            "app.cv.quality_gates.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ffprobe", timeout=30),
+        ):
+            result = check_video_file("/fake/video.mp4")
+        assert result.passed is False
+
+    def test_level_is_error(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "30.0\n"
+        with patch("app.cv.quality_gates.subprocess.run", return_value=mock_result):
+            result = check_video_file("/fake/video.mp4")
+        assert result.level == "error"
+
+
+# ---------------------------------------------------------------------------
+# check_single_person (B-061)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSinglePerson:
+    def test_passes_with_stable_hip_positions(self):
+        # Hip landmarks at consistent x positions — no large jumps
+        frames = []
+        for _ in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5  # x = 0.5 (normalised)
+            frame[:, 3] = 0.9  # visibility
+            frames.append(frame)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.passed is True
+
+    def test_rejects_with_large_hip_jumps(self):
+        # Alternating hip x positions jumping by 30% of frame width
+        frames = []
+        for i in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5
+            frame[:, 3] = 0.9
+            # Hip landmarks (23, 24) alternate between 0.1 and 0.5 normalised x
+            hip_x = 0.1 if i % 2 == 0 else 0.5
+            frame[23, 0] = hip_x
+            frame[24, 0] = hip_x
+            frames.append(frame)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.passed is False
+
+    def test_level_is_error(self):
+        frames = _make_n_frames(10)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.level == "error"
+
+    def test_name_is_single_person(self):
+        frames = _make_n_frames(5)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.name == "single_person"
+
+    def test_handles_fewer_than_two_frames(self):
+        frames = _make_n_frames(1)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert isinstance(result, GateCheckResult)
+
+
+# ---------------------------------------------------------------------------
+# check_minimum_resolution (B-062)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckMinimumResolution:
+    def test_rejects_640x480(self):
+        result = check_minimum_resolution(640, 480)
+        assert result.passed is False
+
+    def test_passes_1280x720(self):
+        result = check_minimum_resolution(1280, 720)
+        assert result.passed is True
+
+    def test_passes_720x1280_portrait(self):
+        # Portrait 720p — min dimension is 720
+        result = check_minimum_resolution(720, 1280)
+        assert result.passed is True
+
+    def test_passes_1920x1080(self):
+        result = check_minimum_resolution(1920, 1080)
+        assert result.passed is True
+
+    def test_rejects_1280x480_mixed(self):
+        # Min dimension is 480 — below threshold
+        result = check_minimum_resolution(1280, 480)
+        assert result.passed is False
+
+    def test_metric_value_is_min_dimension(self):
+        result = check_minimum_resolution(640, 480)
+        assert result.metric_value == 480.0
+
+    def test_threshold_is_720(self):
+        result = check_minimum_resolution(1280, 720)
+        assert result.threshold == 720.0
+
+    def test_level_is_error(self):
+        result = check_minimum_resolution(640, 480)
+        assert result.level == "error"
+
+    def test_name_is_resolution(self):
+        result = check_minimum_resolution(1280, 720)
+        assert result.name == "resolution"
+
+
+# ---------------------------------------------------------------------------
+# check_occlusion (B-063)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckOcclusion:
+    def _frames_with_low_knee_visibility(self, n: int = 10) -> list[np.ndarray]:
+        """Frames where left knee (25) has very low visibility."""
+        frames = []
+        for _ in range(n):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 3] = 5.0  # high visibility for all
+            frame[25, 3] = -5.0  # left knee: sigmoid(-5) ≈ 0.007 < 0.30
+            frames.append(frame)
+        return frames
+
+    def test_returns_warning_for_occluded_knee(self):
+        frames = self._frames_with_low_knee_visibility()
+        results = check_occlusion(frames, "squat")
+        assert len(results) > 0
+        names = [r.name for r in results]
+        assert any("left_knee" in n for n in names)
+
+    def test_no_warnings_when_all_visible(self):
+        # All landmarks at high visibility
+        frames = _make_n_frames(10, visibility=5.0)
+        results = check_occlusion(frames, "squat")
+        assert results == []
+
+    def test_warnings_are_non_rejecting(self):
+        frames = self._frames_with_low_knee_visibility()
+        results = check_occlusion(frames, "squat")
+        for r in results:
+            assert r.passed is True
+            assert r.level == "warning"
+
+    def test_bench_uses_different_landmarks(self):
+        # Make all squat landmarks invisible, bench landmarks visible
+        frames = []
+        for _ in range(5):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 3] = 5.0
+            # Make squat landmarks (hip/knee/ankle) invisible
+            for idx in [23, 24, 25, 26, 27, 28]:
+                frame[idx, 3] = -5.0
+            frames.append(frame)
+        # For bench, only shoulder/elbow/wrist matter — these are visible
+        results = check_occlusion(frames, "bench")
+        assert results == []
+
+    def test_defaults_to_squat_for_unknown_exercise(self):
+        frames = _make_n_frames(5, visibility=5.0)
+        # Should not raise
+        results = check_occlusion(frames, "unknown_exercise")
+        assert isinstance(results, list)

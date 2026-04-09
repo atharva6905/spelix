@@ -158,11 +158,11 @@ def _build_supabase_client() -> object | None:
     This matches the existing StorageService contract.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_service_key = os.environ.get("SUPABASE_SERVICE_KEY")
+    supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
     if not supabase_url or not supabase_service_key:
         logger.warning(
-            "cleanup_expired_artifacts: SUPABASE_URL or SUPABASE_SERVICE_KEY not set — "
+            "cleanup_expired_artifacts: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set — "
             "StorageService will be inert (tests/local only)"
         )
         return None

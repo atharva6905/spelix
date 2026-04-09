@@ -74,7 +74,7 @@ class StorageService:
         if self._client is None:
             raise RuntimeError(
                 "StorageService has no Supabase client. "
-                "Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables."
+                "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables."
             )
 
         path = f"videos/{analysis_id}/{filename}"
@@ -105,7 +105,7 @@ class StorageService:
         if self._client is None:
             raise RuntimeError(
                 "StorageService has no Supabase client. "
-                "Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables."
+                "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables."
             )
 
         await self._client.storage.from_(self._bucket).remove([path])

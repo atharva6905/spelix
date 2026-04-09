@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentUser, get_admin_user
+from app.api.deps import CurrentUser, get_admin_user, get_redis
 from app.db import get_db
 from app.services.admin import AdminService
 
@@ -63,8 +63,11 @@ class HealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _get_service(db: AsyncSession = Depends(get_db)) -> AdminService:
-    return AdminService(db=db)
+async def _get_service(
+    db: AsyncSession = Depends(get_db),
+    redis: Any = Depends(get_redis),
+) -> AdminService:
+    return AdminService(db=db, redis=redis)
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ import anthropic
 import instructor
 
 from app.config import ThresholdConfig
+from app.cv.confidence import confidence_label
 from app.schemas.coaching import CoachingOutput
 
 logger = logging.getLogger(__name__)
@@ -53,17 +54,6 @@ _BACKOFF_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
-
-
-def _confidence_label(score: float) -> str:
-    """Map a numeric confidence score to a human-readable label."""
-    if score >= 0.90:
-        return "High"
-    if score >= 0.70:
-        return "Moderate"
-    if score >= 0.50:
-        return "Low"
-    return "Very Low"
 
 
 def _build_system_prompt() -> str:
@@ -96,7 +86,7 @@ def _build_user_prompt(
 ) -> str:
     """Build the per-analysis user turn (fresh context, not cached)."""
     rep_count = len(rep_metrics)
-    confidence_label = _confidence_label(confidence_score)
+    confidence_label_str = confidence_label(confidence_score)
 
     # Summarise rep metrics as compact JSON for the model
     metrics_summary = json.dumps(rep_metrics, indent=2)
@@ -110,7 +100,7 @@ def _build_user_prompt(
 
     lines: list[str] = [
         f"Exercise: {exercise_type} — {exercise_variant}",
-        f"Analysis results: {rep_count} reps detected. Confidence: {confidence_label}.",
+        f"Analysis results: {rep_count} reps detected. Confidence: {confidence_label_str}.",
         "",
         f"Per-rep metrics:\n{metrics_summary}",
         "",
@@ -122,7 +112,7 @@ def _build_user_prompt(
         "CORRECTION PLAN (3–5 specific actionable cues), DISCLAIMER (mandatory).",
     ]
 
-    if confidence_label in ("Low", "Very Low"):
+    if confidence_label_str in ("Low", "Very Low"):
         lines.insert(
             2,
             "Note: analysis confidence was low for this session — results should "

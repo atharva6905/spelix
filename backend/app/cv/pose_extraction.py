@@ -108,6 +108,35 @@ def extract_landmarks(
 
 
 # ---------------------------------------------------------------------------
+# Frame extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_frames(video_path: str) -> list[np.ndarray]:
+    """Read all frames from a video file.
+
+    Parameters
+    ----------
+    video_path:
+        Absolute path to the video file (any OpenCV-readable format).
+
+    Returns
+    -------
+    list[np.ndarray]
+        Ordered list of BGR frames as uint8 arrays.
+    """
+    cap = cv2.VideoCapture(video_path)
+    frames: list[np.ndarray] = []
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 

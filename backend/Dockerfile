@@ -31,6 +31,10 @@ COPY . .
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix
 
+# Run as non-root user for security
+RUN useradd -m -r spelix && chown spelix:spelix /tmp/spelix
+USER spelix
+
 EXPOSE 8000
 
 CMD ["uv", "run", "--no-dev", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

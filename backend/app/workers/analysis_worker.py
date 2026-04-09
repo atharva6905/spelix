@@ -50,7 +50,7 @@ _HEARTBEAT_TTL = 90  # seconds
 def _build_supabase_client() -> Any | None:
     """Build a Supabase client from env vars, or None if unconfigured."""
     url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_SERVICE_KEY")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
         return None
     try:
@@ -330,7 +330,7 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
 
             # Force status → failed for any non-terminal state.
             if analysis.status not in _TERMINAL_STATES:
-                analysis.status = "failed"
+                analysis.status = transition(analysis.status, "failed")
 
             await repo.update(analysis)
 

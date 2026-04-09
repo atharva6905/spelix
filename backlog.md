@@ -11,45 +11,14 @@ Items B-012, B-013, B-020, B-022, B-026, B-033, B-034, B-039, B-040, B-041 had a
 
 ---
 
-## Active Backlog — Audit Fixes
+## Completed — Audit Fixes (2026-04-09)
 
-### CRITICAL — Must Fix Before Phase 1
+All 12 CRITICAL and 16 HIGH findings resolved. 28 tasks (B-043–B-070) done.
+Backend: 601 tests, 95% coverage. Frontend: 131 tests, tsc clean. ruff/pyright clean.
 
-| ID | Title | Status | Size | Deps | SRS IDs | Audit Ref | Files |
-|----|-------|--------|------|------|---------|-----------|-------|
-| B-043 | Unify confidence thresholds to SRS values | todo | S | — | FR-RESL-08, FR-CVPL-16, FR-SCOR-10 | C-2, C-9 | `coaching.py`, `ResultsPage.tsx`, `HistoryPage.tsx`, `InsightsPanel.tsx` |
-| B-044 | Implement TUS upload flow in frontend | todo | L | — | FR-UPLD-06, FR-UPLD-08 | C-1 | `UploadPage.tsx`, `package.json` (add `tus-js-client`) |
-| B-045 | Fix status transition bypass in worker error handler | todo | S | — | Sec 5.2a | C-6 | `analysis_worker.py:333` |
-| B-046 | Align env var naming: SUPABASE_SERVICE_ROLE_KEY | todo | S | — | — | C-12 | `.env.example`, `analyses.py`, `storage.py`, `cleanup.py`, `analysis_worker.py` |
-| B-047 | Add three-tier disclaimer to results page | todo | S | — | FR-RESL-11 | C-3 | `ResultsPage.tsx` |
-| B-048 | Add rep count + timestamp to summary card | todo | S | — | FR-RESL-01a | C-4 | `ResultsPage.tsx` |
-| B-049 | Fix Appendix B status label mapping | todo | S | — | Appendix B | C-5 | `useAnalysisStatus.ts` |
-| B-050 | Add video duration validation (40s/2min) | todo | M | — | FR-UPLD-02/03/05 | C-8 | `pipeline.py` or `analysis_worker.py` |
-| B-051 | Add FFprobe codec validation | todo | M | — | FR-UPLD-14 | C-8 | `pipeline.py` |
-| B-052 | Wire actual barbell detection into pipeline | todo | M | — | FR-BDET-01/02/03 | C-7 | `pipeline.py` |
-| B-053 | Write `test_pipeline.py` — pipeline orchestration tests | todo | L | — | — | C-10 | `tests/unit/test_pipeline.py` |
-| B-054 | Add video test fixtures | todo | M | — | — | C-11 | `tests/fixtures/` |
+B-043–B-054 (CRITICAL): confidence thresholds unified, TUS upload implemented, status transition fixed, env vars aligned, three-tier disclaimer added, rep count + timestamp in summary, status labels corrected, duration validation added, FFprobe check added, barbell detection wired, pipeline tests written (90% cov), synthetic video fixtures created.
 
-### HIGH — Should Fix Before Phase 1
-
-| ID | Title | Status | Size | Deps | SRS IDs | Audit Ref | Files |
-|----|-------|--------|------|------|---------|-----------|-------|
-| B-055 | Wrap all routes in ErrorBoundary | todo | S | — | NFR-USAB-09 | H-1 | `routes.tsx`, `App.tsx` |
-| B-056 | Fix upload button disabled state (keyboard) | todo | S | — | FR-XDET-09 | H-2 | `UploadPage.tsx` |
-| B-057 | Add sort control to rep metrics table | todo | S | — | FR-RESL-04 | H-3 | `ResultsPage.tsx` (RepMetricsTable) |
-| B-058 | Add per-level confidence guidance text | todo | S | — | FR-RESL-08 | H-4 | `ResultsPage.tsx` |
-| B-059 | Add annotated video MP4 download link | todo | S | — | FR-RESL-02, FR-XPRT-01 | H-5 | `ResultsPage.tsx` |
-| B-060 | Fix admin health endpoint — inject Redis into AdminService | todo | S | — | FR-ADMN-05 | H-7 | `api/v1/admin.py`, `services/admin.py` |
-| B-061 | Implement single-person quality gate | todo | M | — | FR-CVPL-06 | H-8 | `cv/quality_gates.py` |
-| B-062 | Implement resolution quality gate (≥720p) | todo | S | — | FR-CVPL-07 | H-8 | `cv/quality_gates.py` |
-| B-063 | Add occlusion detection warning | todo | M | — | FR-CVPL-17 | H-9 | `cv/quality_gates.py` or `cv/confidence.py` |
-| B-064 | Add `.dockerignore` | todo | S | — | — | H-10 | `backend/.dockerignore` |
-| B-065 | Add non-root user to Dockerfile | todo | S | — | — | H-11 | `backend/Dockerfile` |
-| B-066 | Add `.env.local` + `.env.*` to `.gitignore` | todo | S | — | — | H-12 | `.gitignore` |
-| B-067 | Test JWKS ES256 auth path | todo | M | — | — | H-13 | `tests/unit/test_auth.py` |
-| B-068 | Test `_generate_and_upload_pdf` in isolation | todo | S | — | — | H-14 | `tests/unit/test_analysis_worker.py` |
-| B-069 | Cover `analysis_worker.py` gaps (70%→90%) | todo | M | — | — | H-15 | `tests/unit/test_analysis_worker.py` |
-| B-070 | Regenerate OpenAPI types from live backend | todo | M | B-044 | — | H-6 | `src/api/types.ts`, `package.json` (add `openapi-typescript` devDep) |
+B-055–B-070 (HIGH): ErrorBoundary wired, button disabled fixed, sortable table added, confidence guidance text per level, video download link, admin Redis injected, single-person gate, resolution gate, occlusion warning, .dockerignore created, non-root Docker user, .gitignore updated, JWKS ES256 tests, PDF isolation tests, worker coverage 92%, OpenAPI types regenerated (1318 lines).
 
 ### MEDIUM — Fix During Phase 1
 

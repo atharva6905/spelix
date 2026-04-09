@@ -340,6 +340,44 @@ class TestCoachingService:
         # Must only call create once — no retries
         assert mock_instructor.chat.completions.create.call_count == 1
 
+    # ---------------------------------------------------------------------------
+    # B-043: confidence label thresholds in prompt
+    # ---------------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "score,expected_label",
+        [
+            (0.81, "High"),
+            (0.80, "High"),
+            (0.66, "Moderate"),
+            (0.65, "Moderate"),
+            (0.51, "Low"),
+            (0.50, "Low"),
+            (0.49, "Very Low"),
+            (0.00, "Very Low"),
+        ],
+    )
+    def test_confidence_label_thresholds_in_prompt(
+        self, score: float, expected_label: str
+    ) -> None:
+        """coaching.py must use confidence_label() from cv.confidence (0.80/0.65/0.50 thresholds).
+
+        B-043: the old private _confidence_label() used 0.90/0.70/0.50, which produced
+        wrong labels (e.g. score=0.66 → "Low" instead of "Moderate").
+        """
+        from app.services.coaching import _build_user_prompt
+
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=[],
+            confidence_score=score,
+            thresholds=ThresholdConfig(),
+        )
+        assert f"Confidence: {expected_label}." in prompt, (
+            f"score={score}: expected label '{expected_label}' in prompt, got:\n{prompt}"
+        )
+
     @pytest.mark.asyncio
     async def test_mock_client_none_raises_value_error(self) -> None:
         """Passing None as client when no mock mode raises ValueError."""
