@@ -223,9 +223,12 @@ describe("AdminPage", () => {
       expect(screen.getByText("high-bar")).toBeInTheDocument();
       expect(screen.getByText("deadlift")).toBeInTheDocument();
       expect(screen.getByText("conventional")).toBeInTheDocument();
-      // Status badges
-      expect(screen.getByText("completed")).toBeInTheDocument();
-      expect(screen.getByText("failed")).toBeInTheDocument();
+      // Status badges — use getAllByText because the status filter dropdown
+      // also contains these strings as <option> values
+      const completedEls = screen.getAllByText("completed");
+      expect(completedEls.length).toBeGreaterThanOrEqual(2); // option + badge
+      const failedEls = screen.getAllByText("failed");
+      expect(failedEls.length).toBeGreaterThanOrEqual(2);
     });
   });
 

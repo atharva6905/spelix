@@ -62,13 +62,15 @@ describe("ErrorBoundary", () => {
 
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
-
+    // Update children prop first so re-render after retry won't throw again
     rerender(
       <ErrorBoundary>
         <ThrowingComponent shouldThrow={false} />
       </ErrorBoundary>,
     );
+
+    // ErrorBoundary still in error state — click retry to reset
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
 
     expect(screen.getByText("Working")).toBeInTheDocument();
     expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
@@ -119,29 +121,31 @@ describe("ErrorBoundary", () => {
 
     // First error
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
 
+    // Update prop before retry so re-render won't re-throw
     rerender(
       <ErrorBoundary>
         <ThrowingComponent shouldThrow={false} />
       </ErrorBoundary>,
     );
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     expect(screen.getByText("Working")).toBeInTheDocument();
 
-    // Second error cycle
+    // Second error cycle — force a new throw via getDerivedStateFromError
     rerender(
       <ErrorBoundary>
         <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>,
     );
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
 
+    // Update prop before retry again
     rerender(
       <ErrorBoundary>
         <ThrowingComponent shouldThrow={false} />
       </ErrorBoundary>,
     );
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
     expect(screen.getByText("Working")).toBeInTheDocument();
 
     consoleSpy.mockRestore();
