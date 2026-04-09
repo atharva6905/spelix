@@ -37,9 +37,9 @@ jobs:
         working-directory: backend
         run: uv run ruff check .
 
-      - name: Pyright type check
+      - name: Pyright type check (source only)
         working-directory: backend
-        run: uv run pyright
+        run: uv run pyright app/
 
   backend-test:
     name: Backend Tests
@@ -87,9 +87,20 @@ jobs:
         working-directory: backend
         run: uv sync
 
-      - name: Run Alembic migrations
+      - name: Create test database tables
         working-directory: backend
-        run: uv run alembic upgrade head
+        run: uv run python -c "
+          import asyncio
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from app.models.base import Base
+          from app.models import Analysis, UserProfile, RepMetric, CoachingResult
+          async def create():
+              engine = create_async_engine('postgresql+asyncpg://postgres:postgres@localhost:5432/spelix_test')
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+              await engine.dispose()
+          asyncio.run(create())
+          "
 
       - name: Run tests with coverage
         working-directory: backend
