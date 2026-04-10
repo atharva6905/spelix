@@ -411,7 +411,7 @@ def _make_admin_service(
     analysis_results: list | None = None,
     profile_results: list | None = None,
     redis: AsyncMock | None = None,
-) -> "AdminService":
+):
     """Build an AdminService with mocked repos pre-wired for common test scenarios."""
     from app.repositories.analysis import AnalysisRepository
     from app.repositories.user_profile import UserProfileRepository

@@ -471,9 +471,7 @@ describe("AdminPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Preparing to analyse\u2026")).toBeInTheDocument();
     });
-    // Raw string must not appear in a badge
-    const rawEls = screen.queryAllByText("quality_gate_pending");
-    // Only the filter dropdown <option> may contain it — not a badge span
+    // Raw string must not appear in a badge — only the filter dropdown <option> may contain it
     const badgeEls = screen
       .queryAllByText("quality_gate_pending")
       .filter((el) => el.tagName !== "OPTION");
