@@ -15,17 +15,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, desc, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.models.analysis import Analysis
+from app.repositories.analysis import AnalysisRepository
 
 
 class InsightsService:
     """Compute history insights from completed analyses."""
 
-    def __init__(self, db: AsyncSession) -> None:
-        self._db = db
+    def __init__(self, analysis_repo: AnalysisRepository) -> None:
+        self._repo = analysis_repo
 
     async def exercise_insights(
         self,
@@ -43,24 +40,15 @@ class InsightsService:
             most_common_warning: str | None
             personal_best_confidence: float
         """
-        stmt = (
-            select(Analysis)
-            .where(
-                and_(
-                    Analysis.user_id == user_id,
-                    Analysis.exercise_type == exercise_type,
-                    Analysis.exercise_variant == exercise_variant,
-                    Analysis.status == "completed",
-                )
-            )
-            .order_by(desc(Analysis.created_at))
-            .limit(7)
+        analyses = await self._repo.get_recent_for_exercise(
+            user_id=user_id,
+            exercise_type=exercise_type,
+            exercise_variant=exercise_variant,
+            limit=7,
         )
-        result = await self._db.execute(stmt)
-        analyses = list(result.scalars().all())
 
         # Reverse to chronological order for trend display
-        analyses.reverse()
+        analyses = list(reversed(analyses))
 
         # Rolling avg confidence (last 7 sessions)
         confidences = [
@@ -89,20 +77,11 @@ class InsightsService:
         most_common_warning = most_common[0][0] if most_common else None
 
         # Personal best confidence (all time for this exercise)
-        best_stmt = (
-            select(func.max(Analysis.confidence_score))
-            .where(
-                and_(
-                    Analysis.user_id == user_id,
-                    Analysis.exercise_type == exercise_type,
-                    Analysis.exercise_variant == exercise_variant,
-                    Analysis.status == "completed",
-                    Analysis.confidence_score.isnot(None),
-                )
-            )
+        personal_best = await self._repo.get_personal_best_confidence(
+            user_id=user_id,
+            exercise_type=exercise_type,
+            exercise_variant=exercise_variant,
         )
-        best_result = await self._db.execute(best_stmt)
-        personal_best = best_result.scalar() or 0.0
 
         return {
             "rolling_avg_confidence": rolling_avg,
@@ -121,20 +100,7 @@ class InsightsService:
             highest_variance_exercise: str | None
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-
-        stmt = (
-            select(Analysis)
-            .where(
-                and_(
-                    Analysis.user_id == user_id,
-                    Analysis.status == "completed",
-                    Analysis.created_at >= cutoff,
-                )
-            )
-            .order_by(desc(Analysis.created_at))
-        )
-        result = await self._db.execute(stmt)
-        analyses = list(result.scalars().all())
+        analyses = await self._repo.get_completed_since(user_id=user_id, since=cutoff)
 
         # Most common warning (30 days)
         warnings: list[str] = []
