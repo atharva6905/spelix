@@ -9,7 +9,7 @@ Run: cd backend && uv run pytest tests/unit/test_repositories.py -x -v
 """
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest_asyncio
@@ -102,11 +102,11 @@ class TestAnalysisRepository:
         repo = AnalysisRepository(db_session)
         user_id = _fake_user_id()
 
-        # Use explicit naive UTC timestamps so ordering is deterministic even
-        # within one transaction (server_default=now() returns the same value
+        # Use explicit timezone-aware UTC timestamps so ordering is deterministic
+        # even within one transaction (server_default=now() returns the same value
         # for all rows in a single transaction). The column is TIMESTAMP
-        # WITHOUT TIME ZONE so we pass naive datetimes.
-        now = datetime.utcnow()
+        # WITHOUT TIME ZONE so we strip tzinfo before passing to SQLAlchemy.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         a1 = Analysis(
             user_id=user_id,
             status="queued",

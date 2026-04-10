@@ -418,20 +418,12 @@ async def test_heartbeat_written_during_job():
     ]
     assert len(heartbeat_calls) >= 1, "Heartbeat key was never written"
 
-    # Verify TTL was provided (ex= or px= kwarg, or positional ex arg)
+    # Verify TTL is exactly 90 seconds (NFR-OPER-02)
     hb_call = heartbeat_calls[0]
-    has_ttl = (
-        hb_call.kwargs.get("ex") is not None
-        or hb_call.kwargs.get("px") is not None
-        # arq redis client may use setex positional: set(key, ex, value) or set(key, value, ex=N)
+    assert hb_call.kwargs.get("ex") == 90, (
+        f"Expected ex=90 (90s TTL), got ex={hb_call.kwargs.get('ex')}. "
+        f"Full kwargs: {hb_call.kwargs}"
     )
-    # Accept either kwarg style or the value 1 (placeholder) — just require TTL > 0
-    if not has_ttl:
-        # Some redis clients use set(name, value, ex=N)
-        all_kwargs = hb_call.kwargs
-        assert "ex" in all_kwargs or "px" in all_kwargs, (
-            f"Heartbeat set() call had no TTL. kwargs={all_kwargs}"
-        )
 
 
 # ---------------------------------------------------------------------------
