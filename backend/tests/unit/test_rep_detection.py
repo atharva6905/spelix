@@ -352,42 +352,27 @@ class TestEdgeCases:
 
 
 class TestConfidenceScore:
-    def test_confidence_in_unit_interval(self):
+    """Confidence is a 0.0 placeholder — pipeline Step 7 backfills with Tier 5."""
+
+    def test_confidence_is_placeholder_zero(self):
         angles = _squat_rep_angles(n_reps=2)
         landmarks = _make_landmarks(len(angles), visibility=0.8)
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
         for rep in reps:
-            assert 0.0 <= rep.confidence_score <= 1.0
+            assert rep.confidence_score == 0.0
 
-    def test_higher_visibility_gives_higher_confidence(self):
+    def test_confidence_same_regardless_of_visibility(self):
+        """detect_reps no longer computes confidence — all reps get 0.0."""
         angles = _squat_rep_angles(n_reps=1)
         n = len(angles)
-        high_vis_landmarks = _make_landmarks(n, visibility=2.0)  # high logit
-        low_vis_landmarks = _make_landmarks(n, visibility=-2.0)  # low logit
+        high_vis_landmarks = _make_landmarks(n, visibility=2.0)
+        low_vis_landmarks = _make_landmarks(n, visibility=-2.0)
 
         high_reps = detect_reps(angles, high_vis_landmarks, "squat", "standard", FPS)
         low_reps = detect_reps(angles, low_vis_landmarks, "squat", "standard", FPS)
 
-        assert len(high_reps) == 1
-        assert len(low_reps) == 1
-        assert high_reps[0].confidence_score > low_reps[0].confidence_score
-
-    def test_bench_uses_upper_body_landmarks(self):
-        """
-        Bench should use landmarks {11,12,13,14,15,16}.
-        We set those to high visibility and hip/lower landmarks to low.
-        """
-        angles = _bench_rep_angles(n_reps=1)
-        n = len(angles)
-        landmarks = _make_landmarks(n, visibility=-3.0)  # all low
-        # Set upper-body bench landmarks to high
-        for lm in landmarks:
-            for idx in (11, 12, 13, 14, 15, 16):
-                lm[idx, 3] = 3.0  # high logit → sigmoid ~0.95
-
-        reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
-        assert len(reps) == 1
-        assert reps[0].confidence_score > 0.7
+        assert high_reps[0].confidence_score == 0.0
+        assert low_reps[0].confidence_score == 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -13,8 +13,6 @@ from enum import Enum
 
 import numpy as np
 
-from app.cv.confidence import compute_rep_confidence
-
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -99,7 +97,8 @@ def detect_reps(
     angle_timeseries:
         1-D array of smoothed primary angle per frame (degrees).
     landmarks_per_frame:
-        List of (33, 5) arrays, one per frame (for confidence calculation).
+        List of (33, 5) arrays, one per frame. Retained for API compat;
+        confidence is now computed by pipeline Step 7 (Tier 5).
     exercise_type:
         One of "squat", "bench", "deadlift".
     exercise_variant:
@@ -160,20 +159,14 @@ def detect_reps(
 
                 # Check min rep duration
                 if rep_duration_frames >= min_rep_frames:
-                    # Compute per-rep confidence
-                    confidence = compute_rep_confidence(
-                        landmarks_per_frame,
-                        rep_start_frame,
-                        rep_end_frame,
-                        exercise_type,
-                    )
-
+                    # Confidence placeholder — pipeline Step 7 backfills
+                    # with Tier 5 value (FR-CVPL-20–25)
                     reps.append(
                         DetectedRep(
                             rep_index=len(reps),
                             start_frame=rep_start_frame,
                             end_frame=rep_end_frame,
-                            confidence_score=confidence,
+                            confidence_score=0.0,
                             min_angle=min_angle_in_rep,
                         )
                     )
