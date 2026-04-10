@@ -1,6 +1,22 @@
-FROM python:3.12-slim AS base
+# Stage 1: builder — install all dependencies (including dev) for compilation
+FROM python:3.12-slim AS builder
 
-# System deps for MediaPipe, OpenCV, WeasyPrint
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.4 /uv /usr/local/bin/uv
+
+# Install all deps (including dev) so build-time tools are available
+COPY pyproject.toml uv.lock* ./
+RUN uv sync --frozen
+
+# Copy source so the builder stage has a complete tree if needed by build steps
+COPY . .
+
+# Stage 2: runtime — lean image with only what's needed to run
+FROM python:3.12-slim AS runtime
+
+# System deps for MediaPipe, OpenCV (headless), WeasyPrint
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -18,15 +34,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install uv (needed to run the app via `uv run`)
+COPY --from=ghcr.io/astral-sh/uv:0.11.4 /uv /usr/local/bin/uv
 
-# Install deps
+# Copy the virtualenv built in the builder stage (no dev deps at runtime)
 COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev
 
-# Copy app
-COPY . .
+# Copy application source only (no tests, no scripts — excluded via .dockerignore)
+COPY app/ ./app/
 
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix
