@@ -129,18 +129,29 @@ For tasks in `backend/app/cv/`: always use `spelix-cv-engineer`
 For Alembic or schema changes: always use `spelix-migration`
 For any commit touching auth, user data, or user-facing strings: invoke `spelix-security-reviewer` first
 
-### Parallel Dispatch
+### Parallelism — Decision Rules
 
-Run `/parallel` when 2+ tasks have no overlapping file paths and no unsatisfied Deps.
-The parallel skill contains the pre-flight checklist and dispatch procedure.
+**Three patterns. Choose based on whether workers need to talk to each other.**
 
-**Safe to parallelise**: `backend/app/api/` vs `backend/app/cv/` vs `frontend/src/`
-**Never parallelise**: `models/`, `schemas/`, `alembic/`, tasks with Deps arrows
+`/parallel` (subagents) — independent tasks, result only matters, no cross-agent
+negotiation. Max 7 agents; max 3 on 2GB droplet.
 
-Sub-agents in worktrees commit freely. Main agent asks for confirmation before committing.
-Max 7 simultaneous agents (hard limit); max 3 on 2GB droplet (MediaPipe constraint).
+`claude --worktree name` (separate terminals) — independent tasks each needing their
+own full context window. Open 2–4 terminals, each running a named specialist.
 
----
+`/team` (Agent Teams) — cross-domain tasks where specialists must negotiate an
+interface, debug competing hypotheses, or coordinate on shared types. Teammates
+communicate directly via shared task list and mailbox. Run `/team [scenario]`.
+Always shut the team down when work is done — idle teammates burn tokens.
+
+**Decision question: do the workers need to talk to each other to produce correct output?**
+No → /parallel or worktrees. Yes → /team.
+
+**Cost rules for /team**: Sonnet for all teammates, max 3 teammates, focused spawn
+prompts (CLAUDE.md loads automatically — don't repeat it), shut down when done.
+
+**Never parallelise** (any method): `models/`, `schemas/`, `alembic/`, tasks with Deps arrows.
+Sub-agents and worktrees commit freely. Main agent asks for confirmation before committing.
 
 ## Git Conventions
  
