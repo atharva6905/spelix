@@ -160,7 +160,7 @@ async def _run_pipeline(
             profile = await profile_repo.get_by_user_id(analysis.user_id)
             if profile:
                 body_stats = {}
-                for attr in ("height_cm", "weight_kg", "age", "experience_level"):
+                for attr in ("height_cm", "weight_kg", "age", "experience_level", "arm_span_cm", "femur_length_cm"):
                     val = getattr(profile, attr, None)
                     if val is not None:
                         body_stats[attr] = val
@@ -321,6 +321,13 @@ async def _generate_and_upload_pdf(
         "coaching": coaching_dict,
         "plot_path": plot_local if os.path.isfile(plot_local) else None,
         "quality_gate_result": analysis.quality_gate_result,
+        "scores": {
+            "form_score_safety": analysis.form_score_safety,
+            "form_score_technique": analysis.form_score_technique,
+            "form_score_path_balance": analysis.form_score_path_balance,
+            "form_score_control": analysis.form_score_control,
+            "form_score_overall": analysis.form_score_overall,
+        },
         "disclaimer": (
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."

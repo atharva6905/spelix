@@ -294,6 +294,75 @@
       font-style: italic;
     }
 
+    /* ---------------------------------------------------------------
+       Phase 1: Scoring pills
+    --------------------------------------------------------------- */
+    .overall-score {
+      background: #f7f7f7;
+      border: 1px solid #e0e0e0;
+      border-radius: 6pt;
+      padding: 10pt 14pt;
+      margin-bottom: 10pt;
+      display: flex;
+      align-items: center;
+      gap: 10pt;
+    }
+
+    .overall-value {
+      font-size: 24pt;
+      font-weight: 700;
+      color: #111;
+    }
+
+    .overall-label {
+      font-size: 10pt;
+      color: #444;
+    }
+
+    .score-pills {
+      display: flex;
+      gap: 6pt;
+      flex-wrap: wrap;
+      margin-bottom: 14pt;
+    }
+
+    .score-pill {
+      display: inline-block;
+      padding: 3pt 10pt;
+      border-radius: 12pt;
+      font-size: 8.5pt;
+      font-weight: 600;
+    }
+
+    /* ---------------------------------------------------------------
+       Phase 1: Safety warnings
+    --------------------------------------------------------------- */
+    .safety-warning {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 4pt;
+      padding: 10pt 12pt;
+      margin-bottom: 14pt;
+    }
+
+    .safety-warning .warning-title {
+      font-weight: 700;
+      font-size: 10pt;
+      color: #856404;
+      margin-bottom: 4pt;
+    }
+
+    .safety-warning ul {
+      padding-left: 16pt;
+      margin: 0;
+    }
+
+    .safety-warning ul li {
+      font-size: 9pt;
+      color: #856404;
+      margin-bottom: 2pt;
+    }
+
   </style>
 </head>
 <body>
@@ -345,6 +414,12 @@
     </div>
   </div>
 
+  <!-- Phase 1: Form Scoring -->
+  ${score_pills}
+
+  <!-- Phase 1: Safety Warnings -->
+  ${safety_warnings}
+
   <!-- Rep metrics table -->
   <div class="section">
     <div class="section-title">Per-Rep Metrics</div>
@@ -388,9 +463,12 @@
         ${coaching_corrections}
       </ol>
     </div>
+
+    <!-- Phase 1: Recommended Cues -->
+    ${recommended_cues}
   </div>
 
-  <!-- Sources (Phase 0: empty) -->
+  <!-- Cited Sources -->
   <div class="section">
     <div class="section-title">Cited Sources</div>
     ${sources_block}

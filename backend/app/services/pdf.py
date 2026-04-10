@@ -168,9 +168,123 @@ def _build_coaching_corrections(correction_plan: list[str]) -> str:
 
 def _build_sources_block(sources: list | None) -> str:
     if not sources:
-        return '<p class="sources-empty">No cited sources (Phase 0).</p>'
-    items = "".join(f"<p class='sources-list'>{s}</p>" for s in sources)
-    return items
+        return '<p class="sources-empty">No cited sources.</p>'
+    items: list[str] = []
+    for src in sources:
+        if isinstance(src, dict):
+            authors = ", ".join(src.get("authors", []))
+            title = src.get("title", "")
+            year = src.get("year", "")
+            doi = src.get("doi")
+            entry = f"{authors} ({year}). <em>{title}</em>"
+            if doi:
+                entry += f". DOI: {doi}"
+            items.append(f"<p class='sources-list'>{entry}</p>")
+        else:
+            items.append(f"<p class='sources-list'>{src}</p>")
+    return "".join(items)
+
+
+def _score_descriptor(score: float) -> str:
+    """Map a 1-10 form score to a descriptor label."""
+    if score >= 9.0:
+        return "Elite"
+    if score >= 7.5:
+        return "Advanced"
+    if score >= 5.0:
+        return "Intermediate"
+    if score >= 3.0:
+        return "Needs Work"
+    return "Needs Attention"
+
+
+def _score_color(score: float) -> str:
+    """Map a 1-10 score to a pill color."""
+    if score >= 7.5:
+        return "#155724"  # green
+    if score >= 5.0:
+        return "#856404"  # amber
+    return "#721c24"  # red
+
+
+def _score_bg(score: float) -> str:
+    """Map a 1-10 score to a pill background."""
+    if score >= 7.5:
+        return "#d4edda"
+    if score >= 5.0:
+        return "#fff3cd"
+    return "#f8d7da"
+
+
+def _build_score_pills(scores: dict | None) -> str:
+    """Build the four dimension score pills + overall rating.
+
+    scores: dict with keys form_score_safety, form_score_technique,
+    form_score_path_balance, form_score_control, form_score_overall.
+    """
+    if not scores:
+        return ""
+
+    overall = scores.get("form_score_overall")
+    if overall is None:
+        return ""
+
+    dimensions = [
+        ("Movement Quality", scores.get("form_score_safety")),
+        ("Technique", scores.get("form_score_technique")),
+        ("Path & Balance", scores.get("form_score_path_balance")),
+        ("Control", scores.get("form_score_control")),
+    ]
+
+    # Overall rating card
+    overall_desc = _score_descriptor(overall)
+    html = (
+        '<div class="overall-score">'
+        f'<span class="overall-value">{overall:.1f}</span>'
+        f'<span class="overall-label">Overall Form Rating &mdash; {overall_desc}</span>'
+        "</div>"
+    )
+
+    # Dimension pills
+    html += '<div class="score-pills">'
+    for name, val in dimensions:
+        if val is None:
+            continue
+        bg = _score_bg(val)
+        fg = _score_color(val)
+        html += (
+            f'<span class="score-pill" style="background:{bg};color:{fg};">'
+            f"{name}: {val:.1f}"
+            "</span>"
+        )
+    html += "</div>"
+    return html
+
+
+def _build_safety_warnings(warnings: list[str] | None) -> str:
+    """Build a Movement Quality warning banner."""
+    if not warnings:
+        return ""
+    items = "".join(f"<li>{w}</li>" for w in warnings)
+    return (
+        '<div class="safety-warning">'
+        '<div class="warning-title">Movement Quality Alerts</div>'
+        f"<ul>{items}</ul>"
+        "</div>"
+    )
+
+
+def _build_recommended_cues(cues: list[str] | None) -> str:
+    """Build recommended coaching cues section."""
+    if not cues:
+        return ""
+    items = "".join(f"<li>{c}</li>" for c in cues)
+    return (
+        '<div class="coaching-block">'
+        "<h3>Recommended Cues</h3>"
+        f"<ul>{items}</ul>"
+        "</div>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -274,9 +388,17 @@ class PDFService:
             "coaching_corrections": _build_coaching_corrections(
                 coaching.get("correction_plan") or []
             ),
-            # Sources
+            # Phase 1: Scoring pills, safety warnings, recommended cues
+            "score_pills": _build_score_pills(context.get("scores")),
+            "safety_warnings": _build_safety_warnings(
+                coaching.get("safety_warnings") or []
+            ),
+            "recommended_cues": _build_recommended_cues(
+                coaching.get("recommended_cues") or []
+            ),
+            # Sources — Phase 1 uses coaching citations
             "sources_block": _build_sources_block(
-                context.get("sources") or []
+                coaching.get("citations") or context.get("sources") or []
             ),
             # Footer disclaimer (also used in @page running footer)
             "disclaimer": context.get("disclaimer", MANDATORY_DISCLAIMER),

@@ -382,3 +382,104 @@ class TestPdfServiceConstruction:
 
         service = PDFService(template_dir=str(tmp_path))
         assert service is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 PDF extension tests (FR-XPRT-02)
+# ---------------------------------------------------------------------------
+
+
+class TestPhase1ScorePills:
+    def test_score_pills_rendered_when_scores_present(self, pdf_service):
+        ctx = _make_context()
+        ctx["scores"] = {
+            "form_score_safety": 7.8,
+            "form_score_technique": 6.5,
+            "form_score_path_balance": 8.1,
+            "form_score_control": 5.2,
+            "form_score_overall": 7.2,
+        }
+        html = pdf_service.render_html(ctx)
+        assert "Overall Form Rating" in html
+        assert "7.2" in html
+        assert "Movement Quality" in html
+        assert "Technique" in html
+        assert "Path &amp; Balance" in html or "Path & Balance" in html
+        assert "Control" in html
+
+    def test_score_pills_empty_when_no_scores(self, pdf_service):
+        ctx = _make_context()
+        html = pdf_service.render_html(ctx)
+        assert "Overall Form Rating" not in html
+
+    def test_score_pills_empty_when_overall_none(self, pdf_service):
+        ctx = _make_context()
+        ctx["scores"] = {
+            "form_score_safety": 7.8,
+            "form_score_overall": None,
+        }
+        html = pdf_service.render_html(ctx)
+        assert "Overall Form Rating" not in html
+
+
+class TestPhase1SafetyWarnings:
+    def test_safety_warnings_rendered(self, pdf_service):
+        ctx = _make_context()
+        coaching_with_warnings = dict(_COACHING)
+        coaching_with_warnings["safety_warnings"] = [
+            "Excessive forward lean detected at bottom position.",
+            "Knee valgus observed in reps 2 and 4.",
+        ]
+        ctx["coaching"] = coaching_with_warnings
+        html = pdf_service.render_html(ctx)
+        assert "Movement Quality Alerts" in html
+        assert "Excessive forward lean" in html
+        assert "Knee valgus" in html
+
+    def test_no_safety_warnings_when_empty(self, pdf_service):
+        ctx = _make_context()
+        html = pdf_service.render_html(ctx)
+        assert "Movement Quality Alerts" not in html
+
+
+class TestPhase1RecommendedCues:
+    def test_recommended_cues_rendered(self, pdf_service):
+        ctx = _make_context()
+        coaching_with_cues = dict(_COACHING)
+        coaching_with_cues["recommended_cues"] = [
+            "Push knees out over toes.",
+            "Brace core before descent.",
+        ]
+        ctx["coaching"] = coaching_with_cues
+        html = pdf_service.render_html(ctx)
+        assert "Recommended Cues" in html
+        assert "Push knees out" in html
+
+    def test_no_cues_when_empty(self, pdf_service):
+        ctx = _make_context()
+        html = pdf_service.render_html(ctx)
+        assert "<h3>Recommended Cues</h3>" not in html
+
+
+class TestPhase1Citations:
+    def test_citations_from_coaching(self, pdf_service):
+        ctx = _make_context()
+        coaching_with_citations = dict(_COACHING)
+        coaching_with_citations["citations"] = [
+            {
+                "title": "Squat Depth and Muscle Activation",
+                "authors": ["Schoenfeld, B.", "Grgic, J."],
+                "year": 2020,
+                "doi": "10.1234/example",
+            },
+        ]
+        ctx["coaching"] = coaching_with_citations
+        html = pdf_service.render_html(ctx)
+        assert "Schoenfeld" in html
+        assert "2020" in html
+        assert "Squat Depth and Muscle Activation" in html
+
+    def test_no_citations_shows_empty(self, pdf_service):
+        ctx = _make_context()
+        html = pdf_service.render_html(ctx)
+        assert "No cited sources" in html
