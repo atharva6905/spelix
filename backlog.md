@@ -48,29 +48,3 @@ B-055–B-070 (HIGH): ErrorBoundary wired, button disabled fixed, sortable table
 | B-092 | Fix `datetime.utcnow()` deprecation | done | S | — | — | M-26 | `test_repositories.py:109` |
 | B-093 | Implement lighting + stability warning gates | done | M | — | FR-CVPL-08/09 | M-3 | `cv/quality_gates.py` |
 
----
-
-## Parallelization Guide
-
-### Safe to run in parallel (non-overlapping file paths)
-
-**Batch A — Frontend fixes (B-043f, B-047–B-049, B-055–B-059, B-081–B-083):**
-All under `frontend/src/`. Can be split by page:
-- Agent 1: `ResultsPage.tsx` fixes (B-047, B-048, B-057, B-058, B-059)
-- Agent 2: `UploadPage.tsx` + status + routes (B-044, B-049, B-055, B-056)
-- Agent 3: `TrendChart.tsx` + `AdminPage.tsx` + API constants (B-081, B-082, B-083)
-
-**Batch B — Backend fixes (B-043b, B-045, B-046, B-050–B-052, B-060–B-063):**
-- Agent 1: `cv/quality_gates.py` (B-061, B-062, B-063)
-- Agent 2: `pipeline.py` + `analysis_worker.py` (B-045, B-050, B-051, B-052)
-- Agent 3: `services/coaching.py` + `admin.py` + env var rename (B-043b, B-046, B-060)
-
-**Batch C — Infra (B-064–B-066, B-074–B-078, B-080):**
-All touch different files, safe to parallelize or batch as single agent.
-
-**Batch D — Tests (B-053, B-067–B-069, B-084–B-092):**
-All under `tests/`. Can be split by test file.
-
-### Must be sequential
-- B-044 (TUS upload) before B-070 (OpenAPI types) — types depend on working upload flow
-- B-064 + B-065 before B-079 — multi-stage build depends on .dockerignore and non-root user
