@@ -13,7 +13,7 @@ Requirements: FR-ADMN-01 through FR-ADMN-05
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -407,21 +407,40 @@ class TestConfidenceAudit:
 # ---------------------------------------------------------------------------
 
 
+def _make_admin_service(
+    analysis_results: list | None = None,
+    profile_results: list | None = None,
+    redis: AsyncMock | None = None,
+) -> "AdminService":
+    """Build an AdminService with mocked repos pre-wired for common test scenarios."""
+    from app.repositories.analysis import AnalysisRepository
+    from app.repositories.user_profile import UserProfileRepository
+    from app.services.admin import AdminService
+
+    mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+    mock_analysis_repo.list_all = AsyncMock(return_value=analysis_results or [])
+    mock_analysis_repo.get_below_confidence = AsyncMock(return_value=analysis_results or [])
+    mock_analysis_repo.delete_by_user = AsyncMock(return_value=None)
+    mock_analysis_repo.ping = AsyncMock(return_value=True)
+
+    mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+    mock_profile_repo.list_with_analysis_counts = AsyncMock(return_value=profile_results or [])
+    mock_profile_repo.delete_by_user_id = AsyncMock(return_value=None)
+
+    return AdminService(
+        analysis_repo=mock_analysis_repo,
+        user_profile_repo=mock_profile_repo,
+        redis=redis,
+    )
+
+
 class TestAdminService:
-    """Tests for AdminService methods directly, mocking DB and Redis."""
+    """Tests for AdminService methods directly, mocking repositories."""
 
     @pytest.mark.asyncio
     async def test_list_users_returns_profiles_with_counts(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        # Simulate scalars result for profiles
         profile = _make_orm_profile()
-        mock_execute_result = MagicMock()
-        mock_execute_result.all.return_value = [(profile, 2)]
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db)
+        service = _make_admin_service(profile_results=[{"profile": profile, "analysis_count": 2}])
         results = await service.list_users(limit=50, offset=0)
 
         assert len(results) == 1
@@ -429,63 +448,33 @@ class TestAdminService:
 
     @pytest.mark.asyncio
     async def test_delete_user_data_calls_db_delete(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        mock_execute_result = MagicMock()
-        # No analyses or profiles found
-        mock_execute_result.scalars.return_value.all.return_value = []
-        mock_execute_result.scalar_one_or_none.return_value = None
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db)
+        service = _make_admin_service()
         # Should not raise
         await service.delete_user_data(TEST_USER_ID)
 
     @pytest.mark.asyncio
     async def test_list_all_analyses_no_filter(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        analyses = [_make_orm_analysis()]
-        mock_execute_result = MagicMock()
-        mock_execute_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db)
+        analysis = _make_orm_analysis()
+        service = _make_admin_service(analysis_results=[analysis])
         results = await service.list_all_analyses(limit=50, offset=0, status_filter=None)
 
         assert len(results) == 1
 
     @pytest.mark.asyncio
     async def test_list_all_analyses_with_status_filter(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        analyses = [_make_orm_analysis(status="failed")]
-        mock_execute_result = MagicMock()
-        mock_execute_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db)
+        analysis = _make_orm_analysis(status="failed")
+        service = _make_admin_service(analysis_results=[analysis])
         results = await service.list_all_analyses(limit=10, offset=0, status_filter="failed")
 
         assert len(results) == 1
 
     @pytest.mark.asyncio
     async def test_get_health_returns_queue_depth_and_heartbeat(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        # DB ping succeeds
-        mock_execute_result = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
         mock_redis = AsyncMock()
         mock_redis.llen = AsyncMock(return_value=7)
         mock_redis.get = AsyncMock(return_value=b"1")  # heartbeat exists
 
-        service = AdminService(db=mock_db, redis=mock_redis)
+        service = _make_admin_service(redis=mock_redis)
         health = await service.get_health()
 
         assert health["queue_depth"] == 7
@@ -494,32 +483,19 @@ class TestAdminService:
 
     @pytest.mark.asyncio
     async def test_get_health_heartbeat_missing(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        mock_execute_result = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
         mock_redis = AsyncMock()
         mock_redis.llen = AsyncMock(return_value=0)
         mock_redis.get = AsyncMock(return_value=None)  # heartbeat absent
 
-        service = AdminService(db=mock_db, redis=mock_redis)
+        service = _make_admin_service(redis=mock_redis)
         health = await service.get_health()
 
         assert health["worker_heartbeat"] is False
 
     @pytest.mark.asyncio
     async def test_confidence_audit_returns_below_threshold(self):
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
         flagged = [_make_orm_analysis(confidence_score=0.30)]
-        mock_execute_result = MagicMock()
-        mock_execute_result.scalars.return_value.all.return_value = flagged
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db)
+        service = _make_admin_service(analysis_results=flagged)
         results = await service.confidence_audit(threshold=0.50)
 
         assert len(results) == 1
@@ -557,17 +533,11 @@ class TestAdminRedisInjection:
     @pytest.mark.asyncio
     async def test_admin_service_get_health_with_redis_injected(self):
         """AdminService.get_health reads actual queue depth when Redis is wired."""
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        mock_execute_result = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
         mock_redis = AsyncMock()
         mock_redis.llen = AsyncMock(return_value=5)
         mock_redis.get = AsyncMock(return_value="1")
 
-        service = AdminService(db=mock_db, redis=mock_redis)
+        service = _make_admin_service(redis=mock_redis)
         health = await service.get_health()
 
         assert health["queue_depth"] == 5
@@ -578,14 +548,147 @@ class TestAdminRedisInjection:
     @pytest.mark.asyncio
     async def test_admin_service_get_health_without_redis_returns_defaults(self):
         """When Redis is None (not injected), queue_depth=0 and heartbeat=False."""
-        from app.services.admin import AdminService
-
-        mock_db = AsyncMock()
-        mock_execute_result = MagicMock()
-        mock_db.execute = AsyncMock(return_value=mock_execute_result)
-
-        service = AdminService(db=mock_db, redis=None)
+        service = _make_admin_service(redis=None)
         health = await service.get_health()
 
         assert health["queue_depth"] == 0
         assert health["worker_heartbeat"] is False
+
+
+# ---------------------------------------------------------------------------
+# B-071: AdminService must use repositories (not raw SQLAlchemy)
+# ---------------------------------------------------------------------------
+
+
+class TestAdminServiceUsesRepositories:
+    """AdminService must accept analysis_repo and user_profile_repo via DI."""
+
+    @pytest.mark.asyncio
+    async def test_admin_service_constructor_accepts_repos(self):
+        """AdminService must accept analysis_repo and user_profile_repo kwargs."""
+        from app.services.admin import AdminService
+        import inspect
+
+        sig = inspect.signature(AdminService.__init__)
+        params = list(sig.parameters.keys())
+        assert "analysis_repo" in params, "AdminService must accept analysis_repo kwarg"
+        assert "user_profile_repo" in params, "AdminService must accept user_profile_repo kwarg"
+        assert "db" not in params, "AdminService must not accept raw db/AsyncSession"
+
+    @pytest.mark.asyncio
+    async def test_list_users_calls_repo(self):
+        """list_users delegates to user_profile_repo.list_with_analysis_counts."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        profile = _make_orm_profile()
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+        mock_profile_repo.list_with_analysis_counts = AsyncMock(
+            return_value=[{"profile": profile, "analysis_count": 5}]
+        )
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        results = await service.list_users(limit=10, offset=0)
+
+        mock_profile_repo.list_with_analysis_counts.assert_awaited_once_with(
+            limit=10, offset=0
+        )
+        assert len(results) == 1
+        assert results[0]["analysis_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_delete_user_data_calls_repos(self):
+        """delete_user_data calls analysis_repo.delete_by_user and profile_repo.delete_by_user_id."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.delete_by_user = AsyncMock(return_value=None)
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+        mock_profile_repo.delete_by_user_id = AsyncMock(return_value=None)
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        await service.delete_user_data(TEST_USER_ID)
+
+        mock_analysis_repo.delete_by_user.assert_awaited_once_with(TEST_USER_ID)
+        mock_profile_repo.delete_by_user_id.assert_awaited_once_with(TEST_USER_ID)
+
+    @pytest.mark.asyncio
+    async def test_list_all_analyses_calls_repo(self):
+        """list_all_analyses delegates to analysis_repo.list_all."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        analysis = _make_orm_analysis()
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.list_all = AsyncMock(return_value=[analysis])
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        results = await service.list_all_analyses(limit=50, offset=0, status_filter=None)
+
+        mock_analysis_repo.list_all.assert_awaited_once_with(
+            limit=50, offset=0, status_filter=None
+        )
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_confidence_audit_calls_repo(self):
+        """confidence_audit delegates to analysis_repo.get_below_confidence."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        flagged = _make_orm_analysis(confidence_score=0.30)
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.get_below_confidence = AsyncMock(return_value=[flagged])
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        results = await service.confidence_audit(threshold=0.50)
+
+        mock_analysis_repo.get_below_confidence.assert_awaited_once_with(threshold=0.50)
+        assert len(results) == 1
+        assert results[0].confidence_score == 0.30
+
+    @pytest.mark.asyncio
+    async def test_get_health_still_works_with_repo_based_constructor(self):
+        """get_health still checks DB and Redis correctly after refactor."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.ping = AsyncMock(return_value=True)
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+
+        mock_redis = AsyncMock()
+        mock_redis.llen = AsyncMock(return_value=3)
+        mock_redis.get = AsyncMock(return_value=b"1")
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+            redis=mock_redis,
+        )
+        health = await service.get_health()
+
+        assert health["queue_depth"] == 3
+        assert health["worker_heartbeat"] is True
+        assert health["db_ok"] is True

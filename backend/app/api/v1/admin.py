@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_admin_user, get_redis
 from app.db import get_db
+from app.repositories.analysis import AnalysisRepository
+from app.repositories.user_profile import UserProfileRepository
 from app.services.admin import AdminService
 
 router = APIRouter(tags=["admin"])
@@ -67,7 +69,11 @@ async def _get_service(
     db: AsyncSession = Depends(get_db),
     redis: Any = Depends(get_redis),
 ) -> AdminService:
-    return AdminService(db=db, redis=redis)
+    return AdminService(
+        analysis_repo=AnalysisRepository(db),
+        user_profile_repo=UserProfileRepository(db),
+        redis=redis,
+    )
 
 
 # ---------------------------------------------------------------------------

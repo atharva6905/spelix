@@ -14,9 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user
 from app.db import get_db
+from app.repositories.analysis import AnalysisRepository
 from app.services.insights import InsightsService
 
 router = APIRouter(tags=["insights"])
+
+
+async def _get_service(db: AsyncSession = Depends(get_db)) -> InsightsService:
+    return InsightsService(analysis_repo=AnalysisRepository(db))
 
 
 @router.get("/exercise/{exercise_type}/{exercise_variant}")
@@ -24,18 +29,16 @@ async def get_exercise_insights(
     exercise_type: str,
     exercise_variant: str,
     user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    service: InsightsService = Depends(_get_service),
 ) -> dict:
     """Return per-exercise insights for the current user."""
-    svc = InsightsService(db)
-    return await svc.exercise_insights(user["id"], exercise_type, exercise_variant)
+    return await service.exercise_insights(user["id"], exercise_type, exercise_variant)
 
 
 @router.get("/global")
 async def get_global_insights(
     user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    service: InsightsService = Depends(_get_service),
 ) -> dict:
     """Return global insights across all exercises for the current user."""
-    svc = InsightsService(db)
-    return await svc.global_insights(user["id"])
+    return await service.global_insights(user["id"])

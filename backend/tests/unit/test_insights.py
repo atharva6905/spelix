@@ -57,6 +57,21 @@ def _passed_check() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _make_insights_repo(
+    analyses: list | None = None,
+    personal_best: float = 0.0,
+    completed_analyses: list | None = None,
+) -> AsyncMock:
+    """Build a mock AnalysisRepository pre-wired for InsightsService tests."""
+    from app.repositories.analysis import AnalysisRepository
+
+    mock_repo = AsyncMock(spec=AnalysisRepository)
+    mock_repo.get_recent_for_exercise = AsyncMock(return_value=analyses or [])
+    mock_repo.get_personal_best_confidence = AsyncMock(return_value=personal_best)
+    mock_repo.get_completed_since = AsyncMock(return_value=completed_analyses or [])
+    return mock_repo
+
+
 class TestExerciseInsights:
     """Per-exercise insights computation."""
 
@@ -68,15 +83,9 @@ class TestExerciseInsights:
             for i in range(7)
         ]
 
-        mock_db = AsyncMock()
-        # Mock execute for exercise query
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(side_effect=[mock_result, _scalar_result(0.88)])
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=analyses, personal_best=0.88))
         result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
 
         assert "rolling_avg_confidence" in result
@@ -86,22 +95,17 @@ class TestExerciseInsights:
     @pytest.mark.asyncio
     async def test_rep_count_trend(self):
         """Rep count trend extracted from summary_json."""
+        # Repo returns DESC (days_ago=2,1,0 → rep=3,4,5), service reverses to chrono
         analyses = [
             _make_analysis(rep_count=3 + i, days_ago=2 - i)
             for i in range(3)
         ]
 
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(side_effect=[mock_result, _scalar_result(0.85)])
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=analyses, personal_best=0.85))
         result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
 
-        # DB returns DESC (days_ago=2,1,0 → rep=3,4,5), service reverses to chrono
         assert result["rep_count_trend"] == [5, 4, 3]
 
     @pytest.mark.asyncio
@@ -113,14 +117,9 @@ class TestExerciseInsights:
             _make_analysis(warnings=[_failed_check("Low visibility")]),
         ]
 
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(side_effect=[mock_result, _scalar_result(0.85)])
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=analyses, personal_best=0.85))
         result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
 
         assert result["most_common_warning"] == "Bad framing"
@@ -130,14 +129,9 @@ class TestExerciseInsights:
         """Personal best is the max confidence across all sessions."""
         analyses = [_make_analysis(confidence=0.75)]
 
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(side_effect=[mock_result, _scalar_result(0.92)])
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=analyses, personal_best=0.92))
         result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
 
         assert result["personal_best_confidence"] == 0.92
@@ -145,14 +139,9 @@ class TestExerciseInsights:
     @pytest.mark.asyncio
     async def test_no_analyses_returns_empty(self):
         """Empty history returns empty lists and None warning."""
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(side_effect=[mock_result, _scalar_result(None)])
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=[], personal_best=0.0))
         result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
 
         assert result["rolling_avg_confidence"] == []
@@ -185,14 +174,9 @@ class TestGlobalInsights:
             ),
         ]
 
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(completed_analyses=analyses))
         result = await svc.global_insights(_USER_ID)
 
         assert result["most_common_warning"] == "Framing issue"
@@ -207,14 +191,9 @@ class TestGlobalInsights:
             _make_analysis(exercise_type="bench", rep_count=10, days_ago=2),
         ]
 
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = analyses
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(completed_analyses=analyses))
         result = await svc.global_insights(_USER_ID)
 
         # bench has variance (3,10)=12.25 vs squat (5,5)=0
@@ -223,14 +202,9 @@ class TestGlobalInsights:
     @pytest.mark.asyncio
     async def test_no_analyses_returns_none(self):
         """Empty history returns None for all fields."""
-        mock_db = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(return_value=mock_result)
-
         from app.services.insights import InsightsService
 
-        svc = InsightsService(mock_db)
+        svc = InsightsService(analysis_repo=_make_insights_repo(completed_analyses=[]))
         result = await svc.global_insights(_USER_ID)
 
         assert result["most_common_warning"] is None
@@ -316,6 +290,88 @@ class TestInsightsAPI:
                 assert data["most_common_warning"] == "Bad framing"
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+
+
+# ---------------------------------------------------------------------------
+# Repository-based InsightsService tests (B-071)
+# These tests verify that InsightsService delegates all DB access to
+# repositories rather than calling SQLAlchemy directly.
+# ---------------------------------------------------------------------------
+
+
+class TestInsightsServiceUsesRepositories:
+    """InsightsService must accept an AnalysisRepository and call its methods."""
+
+    @pytest.mark.asyncio
+    async def test_exercise_insights_calls_repo_recent_for_exercise(self):
+        """exercise_insights delegates the 7-session query to the repo."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.services.insights import InsightsService
+
+        analyses = [_make_analysis(confidence=0.80 + i * 0.01, days_ago=6 - i) for i in range(3)]
+        mock_repo = AsyncMock(spec=AnalysisRepository)
+        mock_repo.get_recent_for_exercise = AsyncMock(return_value=analyses)
+        mock_repo.get_personal_best_confidence = AsyncMock(return_value=0.90)
+
+        svc = InsightsService(analysis_repo=mock_repo)
+        result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
+
+        mock_repo.get_recent_for_exercise.assert_awaited_once_with(
+            user_id=_USER_ID,
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            limit=7,
+        )
+        assert "rolling_avg_confidence" in result
+
+    @pytest.mark.asyncio
+    async def test_exercise_insights_calls_repo_personal_best(self):
+        """exercise_insights delegates the personal-best query to the repo."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.services.insights import InsightsService
+
+        mock_repo = AsyncMock(spec=AnalysisRepository)
+        mock_repo.get_recent_for_exercise = AsyncMock(return_value=[])
+        mock_repo.get_personal_best_confidence = AsyncMock(return_value=0.95)
+
+        svc = InsightsService(analysis_repo=mock_repo)
+        result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
+
+        mock_repo.get_personal_best_confidence.assert_awaited_once_with(
+            user_id=_USER_ID,
+            exercise_type="squat",
+            exercise_variant="high_bar",
+        )
+        assert result["personal_best_confidence"] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_global_insights_calls_repo_recent_completed(self):
+        """global_insights delegates the 30-day query to the repo."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.services.insights import InsightsService
+
+        mock_repo = AsyncMock(spec=AnalysisRepository)
+        mock_repo.get_completed_since = AsyncMock(return_value=[])
+
+        svc = InsightsService(analysis_repo=mock_repo)
+        result = await svc.global_insights(_USER_ID)
+
+        mock_repo.get_completed_since.assert_awaited_once()
+        call_kwargs = mock_repo.get_completed_since.call_args
+        assert call_kwargs.kwargs["user_id"] == _USER_ID or call_kwargs.args[0] == _USER_ID
+        assert result["most_common_warning"] is None
+
+    @pytest.mark.asyncio
+    async def test_insights_service_does_not_accept_raw_session(self):
+        """InsightsService constructor must accept analysis_repo keyword, not db."""
+        from app.services.insights import InsightsService
+        import inspect
+
+        sig = inspect.signature(InsightsService.__init__)
+        params = list(sig.parameters.keys())
+        # 'self' + 'analysis_repo' — no 'db' parameter
+        assert "analysis_repo" in params, "InsightsService must accept analysis_repo kwarg"
+        assert "db" not in params, "InsightsService must not accept raw db/AsyncSession"
 
 
 # ---------------------------------------------------------------------------
