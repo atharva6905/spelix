@@ -322,3 +322,271 @@ class TestPostAnalysesStart:
         analysis_id = uuid.uuid4()
         resp = client.post(f"/api/v1/analyses/{analysis_id}/start")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/analyses/{id} — full detail (B-087)
+# ---------------------------------------------------------------------------
+
+
+class TestGetAnalysisDetail:
+    """Tests for GET /api/v1/analyses/{id} full detail endpoint."""
+
+    def _make_detail_analysis(self, user_id=None, status="completed"):
+        """Build a mock analysis object that satisfies AnalysisDetail schema."""
+        obj = _make_mock_analysis(user_id=user_id, status=status)
+        obj.confidence_score = 0.85
+        obj.annotated_video_path = f"artifacts/{obj.id}/annotated.mp4"
+        obj.plot_path = f"artifacts/{obj.id}/plot.png"
+        obj.pdf_path = f"artifacts/{obj.id}/report.pdf"
+        obj.tags = ["competition", "pr"]
+        obj.quality_gate_result = None
+        obj.summary_json = None
+        # Nested relationships — empty for simplicity
+        obj.coaching_result = None
+        obj.rep_metrics = []
+        return obj
+
+    def test_get_detail_returns_200_with_correct_fields(self):
+        """GET /analyses/{id} returns 200 and all expected fields for the owner."""
+        analysis = self._make_detail_analysis()
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(analysis.id)
+        assert body["status"] == "completed"
+        assert body["exercise_type"] == "squat"
+        assert body["exercise_variant"] == "high_bar"
+        assert "confidence_score" in body
+        assert "created_at" in body
+        assert "updated_at" in body
+
+    def test_get_detail_includes_tags(self):
+        """GET /analyses/{id} response includes the tags list."""
+        analysis = self._make_detail_analysis()
+        analysis.tags = ["pr", "competition"]
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        assert resp.json()["tags"] == ["pr", "competition"]
+
+    def test_get_detail_wrong_user_returns_403(self):
+        """GET /analyses/{id} for an analysis owned by another user returns 403."""
+        analysis_id = uuid.uuid4()
+        mock_service = AsyncMock()
+        from fastapi import HTTPException as _HTTPException
+        mock_service.get_analysis_detail.side_effect = _HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "You do not own this analysis.",
+                    "detail": None,
+                }
+            },
+        )
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis_id}")
+
+        assert resp.status_code == 403
+
+    def test_get_detail_not_found_returns_404(self):
+        """GET /analyses/{id} for a non-existent ID returns 404."""
+        analysis_id = uuid.uuid4()
+        mock_service = AsyncMock()
+        from fastapi import HTTPException as _HTTPException
+        mock_service.get_analysis_detail.side_effect = _HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "ANALYSIS_NOT_FOUND",
+                    "message": "Analysis not found.",
+                    "detail": None,
+                }
+            },
+        )
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis_id}")
+
+        assert resp.status_code == 404
+
+    def test_get_detail_invalid_uuid_returns_422(self, app_client: TestClient):
+        """GET /analyses/not-a-uuid returns 422 (FastAPI path validation)."""
+        resp = app_client.get("/api/v1/analyses/not-a-uuid")
+        assert resp.status_code == 422
+
+    def test_get_detail_unauthenticated_returns_401(self):
+        """GET /analyses/{id} without a JWT returns 401."""
+        bare_app = FastAPI()
+        bare_app.include_router(router, prefix="/api/v1/analyses")
+        client = TestClient(bare_app, raise_server_exceptions=False)
+
+        resp = client.get(f"/api/v1/analyses/{uuid.uuid4()}")
+        assert resp.status_code == 401
+
+    def test_get_detail_nested_coaching_result_present(self):
+        """When a coaching result is attached, it appears in the response."""
+        analysis = self._make_detail_analysis()
+        coaching_mock = MagicMock()
+        coaching_mock.structured_output_json = {"summary": "Good form overall."}
+        coaching_mock.created_at = datetime.now(timezone.utc)
+        analysis.coaching_result = coaching_mock
+
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["coaching_result"] is not None
+        assert body["coaching_result"]["structured_output_json"]["summary"] == "Good form overall."
+
+    def test_get_detail_rep_metrics_list(self):
+        """Rep metrics nested list is serialised correctly (may be empty)."""
+        analysis = self._make_detail_analysis()
+        analysis.rep_metrics = []  # empty list is valid
+
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        assert resp.json()["rep_metrics"] == []
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/analyses/{id}/status — status poll (B-087)
+# ---------------------------------------------------------------------------
+
+
+class TestGetAnalysisStatus:
+    """Tests for GET /api/v1/analyses/{id}/status endpoint."""
+
+    def _make_status_analysis(self, status="processing"):
+        obj = _make_mock_analysis(status=status)
+        return obj
+
+    def test_get_status_returns_200_with_status_fields(self):
+        """GET /analyses/{id}/status returns 200 with id, status, updated_at."""
+        analysis = self._make_status_analysis(status="processing")
+        mock_service = AsyncMock()
+        mock_service.get_analysis_status.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == str(analysis.id)
+        assert body["status"] == "processing"
+        assert "updated_at" in body
+
+    def test_get_status_returns_all_valid_statuses(self):
+        """Status endpoint can return any of the 7 valid status values."""
+        valid_statuses = [
+            "queued",
+            "quality_gate_pending",
+            "quality_gate_rejected",
+            "processing",
+            "coaching",
+            "completed",
+            "failed",
+        ]
+        for s in valid_statuses:
+            analysis = self._make_status_analysis(status=s)
+            mock_service = AsyncMock()
+            mock_service.get_analysis_status.return_value = analysis
+
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.get(f"/api/v1/analyses/{analysis.id}/status")
+
+            assert resp.status_code == 200, f"Expected 200 for status={s}"
+            assert resp.json()["status"] == s
+
+    def test_get_status_wrong_user_returns_403(self):
+        """GET /analyses/{id}/status for another user's analysis returns 403."""
+        analysis_id = uuid.uuid4()
+        mock_service = AsyncMock()
+        from fastapi import HTTPException as _HTTPException
+        mock_service.get_analysis_status.side_effect = _HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "You do not own this analysis.",
+                    "detail": None,
+                }
+            },
+        )
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis_id}/status")
+
+        assert resp.status_code == 403
+
+    def test_get_status_not_found_returns_404(self):
+        """GET /analyses/{id}/status for non-existent ID returns 404."""
+        analysis_id = uuid.uuid4()
+        mock_service = AsyncMock()
+        from fastapi import HTTPException as _HTTPException
+        mock_service.get_analysis_status.side_effect = _HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "ANALYSIS_NOT_FOUND",
+                    "message": "Analysis not found.",
+                    "detail": None,
+                }
+            },
+        )
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis_id}/status")
+
+        assert resp.status_code == 404
+
+    def test_get_status_invalid_uuid_returns_422(self, app_client: TestClient):
+        """GET /analyses/bad-id/status returns 422."""
+        resp = app_client.get("/api/v1/analyses/not-a-uuid/status")
+        assert resp.status_code == 422
+
+    def test_get_status_unauthenticated_returns_401(self):
+        """GET /analyses/{id}/status without token returns 401."""
+        bare_app = FastAPI()
+        bare_app.include_router(router, prefix="/api/v1/analyses")
+        client = TestClient(bare_app, raise_server_exceptions=False)
+
+        resp = client.get(f"/api/v1/analyses/{uuid.uuid4()}/status")
+        assert resp.status_code == 401
+
+    def test_get_status_response_has_no_extra_fields(self):
+        """
+        The status endpoint returns only id, status, updated_at — no video paths,
+        no coaching results, no rep metrics. Verify the response is minimal.
+        """
+        analysis = self._make_status_analysis(status="completed")
+        mock_service = AsyncMock()
+        mock_service.get_analysis_status.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # Only the three AnalysisStatusResponse fields should be present
+        assert set(body.keys()) == {"id", "status", "updated_at"}
