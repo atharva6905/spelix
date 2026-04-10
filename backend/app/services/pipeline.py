@@ -70,6 +70,7 @@ class PipelineResult:
         "confidence_results",
         "score_result",
         "bar_path",
+        "keyframes",
         "annotated_video_storage_path",
         "plot_storage_path",
     )
@@ -86,6 +87,7 @@ class PipelineResult:
         self.confidence_results: list = []
         self.score_result: Any = None
         self.bar_path: dict | None = None
+        self.keyframes: list = []
         self.annotated_video_storage_path: str | None = None
         self.plot_storage_path: str | None = None
 
@@ -406,6 +408,18 @@ async def run_cv_pipeline(
             for rm in rep_metrics
         ]
         await rep_metric_repo.create_batch(db_metrics)
+
+    await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 8b: Keyframe extraction (FR-AICP-01)
+    # ------------------------------------------------------------------ #
+    from app.cv.keyframe_extraction import extract_keyframes
+
+    keyframes = await loop.run_in_executor(
+        None, extract_keyframes, video_local, reps, primary_series,
+    )
+    result.keyframes = keyframes
 
     await write_heartbeat(redis)
 
