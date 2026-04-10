@@ -16,6 +16,7 @@ import {
   getConfidenceCategory,
   type ConfidenceCategory,
 } from "@/lib/confidence";
+import { API_BASE } from "@/api/config";
 
 // ---------------------------------------------------------------------------
 // Confidence helpers — never expose raw decimal (FR-SCOR-09–10, NFR-USAB-03)
@@ -485,7 +486,7 @@ export default function ResultsPage() {
           <div className="flex flex-wrap gap-3">
             {/* CSV export — constructed from analysis id */}
             <a
-              href={`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/api/v1/analyses/${analysis.id}/export/csv`}
+              href={`${API_BASE}/api/v1/analyses/${analysis.id}/export/csv`}
               className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200"
               data-testid="csv-download"
             >

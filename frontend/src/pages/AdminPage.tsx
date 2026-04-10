@@ -27,15 +27,44 @@ import {
   type AdminHealth,
 } from "@/api/admin";
 
+// Valid status values per SRS Section 5.2a (7 total — quality_gate_passed is NOT valid)
 const ANALYSIS_STATUSES = [
   "queued",
   "quality_gate_pending",
-  "quality_gate_passed",
   "quality_gate_rejected",
   "processing",
+  "coaching",
   "completed",
   "failed",
-];
+] as const;
+
+type AnalysisStatusValue = typeof ANALYSIS_STATUSES[number];
+
+/**
+ * User-facing labels per SRS Appendix B.
+ * Raw status strings must never appear in user-visible UI.
+ */
+const STATUS_LABELS: Record<AnalysisStatusValue, string> = {
+  queued: "Queued",
+  quality_gate_pending: "Preparing to analyse\u2026",
+  quality_gate_rejected: "Video could not be processed",
+  processing: "Processing",
+  coaching: "Generating coaching\u2026",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+/**
+ * Returns the user-facing label for a status value.
+ * Unknown values are displayed as the raw string with a "?" warning indicator
+ * so the UI never crashes on unexpected API values.
+ */
+function formatStatus(status: string): string {
+  if (status in STATUS_LABELS) {
+    return STATUS_LABELS[status as AnalysisStatusValue];
+  }
+  return `${status} ?`;
+}
 
 const PAGE_SIZE = 50;
 
@@ -389,12 +418,13 @@ function AnalysisLogPanel() {
                             : analysis.status === "failed" ||
                                 analysis.status === "quality_gate_rejected"
                               ? "bg-red-100 text-red-700"
-                              : analysis.status === "processing"
+                              : analysis.status === "processing" ||
+                                  analysis.status === "coaching"
                                 ? "bg-blue-100 text-blue-700"
                                 : "bg-gray-100 text-gray-600"
                         }`}
                       >
-                        {analysis.status}
+                        {formatStatus(analysis.status)}
                       </span>
                     </td>
                     <td className="py-3 pr-4 capitalize text-gray-700">
