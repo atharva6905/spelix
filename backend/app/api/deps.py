@@ -26,6 +26,18 @@ _JWT_AUDIENCE = "authenticated"
 
 _http_bearer = HTTPBearer()
 
+
+def _get_expected_issuer() -> str:
+    """Return the expected JWT issuer.
+
+    Checks SUPABASE_JWT_ISSUER first; falls back to deriving from SUPABASE_URL
+    as ``{SUPABASE_URL}/auth/v1``.
+    """
+    explicit = os.environ.get("SUPABASE_JWT_ISSUER")
+    if explicit:
+        return explicit
+    return f"{_get_supabase_url()}/auth/v1"
+
 # JWKS cache: fetched from Supabase and refreshed every 60 minutes
 _jwks_cache: dict | None = None
 _jwks_fetched_at: float = 0
@@ -129,6 +141,17 @@ async def get_current_user(
             raise invalid_credentials_exc
 
     if payload is None:
+        raise invalid_credentials_exc
+
+    # Validate issuer claim (B-075)
+    try:
+        expected_issuer = _get_expected_issuer()
+        token_issuer: str | None = payload.get("iss")
+        if token_issuer != expected_issuer:
+            raise invalid_credentials_exc
+    except HTTPException:
+        raise
+    except Exception:
         raise invalid_credentials_exc
 
     # Extract standard Supabase claims
