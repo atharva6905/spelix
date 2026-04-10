@@ -67,6 +67,11 @@ docker compose exec redis redis-cli llen arq:queue  # Inspect ARQ queue
 docker compose ps && docker compose exec redis redis-cli ping      # Health check
 ```
 
+## General Rules
+
+- When asked to start fixing or implementing immediately, skip broad codebase exploration. Read only the specific files needed for the task and begin.
+- Use terminology exactly as defined in SRS.md and CLAUDE.md. Never invent names, categories, or subsystem labels not present in the spec.
+
 ## Architecture Decisions
 
 - All CPU-bound CV work: `loop.run_in_executor(None, fn)` — never block the ARQ event loop
@@ -90,42 +95,51 @@ Required indexes in migration 001: `(user_id, created_at DESC)` on `analyses`; `
 Status column: `VARCHAR(30)` with CHECK constraint listing all 7 valid values.
 JSONB columns: `summary_json`, `quality_gate_result`, `metrics_json`, `structured_output_json`, `agent_trace_json`, `retrieved_sources_json`.
 
-## Sub-Agent Routing
- 
-- Sub-agents use Sonnet 4.6 (set via CLAUDE_CODE_SUBAGENT_MODEL env var)
-- All sub-agents run with **worktree isolation** — each gets its own git branch and working directory, auto-cleaned on completion
-- Maximum 7 for local dev (Claude Code hard limit), 3 for production droplet (2GB RAM constraint — MediaPipe peak ~350MB)
- 
-### When to Dispatch Parallel Sub-Agents
- 
-Run `/parallel` (reads the parallel skill) when the next batch of tasks in `backlog.md` contains 2+ tasks with:
-- Status: `todo`
-- All dependencies satisfied (check `Deps` column)
-- Non-overlapping file paths
- 
-The `/parallel` skill contains pre-planned dispatch blocks for Phase 0. Follow them.
- 
-### Safe Parallelization Rules
- 
-- **Safe to parallelise**: `backend/app/api/` vs `backend/app/cv/` vs `frontend/src/` — different directory subtrees
-- **Safe to parallelise**: any pure function task (quality gates, confidence, signal processing) — no shared state
-- **Never parallelise**: anything touching `models/`, `schemas/`, or `alembic/` — one agent owns these, others read results
-- **Never parallelise**: tasks with dependency arrows in the implementation plan
- 
-### Sub-Agent Instructions Template
- 
-When dispatching via Task tool, each sub-agent receives:
-1. "Read CLAUDE.md for project context"
-2. "Use Context7 MCP to look up current API docs before writing library code"
-3. The specific task description, file list, SRS requirement IDs, and TDD gate from the implementation plan
-4. "Write failing test first, then implement. Commit when TDD gate passes."
- 
-### Post-Merge
- 
-After all sub-agents complete and their worktrees are merged:
-1. Run `/check` — catch any cross-agent type conflicts
-2. Run `/test` — catch any integration issues
-3. Update `backlog.md` and `memory.md`
+## Agent Architecture
+
+### Specialist Agents (`.claude/agents/`)
+
+Named specialist agents carry permanent domain knowledge. The main agent auto-delegates
+when a task matches an agent's description, or invoke explicitly:
+`"Use the spelix-cv-engineer agent to implement FR-CVPL-08"`
+
+**Active agents (always):**
+- `spelix-tdd` — TDD-first implementation for any feature or fix
+- `spelix-auditor` — read-only SRS compliance checker (Haiku model)
+- `spelix-security-reviewer` — pre-merge auth/RLS/language checks
+- `spelix-migration` — Alembic migrations and schema changes
+
+**Activate at Phase 1:**
+- `spelix-cv-engineer` — all tasks in `backend/app/cv/`
+- `spelix-coaching-engineer` — coaching service, SSE, LLM prompt work
+
+**Activate at Phase 2:** `spelix-rag-engineer`, `spelix-corpus-curator`
+**Activate at Phase 3:** `spelix-langgraph-engineer`
+**Activate at Phase 4:** `spelix-eval-engineer`
+
+### Agent Delegation Rules
+
+For ANY task touching 3+ files or with an SRS requirement ID:
+1. Run `/plan` — Explore and plan first, never jump to code
+2. Dispatch execution to the matching specialist agent
+3. Main agent reviews output, runs /check + /test, merges
+
+For tasks in `backend/app/cv/`: always use `spelix-cv-engineer`
+For Alembic or schema changes: always use `spelix-migration`
+For any commit touching auth, user data, or user-facing strings: invoke `spelix-security-reviewer` first
+
+### Parallel Dispatch
+
+Run `/parallel` when 2+ tasks have no overlapping file paths and no unsatisfied Deps.
+The parallel skill contains the pre-flight checklist and dispatch procedure.
+
+**Safe to parallelise**: `backend/app/api/` vs `backend/app/cv/` vs `frontend/src/`
+**Never parallelise**: `models/`, `schemas/`, `alembic/`, tasks with Deps arrows
+
+Sub-agents in worktrees commit freely. Main agent asks for confirmation before committing.
+Max 7 simultaneous agents (hard limit); max 3 on 2GB droplet (MediaPipe constraint).
+
+---
 
 ## Git Conventions
  
@@ -157,6 +171,9 @@ Examples:
 
 ## Gotchas
 
+- Python imports: always add imports inline with the code that uses them in the
+same edit operation. Never add imports in a separate edit — ruff/isort will
+strip the unused import before the usage edit is applied.
 - MediaPipe: `model_complexity=2, static_image_mode=True, min_detection_confidence=0.5, min_tracking_confidence=0.5, num_threads=1` — exact config, no deviation
 - MediaPipe visibility/presence scores may be pre-sigmoid logits (values outside [0,1]): apply `sigmoid()` before using (GitHub #4411, #4462)
 - MediaPipe is not bit-exact deterministic — ±1° angle variance acceptable; `static_image_mode=True` + `num_threads=1` is the maximum reproducibility setting
@@ -172,7 +189,27 @@ Examples:
 
 ## Compaction Survival
 
-When asked to summarise for compaction: always preserve current phase, last 5 modified files, any failing tests, and the current task.
+Context budget: keep below 60% capacity. Watch the statusline.
+At 60%: finish current task, run /handoff, start fresh session.
+Use the Explore built-in subagent for file discovery — its reads stay out of main context.
+When asked to summarize for compaction: always preserve current phase, last 5 modified files, any failing tests, and the current task.
 After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirements before resuming.
 After compaction: run `/status` to confirm environment state.
 Phase 0 complete when: all pytest tests pass and `docker compose up` runs cleanly end-to-end.
+At the end of any session that didn't complete all planned batches, write a
+handoff note to .claude/handoff.md containing: (1) completed tasks with commit
+SHAs, (2) remaining tasks with backlog IDs, (3) current test count and any
+failures, (4) any blockers discovered.
+
+## memory.md Update Protocol
+
+After every session commit, update memory.md with:
+  phase: [current]
+  task: [current task ID]
+  status: [in_progress | blocked | escalated | done]
+  last_modified: [last 5 files modified]
+  failing_tests: [list or empty]
+  blockers: [list or empty]
+  next_action: "[specific next step — exact command or task]"
+  session_count: [increment by 1]
+  last_session: [today's date]

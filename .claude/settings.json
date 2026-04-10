@@ -55,6 +55,15 @@
             "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process');try{execSync('(git diff --cached; git diff) | grep -iE \\\\\\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\\\\\"',{stdio:'pipe'});process.stderr.write('\\n\\u{1F6AB} BLOCKED: secrets detected in staged changes\\n');process.exit(2)}catch(e){process.exit(0)}}}catch(e){}})\""
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CC_TOOL_INPUT\" | grep -q 'git worktree add'; then git fetch origin main && git merge-base --is-ancestor origin/main HEAD || echo 'WARNING: not branching from latest main'; fi"
+          }
+        ]
       }
     ],
     "Stop": [
@@ -71,5 +80,8 @@
   },
   "enabledPlugins": {
     "vercel@claude-plugins-official": true
+  }, 
+  "env": {
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
   }
 }
