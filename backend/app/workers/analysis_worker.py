@@ -86,7 +86,7 @@ async def _run_pipeline(
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
         # ------------------------------------------------------------------ #
-        await run_cv_pipeline(
+        pipeline_result = await run_cv_pipeline(
             analysis=analysis,
             repo=repo,
             rep_metric_repo=rep_metric_repo,
@@ -111,11 +111,72 @@ async def _run_pipeline(
         await _write_heartbeat(redis)
 
         # ------------------------------------------------------------------ #
-        # Coaching: call Claude Sonnet via CoachingService (B-024)
+        # GPT-4o keyframe analysis (FR-AICP-02) — best-effort
+        # ------------------------------------------------------------------ #
+        keyframe_analysis_text: str | None = None
+        if pipeline_result.keyframes:
+            try:
+                import openai as openai_mod
+
+                from app.services.keyframe_analysis import KeyframeAnalysisService
+
+                openai_client = openai_mod.AsyncOpenAI()
+                kf_svc = KeyframeAnalysisService(openai_client)
+
+                # Build rep metrics dicts for keyframe analysis
+                rep_metric_repo_kf = RepMetricRepository(repo.db)
+                db_rep_metrics_kf = await rep_metric_repo_kf.get_by_analysis(analysis_id)
+                rep_metrics_for_kf = [
+                    {"rep_number": rm.rep_index + 1, **(rm.metrics_json or {})}
+                    for rm in db_rep_metrics_kf
+                ]
+
+                kf_result = await kf_svc.analyze_keyframes(
+                    keyframes=pipeline_result.keyframes,
+                    exercise_type=analysis.exercise_type,
+                    exercise_variant=analysis.exercise_variant,
+                    rep_metrics=rep_metrics_for_kf,
+                )
+                # Serialize to text for coaching prompt
+                keyframe_analysis_text = kf_result.model_dump_json(indent=2)
+                logger.info("GPT-4o keyframe analysis completed for %s", analysis_id)
+            except Exception:
+                logger.warning(
+                    "GPT-4o keyframe analysis failed for %s — continuing without",
+                    analysis_id,
+                    exc_info=True,
+                )
+
+        await _write_heartbeat(redis)
+
+        # ------------------------------------------------------------------ #
+        # Body stats (FR-AICP-05) — best-effort
+        # ------------------------------------------------------------------ #
+        body_stats: dict | None = None
+        try:
+            from app.repositories.user_profile import UserProfileRepository
+
+            profile_repo = UserProfileRepository(repo.db)
+            profile = await profile_repo.get_by_user_id(analysis.user_id)
+            if profile:
+                body_stats = {}
+                for attr in ("height_cm", "weight_kg", "age", "experience_level"):
+                    val = getattr(profile, attr, None)
+                    if val is not None:
+                        body_stats[attr] = val
+                if not body_stats:
+                    body_stats = None
+        except Exception:
+            logger.warning(
+                "Failed to fetch user profile for %s — coaching without body stats",
+                analysis_id,
+            )
+
+        # ------------------------------------------------------------------ #
+        # Coaching: Claude Sonnet streaming via CoachingService (Phase 1)
         # ------------------------------------------------------------------ #
         coaching_repo = CoachingResultRepository(repo.db)
 
-        # Build rep metrics dicts for coaching prompt
         rep_metric_repo = RepMetricRepository(repo.db)
         db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
         rep_metrics_dicts = [
@@ -129,13 +190,27 @@ async def _run_pipeline(
         client = anthropic.AsyncAnthropic()
         coaching_svc = CoachingService(client)
 
-        coaching_output = await coaching_svc.generate_coaching(
-            exercise_type=analysis.exercise_type,
-            exercise_variant=analysis.exercise_variant,
-            rep_metrics=rep_metrics_dicts,
-            confidence_score=analysis.confidence_score or 0.0,
-            thresholds=thresholds,
+        # Open dedicated Redis for pub/sub (not the ARQ ctx["redis"])
+        import redis.asyncio as aioredis
+
+        pubsub_redis = aioredis.from_url(
+            os.environ.get("REDIS_URL", "redis://localhost:6379"),
+            decode_responses=True,
         )
+        try:
+            coaching_output = await coaching_svc.generate_coaching_streaming(
+                exercise_type=analysis.exercise_type,
+                exercise_variant=analysis.exercise_variant,
+                rep_metrics=rep_metrics_dicts,
+                confidence_score=analysis.confidence_score or 0.0,
+                thresholds=thresholds,
+                body_stats=body_stats,
+                keyframe_analysis_text=keyframe_analysis_text,
+                analysis_id=analysis_id,
+                pubsub_redis=pubsub_redis,
+            )
+        finally:
+            await pubsub_redis.aclose()
 
         # Store coaching result in DB
         coaching_result = CoachingResult(

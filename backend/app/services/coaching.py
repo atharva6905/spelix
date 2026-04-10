@@ -238,6 +238,7 @@ class CoachingService:
         model: str = MODEL,
     ) -> None:
         self._model = model
+        self._raw_client = anthropic_client
         if anthropic_client is None:
             # Defer instructor wrapping — will raise on use if not mocked
             self._instructor_client: Any = None
@@ -365,5 +366,134 @@ class CoachingService:
                 raise
 
         # All retries exhausted
+        assert last_exc is not None
+        raise last_exc
+
+    async def generate_coaching_streaming(
+        self,
+        *,
+        exercise_type: str,
+        exercise_variant: str,
+        rep_metrics: list[dict[str, Any]],
+        confidence_score: float,
+        thresholds: ThresholdConfig,
+        body_stats: dict[str, Any] | None = None,
+        keyframe_analysis_text: str | None = None,
+        analysis_id: Any = None,
+        pubsub_redis: Any = None,
+    ) -> CoachingOutput:
+        """Stream coaching from Claude, publish chunks to Redis, return validated output.
+
+        FR-AICP-07: Coaching output streamed via SSE.
+        FR-AICP-21: Prompt caching on system prompt via Anthropic cache-control.
+
+        Flow:
+        1. Call Anthropic streaming API with cache-control on system prompt.
+        2. For each text chunk, publish to Redis channel ``coaching:{analysis_id}``.
+        3. Accumulate full response text.
+        4. After stream completes, publish ``{"type": "done"}`` sentinel.
+        5. Validate accumulated text into CoachingOutput via instructor.
+        6. Return the validated CoachingOutput.
+
+        If pubsub_redis is None, skips Redis publishing (useful for tests).
+        Falls back to non-streaming generate_coaching() on error.
+        """
+        if self._raw_client is None:
+            raise ValueError(
+                "CoachingService was constructed with anthropic_client=None."
+            )
+
+        system_prompt = _build_system_prompt()
+        user_prompt = _build_user_prompt(
+            exercise_type=exercise_type,
+            exercise_variant=exercise_variant,
+            rep_metrics=rep_metrics,
+            confidence_score=confidence_score,
+            thresholds=thresholds,
+            body_stats=body_stats,
+            keyframe_analysis_text=keyframe_analysis_text,
+        )
+
+        channel = f"coaching:{analysis_id}" if analysis_id else None
+        accumulated_text = ""
+
+        last_exc: Exception | None = None
+
+        for delay in [None, *_BACKOFF_DELAYS]:
+            if delay is not None:
+                await asyncio.sleep(delay)
+
+            try:
+                # FR-AICP-21: cache-control on system prompt
+                async with self._raw_client.messages.stream(
+                    model=self._model,
+                    max_tokens=MAX_TOKENS,
+                    temperature=TEMPERATURE,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user_prompt}],
+                ) as stream:
+                    accumulated_text = ""
+                    async for text in stream.text_stream:
+                        accumulated_text += text
+
+                        # Publish chunk to Redis for SSE endpoint
+                        if pubsub_redis and channel:
+                            await pubsub_redis.publish(
+                                channel,
+                                json.dumps({"type": "chunk", "text": text}),
+                            )
+
+                # Publish done sentinel
+                if pubsub_redis and channel:
+                    await pubsub_redis.publish(
+                        channel,
+                        json.dumps({"type": "done"}),
+                    )
+
+                # Validate accumulated text into CoachingOutput via instructor
+                if self._instructor_client is None:
+                    raise ValueError("Instructor client not available")
+
+                validated: CoachingOutput = await self._instructor_client.chat.completions.create(
+                    model=self._model,
+                    max_tokens=MAX_TOKENS,
+                    temperature=0.1,
+                    system=system_prompt,
+                    messages=[
+                        {"role": "user", "content": user_prompt},
+                        {"role": "assistant", "content": accumulated_text},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Parse the coaching feedback above into the required "
+                                "structured format. Preserve all content exactly."
+                            ),
+                        },
+                    ],
+                    response_model=CoachingOutput,
+                )
+                return validated
+
+            except Exception as exc:
+                if _is_auth_error(exc):
+                    logger.critical(
+                        "Anthropic 401 authentication error during streaming."
+                    )
+                    raise
+
+                if _is_retryable(exc):
+                    last_exc = exc
+                    logger.warning("Retryable Anthropic streaming error: %s", exc)
+                    continue
+
+                logger.error("Non-retryable Anthropic streaming error: %s", exc)
+                raise
+
         assert last_exc is not None
         raise last_exc

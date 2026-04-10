@@ -119,7 +119,7 @@ async def test_coaching_wired_produces_completed_status():
     # Mock coaching service
     mock_coaching_output = _mock_coaching_output()
 
-    async def mock_cv_pipeline(**kwargs: Any) -> None:
+    async def mock_cv_pipeline(**kwargs: Any) -> MagicMock:
         """Simulate CV pipeline: queued → qg_pending → processing."""
         from app.services.status import transition as _transition
 
@@ -129,6 +129,11 @@ async def test_coaching_wired_produces_completed_status():
         await repo_arg.update(a)
         a.status = _transition(a.status, "processing")
         await repo_arg.update(a)
+
+        # Return a PipelineResult-like object
+        result = MagicMock()
+        result.keyframes = []
+        return result
 
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
@@ -159,8 +164,9 @@ async def test_coaching_wired_produces_completed_status():
         "app.workers.analysis_worker._generate_and_upload_pdf",
         new_callable=AsyncMock,
     ):
-        # Configure coaching service mock
+        # Configure coaching service mock — Phase 1 uses generate_coaching_streaming
         mock_svc_instance = AsyncMock()
+        mock_svc_instance.generate_coaching_streaming.return_value = mock_coaching_output
         mock_svc_instance.generate_coaching.return_value = mock_coaching_output
         MockCoachingSvc.return_value = mock_svc_instance
 
@@ -169,9 +175,18 @@ async def test_coaching_wired_produces_completed_status():
         mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session_factory.return_value = mock_session
 
-        from app.workers.analysis_worker import process_analysis
+        # Patch redis.asyncio for pub/sub (worker opens dedicated connection)
+        mock_pubsub_redis = AsyncMock()
+        mock_pubsub_redis.aclose = AsyncMock()
 
-        await process_analysis(ctx, analysis_id)
+        import redis.asyncio as real_aioredis
+
+        with patch.object(
+            real_aioredis, "from_url", return_value=mock_pubsub_redis,
+        ):
+            from app.workers.analysis_worker import process_analysis
+
+            await process_analysis(ctx, analysis_id)
 
     # Verify status transitions include coaching → completed
     assert "coaching" in statuses_seen
@@ -179,7 +194,7 @@ async def test_coaching_wired_produces_completed_status():
     assert statuses_seen[-1] == "completed"
 
     # Verify coaching service was called
-    mock_svc_instance.generate_coaching.assert_called_once()
+    mock_svc_instance.generate_coaching_streaming.assert_called_once()
 
     # Verify coaching result was persisted
     assert len(coaching_created) == 1
@@ -203,7 +218,7 @@ async def test_coaching_failure_sets_failed_status():
     mock_repo.update.return_value = analysis
     mock_repo._db = MagicMock()
 
-    async def mock_cv_pipeline2(**kwargs: Any) -> None:
+    async def mock_cv_pipeline2(**kwargs: Any) -> MagicMock:
         from app.services.status import transition as _transition
 
         a = kwargs["analysis"]
@@ -212,6 +227,10 @@ async def test_coaching_failure_sets_failed_status():
         await repo_arg.update(a)
         a.status = _transition(a.status, "processing")
         await repo_arg.update(a)
+
+        result = MagicMock()
+        result.keyframes = []
+        return result
 
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
@@ -239,7 +258,7 @@ async def test_coaching_failure_sets_failed_status():
         MockRepMetricRepo.return_value = mock_rep_repo
 
         mock_svc = AsyncMock()
-        mock_svc.generate_coaching.side_effect = RuntimeError("LLM exploded")
+        mock_svc.generate_coaching_streaming.side_effect = RuntimeError("LLM exploded")
         MockCoachingSvc.return_value = mock_svc
 
         mock_session = AsyncMock()
@@ -247,9 +266,18 @@ async def test_coaching_failure_sets_failed_status():
         mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session_factory.return_value = mock_session
 
-        from app.workers.analysis_worker import process_analysis
+        # Patch redis.asyncio for pub/sub
+        mock_pubsub_redis = AsyncMock()
+        mock_pubsub_redis.aclose = AsyncMock()
 
-        await process_analysis(ctx, analysis_id)
+        import redis.asyncio as real_aioredis
+
+        with patch.object(
+            real_aioredis, "from_url", return_value=mock_pubsub_redis,
+        ):
+            from app.workers.analysis_worker import process_analysis
+
+            await process_analysis(ctx, analysis_id)
 
     assert analysis.status == "failed"
     assert "LLM exploded" in analysis.error_message
