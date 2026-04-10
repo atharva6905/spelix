@@ -572,7 +572,7 @@ def check_camera_stability(frames_gray: list[np.ndarray]) -> GateCheckResult:
         flow = cv2.calcOpticalFlowFarneback(
             frames_gray[i],
             frames_gray[i + 1],
-            None,
+            None,  # type: ignore[arg-type]
             pyr_scale=0.5,
             levels=3,
             winsize=15,
