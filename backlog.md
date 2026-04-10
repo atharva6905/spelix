@@ -46,7 +46,7 @@ B-055–B-070 (HIGH): ErrorBoundary wired, button disabled fixed, sortable table
 | B-090 | Frontend tests: HomePage, AppLayout, hooks | done | M | — | — | M-23 | `frontend/src/` |
 | B-091 | Fix weak test assertions (heartbeat TTL, QG message) | done | S | — | — | M-24, M-25 | `test_analysis_worker.py`, `test_quality_gates.py` |
 | B-092 | Fix `datetime.utcnow()` deprecation | done | S | — | — | M-26 | `test_repositories.py:109` |
-| B-093 | Implement lighting + stability warning gates | todo | M | — | FR-CVPL-08/09 | M-3 | `cv/quality_gates.py` |
+| B-093 | Implement lighting + stability warning gates | done | M | — | FR-CVPL-08/09 | M-3 | `cv/quality_gates.py` |
 
 ---
 
