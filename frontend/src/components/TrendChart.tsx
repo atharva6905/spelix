@@ -30,6 +30,22 @@ export interface TrendChartProps {
   label: string;
 }
 
+/**
+ * Formats a 0–1 decimal confidence value as a percentage string.
+ * Used by the line chart tooltip so users see "87%" instead of "0.87".
+ */
+export function formatLineValue(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+/**
+ * Formats an integer rep-count value as a plain string.
+ * Used by the bar chart tooltip so users see "5" instead of "5.00".
+ */
+export function formatBarValue(value: number): string {
+  return String(Math.round(value));
+}
+
 export default function TrendChart({ data, type, label }: TrendChartProps) {
   if (data.length === 0) {
     return (
@@ -64,7 +80,7 @@ export default function TrendChart({ data, type, label }: TrendChartProps) {
             />
             <YAxis tick={{ fontSize: 10 }} domain={[0, 1]} />
             <Tooltip
-              formatter={(value) => [typeof value === "number" ? value.toFixed(2) : String(value ?? ""), label]}
+              formatter={(value) => [typeof value === "number" ? formatLineValue(value) : String(value ?? ""), label]}
               labelFormatter={(l) => new Date(String(l)).toLocaleDateString()}
             />
             <Line
@@ -89,7 +105,7 @@ export default function TrendChart({ data, type, label }: TrendChartProps) {
             />
             <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
             <Tooltip
-              formatter={(value) => [String(value ?? ""), label]}
+              formatter={(value) => [typeof value === "number" ? formatBarValue(value) : String(value ?? ""), label]}
               labelFormatter={(l) => new Date(String(l)).toLocaleDateString()}
             />
             <Bar dataKey="value" fill="#10b981" radius={[2, 2, 0, 0]} />
