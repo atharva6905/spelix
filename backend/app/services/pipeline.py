@@ -30,7 +30,9 @@ from app.cv.barbell_detection import (
     compute_bar_path_from_landmarks,
     track_barbell,
 )
-from app.cv.confidence import compute_session_confidence
+from app.cv.confidence import (
+    compute_session_confidence,
+)
 from app.cv.metric_extraction import extract_rep_metrics
 from app.cv.pose_extraction import extract_frames, extract_landmarks
 from app.cv.quality_gates import run_quality_gates
@@ -65,6 +67,8 @@ class PipelineResult:
         "reps",
         "rep_metrics",
         "session_confidence",
+        "confidence_results",
+        "score_result",
         "bar_path",
         "annotated_video_storage_path",
         "plot_storage_path",
@@ -79,6 +83,8 @@ class PipelineResult:
         self.reps: list = []
         self.rep_metrics: list = []
         self.session_confidence: float = 0.0
+        self.confidence_results: list = []
+        self.score_result: Any = None
         self.bar_path: dict | None = None
         self.annotated_video_storage_path: str | None = None
         self.plot_storage_path: str | None = None
@@ -118,6 +124,57 @@ async def download_video(
     with open(local_path, "wb") as f:
         f.write(data)
     return local_path
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _aggregate_rep_metrics(
+    rep_metrics: list,
+    reps: list,
+    session_confidence: float,
+) -> dict[str, float]:
+    """Flatten per-rep metrics into a single dict for scoring.
+
+    Takes the mean of each metric key across all reps. Also adds:
+    - confidence_score: session-level confidence
+    - rep_duration_std: std dev of rep durations (for ControlScore)
+    - depth_angle_std: std dev of depth angles (for TechniqueScore)
+    """
+    if not rep_metrics:
+        return {"confidence_score": session_confidence}
+
+    # Collect all metric keys and their values across reps
+    all_keys: dict[str, list[float]] = {}
+    for rm in rep_metrics:
+        for k, v in rm.metrics.items():
+            if isinstance(v, (int, float)):
+                all_keys.setdefault(k, []).append(float(v))
+
+    # Mean of each metric
+    result: dict[str, float] = {}
+    for k, values in all_keys.items():
+        result[k] = sum(values) / len(values) if values else 0.0
+
+    # Add std dev for control/technique scoring
+    if "rep_duration_s" in all_keys and len(all_keys["rep_duration_s"]) > 1:
+        vals = all_keys["rep_duration_s"]
+        mean = sum(vals) / len(vals)
+        result["rep_duration_std"] = (
+            sum((v - mean) ** 2 for v in vals) / len(vals)
+        ) ** 0.5
+
+    if "depth_angle" in all_keys and len(all_keys["depth_angle"]) > 1:
+        vals = all_keys["depth_angle"]
+        mean = sum(vals) / len(vals)
+        result["depth_angle_std"] = (
+            sum((v - mean) ** 2 for v in vals) / len(vals)
+        ) ** 0.5
+
+    result["confidence_score"] = session_confidence
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -296,9 +353,37 @@ async def run_cv_pipeline(
     result.rep_metrics = rep_metrics
 
     # ------------------------------------------------------------------ #
-    # Step 7: Confidence scoring
+    # Step 7: Tier 1–5 confidence scoring (FR-CVPL-20–25, replaces Phase 0)
     # ------------------------------------------------------------------ #
-    rep_confidences = [r.confidence_score for r in reps]
+    from app.config import ThresholdConfig
+    from app.cv.confidence import compute_confidence_result
+
+    cfg = ThresholdConfig()
+    confidence_results = []
+    for rm in rep_metrics:
+        # Find depth frame: frame with min primary angle within the rep range
+        primary_angles = primary_series[rm.start_frame:rm.end_frame + 1]
+        if len(primary_angles) > 0:
+            depth_frame_idx = rm.start_frame + int(np.argmin(primary_angles))
+        else:
+            depth_frame_idx = (rm.start_frame + rm.end_frame) // 2
+
+        conf_result = compute_confidence_result(
+            landmarks_per_frame=landmarks_per_frame,
+            start_frame=rm.start_frame,
+            end_frame=rm.end_frame,
+            exercise_type=exercise_type,
+            depth_frame_idx=depth_frame_idx,
+            cfg=cfg,
+            rep_index=rm.rep_index,
+        )
+        confidence_results.append(conf_result)
+        # Backfill DetectedRep.confidence_score with Tier 5 value
+        if rm.rep_index < len(reps):
+            reps[rm.rep_index].confidence_score = conf_result.tier5
+
+    result.confidence_results = confidence_results
+    rep_confidences = [cr.tier5 for cr in confidence_results]
     session_confidence = compute_session_confidence(rep_confidences)
     result.session_confidence = session_confidence
 
@@ -355,6 +440,32 @@ async def run_cv_pipeline(
             exercise_type,
         )
     result.bar_path = bar_path
+
+    # ------------------------------------------------------------------ #
+    # Step 9b: Form scoring (FR-SCOR-01–08) — needs bar_path from Step 9
+    # ------------------------------------------------------------------ #
+    from app.cv.scoring import OverallFormScore
+
+    scorer = OverallFormScore()
+    # Aggregate per-rep metrics into a single dict (mean across reps)
+    agg_metrics = _aggregate_rep_metrics(rep_metrics, reps, session_confidence)
+    score_result = scorer.compute(agg_metrics, bar_path, cfg, exercise_type)
+    result.score_result = score_result
+
+    # Write form scores to analysis row
+    safety_dim = score_result.get_dimension("safety")
+    technique_dim = score_result.get_dimension("technique")
+    path_dim = score_result.get_dimension("path_balance")
+    control_dim = score_result.get_dimension("control")
+
+    analysis.form_score_safety = safety_dim.score if safety_dim else None
+    analysis.form_score_technique = technique_dim.score if technique_dim else None
+    analysis.form_score_path_balance = path_dim.score if path_dim else None
+    analysis.form_score_control = control_dim.score if control_dim else None
+    analysis.form_score_overall = score_result.overall
+    await repo.update(analysis)
+
+    await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
     # Step 10: Artifact generation (CPU-bound)
