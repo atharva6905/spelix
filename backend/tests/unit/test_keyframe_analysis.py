@@ -13,11 +13,14 @@ import pytest
 
 from app.cv.keyframe_extraction import RepKeyframes
 from app.services.keyframe_analysis import (
+    ExerciseClassification,
     KeyframeAnalysis,
     KeyframeAnalysisResult,
     KeyframeAnalysisService,
     _build_image_content,
 )
+
+_ = ExerciseClassification  # prevent ruff from stripping — used in tests below
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -318,3 +321,134 @@ class TestKeyframeAnalysisService:
 
         assert sleep_count == 0
         assert mock_instructor.chat.completions.create.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# ExerciseClassification schema tests (FR-XDET-04)
+# ---------------------------------------------------------------------------
+
+
+class TestExerciseClassificationSchema:
+    def test_valid_classification(self) -> None:
+        cls = ExerciseClassification(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            confidence=0.92,
+            reasoning="Upright torso, barbell on upper back, deep knee flexion.",
+        )
+        assert cls.exercise_type == "squat"
+        assert cls.confidence == 0.92
+
+    def test_confidence_bounds(self) -> None:
+        with pytest.raises(Exception):
+            ExerciseClassification(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                confidence=1.5,
+                reasoning="Over bounds",
+            )
+
+
+# ---------------------------------------------------------------------------
+# classify_exercise service tests (FR-XDET-04)
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyExercise:
+    @pytest.mark.asyncio
+    async def test_classify_returns_structured_result(self) -> None:
+        """Mocked GPT-4o → valid ExerciseClassification."""
+        mock_client = MagicMock()
+        expected = ExerciseClassification(
+            exercise_type="bench",
+            exercise_variant="flat",
+            confidence=0.88,
+            reasoning="Supine position with barbell press motion.",
+        )
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(return_value=expected)
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+
+            svc = KeyframeAnalysisService(openai_client=mock_client)
+            result = await svc.classify_exercise(
+                frame_images_b64=[_TINY_JPEG_B64, _TINY_JPEG_B64],
+            )
+
+        assert isinstance(result, ExerciseClassification)
+        assert result.exercise_type == "bench"
+        assert result.confidence == 0.88
+
+    @pytest.mark.asyncio
+    async def test_classify_sends_images(self) -> None:
+        """Verify user message contains image_url blocks for classification."""
+        mock_client = MagicMock()
+        expected = ExerciseClassification(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            confidence=0.9,
+            reasoning="Test",
+        )
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def capture_create(**kwargs: Any) -> ExerciseClassification:
+            captured_kwargs.update(kwargs)
+            return expected
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = capture_create
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+
+            svc = KeyframeAnalysisService(openai_client=mock_client)
+            await svc.classify_exercise(
+                frame_images_b64=[_TINY_JPEG_B64, _TINY_JPEG_B64, _TINY_JPEG_B64],
+            )
+
+        messages = captured_kwargs["messages"]
+        user_msg = messages[1]
+        image_blocks = [c for c in user_msg["content"] if c.get("type") == "image_url"]
+        assert len(image_blocks) == 3
+
+    @pytest.mark.asyncio
+    async def test_classify_caps_at_3_images(self) -> None:
+        """Even if more than 3 images provided, only first 3 sent."""
+        mock_client = MagicMock()
+        expected = ExerciseClassification(
+            exercise_type="deadlift",
+            exercise_variant="conventional",
+            confidence=0.85,
+            reasoning="Test",
+        )
+
+        captured_kwargs: dict[str, Any] = {}
+
+        async def capture_create(**kwargs: Any) -> ExerciseClassification:
+            captured_kwargs.update(kwargs)
+            return expected
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = capture_create
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+
+            svc = KeyframeAnalysisService(openai_client=mock_client)
+            await svc.classify_exercise(
+                frame_images_b64=[_TINY_JPEG_B64] * 5,
+            )
+
+        messages = captured_kwargs["messages"]
+        user_msg = messages[1]
+        image_blocks = [c for c in user_msg["content"] if c.get("type") == "image_url"]
+        assert len(image_blocks) == 3
+
+    @pytest.mark.asyncio
+    async def test_classify_none_client_raises(self) -> None:
+        svc = KeyframeAnalysisService(openai_client=None)
+        with pytest.raises(ValueError):
+            await svc.classify_exercise(frame_images_b64=[_TINY_JPEG_B64])

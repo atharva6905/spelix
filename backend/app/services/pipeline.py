@@ -73,6 +73,7 @@ class PipelineResult:
         "keyframes",
         "annotated_video_storage_path",
         "plot_storage_path",
+        "detection_result",
     )
 
     def __init__(self) -> None:
@@ -90,6 +91,7 @@ class PipelineResult:
         self.keyframes: list = []
         self.annotated_video_storage_path: str | None = None
         self.plot_storage_path: str | None = None
+        self.detection_result: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +264,30 @@ async def run_cv_pipeline(
     result.frame_height = frame_height
 
     await write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Step 2b: Exercise auto-detection (FR-XDET-03)
+    # ------------------------------------------------------------------ #
+    from app.cv.exercise_detection import detect_exercise_heuristic
+
+    detection = await loop.run_in_executor(
+        None, detect_exercise_heuristic, landmarks_per_frame,
+    )
+    result.detection_result = detection
+    logger.info(
+        "Exercise detection: %s (conf=%.2f, method=%s) for analysis %s",
+        detection.detected_type, detection.confidence, detection.method, analysis_id,
+    )
+
+    # Store detection result as JSONB on the analysis for FR-XDET-07
+    analysis.detection_result = {
+        "detected_type": detection.detected_type,
+        "detected_variant": detection.detected_variant,
+        "confidence": detection.confidence,
+        "method": detection.method,
+        "details": detection.details,
+    }
+    await repo.update(analysis)
 
     # ------------------------------------------------------------------ #
     # Step 3: Quality gates

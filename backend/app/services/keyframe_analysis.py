@@ -53,6 +53,28 @@ _BACKOFF_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 from pydantic import BaseModel, Field
 
 
+class ExerciseClassification(BaseModel):
+    """GPT-4o exercise classification result (FR-XDET-04)."""
+
+    exercise_type: str = Field(
+        description="Detected exercise: 'squat', 'bench', or 'deadlift'.",
+    )
+    exercise_variant: str = Field(
+        description=(
+            "Detected variant: 'high_bar', 'low_bar', 'flat', 'incline', "
+            "'decline', 'conventional', 'sumo', or 'romanian'."
+        ),
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Classification confidence from 0.0 to 1.0.",
+    )
+    reasoning: str = Field(
+        description="Brief explanation of why this classification was chosen.",
+    )
+
+
 class KeyframeAnalysis(BaseModel):
     """Per-rep visual analysis from GPT-4o."""
 
@@ -297,6 +319,89 @@ class KeyframeAnalysisService:
                     logger.warning("Retryable OpenAI error: %s", exc)
                     continue
 
+                logger.error("Non-retryable OpenAI error: %s", exc)
+                raise
+
+        assert last_exc is not None
+        raise last_exc
+
+    async def classify_exercise(
+        self,
+        *,
+        frame_images_b64: list[str],
+    ) -> "ExerciseClassification":
+        """GPT-4o exercise classification fallback (FR-XDET-04).
+
+        Sends up to 3 keyframe images and asks GPT-4o to classify
+        the exercise type and variant.
+
+        Parameters
+        ----------
+        frame_images_b64:
+            List of base64-encoded JPEG frames (first 3 from the video).
+
+        Returns
+        -------
+        ExerciseClassification
+            Detected exercise type, variant, and confidence.
+        """
+        if self._instructor_client is None:
+            raise ValueError(
+                "KeyframeAnalysisService constructed with openai_client=None."
+            )
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    "Classify the barbell exercise shown in these frames.\n"
+                    "Choose from: squat, bench, deadlift.\n"
+                    "Also identify the variant if possible."
+                ),
+            },
+        ]
+        for i, b64 in enumerate(frame_images_b64[:3]):
+            content.append({"type": "text", "text": f"Frame {i + 1}:"})
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}", "detail": "low"},
+            })
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a barbell exercise classifier. Given video frames, "
+                    "identify the exercise type (squat, bench, deadlift) and "
+                    "variant. Be precise and confident."
+                ),
+            },
+            {"role": "user", "content": content},
+        ]
+
+        last_exc: Exception | None = None
+        for delay in [None, *_BACKOFF_DELAYS]:
+            if delay is not None:
+                await asyncio.sleep(delay)
+            try:
+                result: ExerciseClassification = (
+                    await self._instructor_client.chat.completions.create(
+                        model=self._model,
+                        max_tokens=256,
+                        temperature=0.1,
+                        messages=messages,
+                        response_model=ExerciseClassification,
+                    )
+                )
+                return result
+            except Exception as exc:
+                if _is_auth_error(exc):
+                    logger.critical("OpenAI 401 — check OPENAI_API_KEY.")
+                    raise
+                if _is_retryable(exc):
+                    last_exc = exc
+                    logger.warning("Retryable OpenAI error: %s", exc)
+                    continue
                 logger.error("Non-retryable OpenAI error: %s", exc)
                 raise
 
