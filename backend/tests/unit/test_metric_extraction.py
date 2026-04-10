@@ -147,7 +147,7 @@ class TestSquatMetrics:
         assert len(result) == 1
         return result[0]
 
-    def test_squat_has_all_6_metrics(self):
+    def test_squat_has_all_metrics(self):
         rm = self._run()
         expected_keys = {
             "depth_angle",
@@ -155,7 +155,11 @@ class TestSquatMetrics:
             "torso_lean",
             "rep_duration_s",
             "descent_duration_s",
+            "eccentric_duration_s",
             "ascent_duration_s",
+            "lockout_passed",
+            "lockout_confidence",
+            "phase_of_max_deviation",
         }
         assert expected_keys == set(rm.metrics.keys())
 
@@ -232,14 +236,18 @@ class TestBenchMetrics:
         assert len(result) == 1
         return result[0]
 
-    def test_bench_has_all_5_metrics(self):
+    def test_bench_has_all_metrics(self):
         rm = self._run()
         expected_keys = {
             "elbow_angle_at_bottom",
             "shoulder_angle_at_bottom",
             "rep_duration_s",
             "descent_duration_s",
+            "eccentric_duration_s",
             "ascent_duration_s",
+            "lockout_passed",
+            "lockout_confidence",
+            "phase_of_max_deviation",
         }
         assert expected_keys == set(rm.metrics.keys())
 
@@ -291,7 +299,7 @@ class TestDeadliftMetrics:
         assert len(result) == 1
         return result[0]
 
-    def test_deadlift_has_all_6_metrics(self):
+    def test_deadlift_has_all_metrics(self):
         rm = self._run()
         expected_keys = {
             "hip_angle_at_bottom",
@@ -299,7 +307,11 @@ class TestDeadliftMetrics:
             "torso_lean_at_start",
             "rep_duration_s",
             "descent_duration_s",
+            "eccentric_duration_s",
             "ascent_duration_s",
+            "lockout_passed",
+            "lockout_confidence",
+            "phase_of_max_deviation",
         }
         assert expected_keys == set(rm.metrics.keys())
 
@@ -324,6 +336,86 @@ class TestDeadliftMetrics:
         rm = self._run()
         assert rm.metrics["descent_duration_s"] > 0
         assert rm.metrics["ascent_duration_s"] > 0
+
+
+# ---------------------------------------------------------------------------
+# FR-REPM-07: Eccentric duration alias
+# ---------------------------------------------------------------------------
+
+
+class TestEccentricDuration:
+    """FR-REPM-07: eccentric_duration_s mirrors descent duration for all exercises."""
+
+    def test_squat_eccentric_equals_descent(self):
+        from app.cv.metric_extraction import extract_rep_metrics
+        landmarks = make_landmarks(60)
+        ts = make_squat_timeseries(60)
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=80.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "squat", "high_bar", 30.0)[0]
+        assert rm.metrics["eccentric_duration_s"] == rm.metrics["descent_duration_s"]
+
+    def test_bench_eccentric_equals_descent(self):
+        from app.cv.metric_extraction import extract_rep_metrics
+        landmarks = make_landmarks(60)
+        ts = make_bench_timeseries(60)
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=85.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "bench", "flat", 30.0)[0]
+        assert rm.metrics["eccentric_duration_s"] == rm.metrics["descent_duration_s"]
+
+    def test_deadlift_eccentric_equals_descent(self):
+        from app.cv.metric_extraction import extract_rep_metrics
+        landmarks = make_landmarks(60)
+        ts = make_deadlift_timeseries(60)
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=75.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "deadlift", "conventional", 30.0)[0]
+        assert rm.metrics["eccentric_duration_s"] == rm.metrics["descent_duration_s"]
+
+
+# ---------------------------------------------------------------------------
+# FR-REPM-08: Lockout quality
+# ---------------------------------------------------------------------------
+
+
+class TestLockoutQuality:
+    def test_squat_lockout_fields_present(self):
+        from app.cv.metric_extraction import extract_rep_metrics
+        landmarks = make_landmarks(60)
+        ts = make_squat_timeseries(60)
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=80.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "squat", "high_bar", 30.0)[0]
+        assert "lockout_passed" in rm.metrics
+        assert "lockout_confidence" in rm.metrics
+        assert rm.metrics["lockout_passed"] in (0.0, 1.0)
+        assert 0.0 <= rm.metrics["lockout_confidence"] <= 1.0
+
+    def test_squat_lockout_passed_when_end_angle_high(self):
+        """Synthetic timeseries ends at 170° → lockout should pass."""
+        landmarks = make_landmarks(60)
+        # Override hip and knee to end at 170°
+        ts = make_squat_timeseries(60)
+        ts["hip_angle"][59] = 170.0
+        ts["knee_angle"][59] = 170.0
+        from app.cv.metric_extraction import extract_rep_metrics
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=80.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "squat", "high_bar", 30.0)[0]
+        assert rm.metrics["lockout_passed"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# FR-REPM-09: Phase of max deviation
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseOfMaxDeviation:
+    def test_phase_field_is_valid_phase_name(self):
+        from app.cv.metric_extraction import extract_rep_metrics
+        landmarks = make_landmarks(60)
+        ts = make_squat_timeseries(60)
+        rep = make_detected_rep(start_frame=0, end_frame=59, min_angle=80.0)
+        rm = extract_rep_metrics([rep], landmarks, ts, "squat", "high_bar", 30.0)[0]
+        assert rm.metrics["phase_of_max_deviation"] in {
+            "setup", "descent", "bottom", "ascent", "lockout",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +524,11 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         for key, val in result[0].metrics.items():
-            assert isinstance(val, float), f"metric {key} is not a float"
+            # phase_of_max_deviation is a string (phase name); all others are floats
+            if key == "phase_of_max_deviation":
+                assert isinstance(val, str)
+            else:
+                assert isinstance(val, float), f"metric {key} is not a float"
 
     def test_all_bench_metric_values_are_floats(self):
         landmarks = make_landmarks(60)
@@ -447,7 +543,11 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         for key, val in result[0].metrics.items():
-            assert isinstance(val, float), f"metric {key} is not a float"
+            # phase_of_max_deviation is a string (phase name); all others are floats
+            if key == "phase_of_max_deviation":
+                assert isinstance(val, str)
+            else:
+                assert isinstance(val, float), f"metric {key} is not a float"
 
     def test_all_deadlift_metric_values_are_floats(self):
         landmarks = make_landmarks(60)
@@ -462,4 +562,8 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         for key, val in result[0].metrics.items():
-            assert isinstance(val, float), f"metric {key} is not a float"
+            # phase_of_max_deviation is a string (phase name); all others are floats
+            if key == "phase_of_max_deviation":
+                assert isinstance(val, str)
+            else:
+                assert isinstance(val, float), f"metric {key} is not a float"

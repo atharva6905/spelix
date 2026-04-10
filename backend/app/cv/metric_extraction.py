@@ -47,7 +47,7 @@ class RepMetrics:
     rep_index: int
     start_frame: int
     end_frame: int
-    metrics: dict[str, float]  # exercise-specific metrics
+    metrics: dict[str, float | str]  # exercise-specific metrics (may include phase labels)
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,108 @@ def _find_descent_end_ascent_start(
 
 
 # ---------------------------------------------------------------------------
+# FR-REPM-08: Lockout quality assessment
+# ---------------------------------------------------------------------------
+
+
+def _assess_lockout_quality(
+    exercise_type: str,
+    end_frame: int,
+    landmarks_per_frame: list[np.ndarray],
+    angle_timeseries: dict[str, np.ndarray],
+) -> tuple[bool, float]:
+    """
+    Assess lockout quality at rep end for squat, bench, or deadlift (FR-REPM-08).
+
+    Returns
+    -------
+    (passed, confidence) tuple.
+    - squat: full hip AND knee extension (both >= 165°)
+    - bench: full elbow extension (>= 165°)
+    - deadlift: full hip extension (>= 165°) + shoulders behind bar
+    Confidence is the mean visibility of the joints inspected.
+    """
+    if end_frame >= len(landmarks_per_frame):
+        return (False, 0.0)
+    frame = landmarks_per_frame[end_frame]
+
+    if exercise_type == "squat":
+        hip_ok = angle_timeseries["hip_angle"][end_frame] >= 165.0
+        knee_ok = angle_timeseries["knee_angle"][end_frame] >= 165.0
+        vis = float(np.mean([frame[_HIP, 3], frame[_KNEE, 3]]))
+        return (bool(hip_ok and knee_ok), vis)
+    if exercise_type == "bench":
+        elbow_ok = angle_timeseries["elbow_angle"][end_frame] >= 165.0
+        vis = float(frame[_ELBOW, 3])
+        return (bool(elbow_ok), vis)
+    if exercise_type == "deadlift":
+        hip_ok = angle_timeseries["hip_angle"][end_frame] >= 165.0
+        # Shoulders behind bar: shoulder x should be at or behind hip x
+        # (sagittal view, right-facing = x increases forward)
+        shoulder_behind = bool(frame[_SHOULDER, 0] <= frame[_HIP, 0] + 0.02)
+        vis = float(np.mean([frame[_HIP, 3], frame[_SHOULDER, 3]]))
+        return (bool(hip_ok and shoulder_behind), vis)
+    return (False, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# FR-REPM-09: Phase of maximum deviation
+# ---------------------------------------------------------------------------
+
+
+def _phase_of_max_deviation(
+    primary_series: np.ndarray,
+    start: int,
+    end: int,
+    depth_frame: int,
+    threshold_angle: float,
+) -> str:
+    """
+    Identify which lift phase shows the greatest deviation from threshold_angle.
+
+    Phases: setup | descent | bottom | ascent | lockout
+    Returns the phase name with maximum |angle - threshold| within its frames.
+    """
+    if end <= start:
+        return "bottom"
+
+    # Phase segmentation:
+    # - setup: first ~10% of rep
+    # - descent: setup_end → just before depth (within 5% window)
+    # - bottom: ±5% window around depth_frame
+    # - ascent: after bottom window → just before lockout
+    # - lockout: last ~10% of rep
+    rep_len = end - start
+    setup_end = start + max(1, int(0.10 * rep_len))
+    lockout_start = end - max(1, int(0.10 * rep_len))
+    bottom_half = max(1, int(0.05 * rep_len))
+    bottom_start = max(setup_end, depth_frame - bottom_half)
+    bottom_end = min(lockout_start, depth_frame + bottom_half)
+
+    phase_ranges = {
+        "setup": (start, setup_end),
+        "descent": (setup_end, bottom_start),
+        "bottom": (bottom_start, bottom_end + 1),
+        "ascent": (bottom_end + 1, lockout_start),
+        "lockout": (lockout_start, end + 1),
+    }
+
+    best_phase = "bottom"
+    best_dev = -1.0
+    for phase, (a, b) in phase_ranges.items():
+        if b <= a or a >= len(primary_series):
+            continue
+        segment = primary_series[a : min(b, len(primary_series))]
+        if segment.size == 0:
+            continue
+        dev = float(np.max(np.abs(segment - threshold_angle)))
+        if dev > best_dev:
+            best_dev = dev
+            best_phase = phase
+    return best_phase
+
+
+# ---------------------------------------------------------------------------
 # Exercise-specific analyzers
 # ---------------------------------------------------------------------------
 
@@ -131,7 +233,7 @@ def _squat_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
-) -> dict[str, float]:
+) -> dict[str, float | str]:
     """
     Extract squat metrics for one rep.
 
@@ -162,13 +264,24 @@ def _squat_metrics(
     descent_duration_s = descent_frames / fps
     ascent_duration_s = ascent_frames / fps
 
+    lockout_passed, lockout_conf = _assess_lockout_quality(
+        "squat", end, landmarks_per_frame, angle_timeseries,
+    )
+    max_dev_phase = _phase_of_max_deviation(
+        hip_series, start, end, depth_frame, threshold_angle=90.0,
+    )
+
     return {
         "depth_angle": depth_angle,
         "knee_angle_at_depth": knee_angle_at_depth,
         "torso_lean": torso_lean,
         "rep_duration_s": rep_duration_s,
         "descent_duration_s": descent_duration_s,
+        "eccentric_duration_s": descent_duration_s,  # FR-REPM-07
         "ascent_duration_s": ascent_duration_s,
+        "lockout_passed": float(lockout_passed),
+        "lockout_confidence": lockout_conf,
+        "phase_of_max_deviation": max_dev_phase,  # type: ignore[dict-item]
     }
 
 
@@ -177,7 +290,7 @@ def _bench_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
-) -> dict[str, float]:
+) -> dict[str, float | str]:
     """
     Extract bench press metrics for one rep.
 
@@ -206,12 +319,23 @@ def _bench_metrics(
     descent_duration_s = descent_frames / fps
     ascent_duration_s = ascent_frames / fps
 
+    lockout_passed, lockout_conf = _assess_lockout_quality(
+        "bench", end, landmarks_per_frame, angle_timeseries,
+    )
+    max_dev_phase = _phase_of_max_deviation(
+        elbow_series, start, end, bottom_frame, threshold_angle=90.0,
+    )
+
     return {
         "elbow_angle_at_bottom": elbow_angle_at_bottom,
         "shoulder_angle_at_bottom": shoulder_angle_at_bottom,
         "rep_duration_s": rep_duration_s,
         "descent_duration_s": descent_duration_s,
+        "eccentric_duration_s": descent_duration_s,  # FR-REPM-07
         "ascent_duration_s": ascent_duration_s,
+        "lockout_passed": float(lockout_passed),
+        "lockout_confidence": lockout_conf,
+        "phase_of_max_deviation": max_dev_phase,
     }
 
 
@@ -220,7 +344,7 @@ def _deadlift_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
-) -> dict[str, float]:
+) -> dict[str, float | str]:
     """
     Extract deadlift metrics for one rep.
 
@@ -255,13 +379,24 @@ def _deadlift_metrics(
     descent_duration_s = descent_frames / fps
     ascent_duration_s = ascent_frames / fps
 
+    lockout_passed, lockout_conf = _assess_lockout_quality(
+        "deadlift", end, landmarks_per_frame, angle_timeseries,
+    )
+    max_dev_phase = _phase_of_max_deviation(
+        hip_series, start, end, bottom_frame, threshold_angle=90.0,
+    )
+
     return {
         "hip_angle_at_bottom": hip_angle_at_bottom,
         "knee_angle_at_lockout": knee_angle_at_lockout,
         "torso_lean_at_start": torso_lean_at_start,
         "rep_duration_s": rep_duration_s,
         "descent_duration_s": descent_duration_s,
+        "eccentric_duration_s": descent_duration_s,  # FR-REPM-07
         "ascent_duration_s": ascent_duration_s,
+        "lockout_passed": float(lockout_passed),
+        "lockout_confidence": lockout_conf,
+        "phase_of_max_deviation": max_dev_phase,
     }
 
 

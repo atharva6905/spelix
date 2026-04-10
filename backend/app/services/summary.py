@@ -62,6 +62,39 @@ def _collect_top_metric_keys(rep_metrics_json_list: list[dict[str, Any] | None])
     return sorted(keys)
 
 
+def _compute_consistency_metrics(
+    rep_metrics_json_list: list[dict[str, Any] | None],
+) -> dict[str, float]:
+    """FR-REPM-12: Rep-to-rep consistency metrics (std dev across reps).
+
+    Computed on all numeric metric keys present in 2+ reps. Flags technique
+    that breaks down under fatigue (Sheiko consistency-under-load principle).
+    """
+    import math
+
+    if len(rep_metrics_json_list) < 2:
+        return {}
+
+    # Collect numeric values per metric key
+    per_key: dict[str, list[float]] = {}
+    for mj in rep_metrics_json_list:
+        if not mj:
+            continue
+        for k, v in mj.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                per_key.setdefault(k, []).append(float(v))
+
+    result: dict[str, float] = {}
+    for k, values in per_key.items():
+        if len(values) < 2:
+            continue
+        mean = sum(values) / len(values)
+        variance = sum((v - mean) ** 2 for v in values) / len(values)
+        std = math.sqrt(variance)
+        result[f"{k}_std"] = round(std, 4)
+    return result
+
+
 class SummaryService:
     """Compute and persist summary_json for a completed analysis.
 
@@ -113,9 +146,9 @@ class SummaryService:
 
         warnings = _extract_quality_gate_warnings(analysis.quality_gate_result)
 
-        metric_keys = _collect_top_metric_keys(
-            [rm.metrics_json for rm in rep_metrics]
-        )
+        rep_metrics_json = [rm.metrics_json for rm in rep_metrics]
+        metric_keys = _collect_top_metric_keys(rep_metrics_json)
+        consistency = _compute_consistency_metrics(rep_metrics_json)
 
         summary: dict[str, Any] = {
             "confidence_score": confidence_score,
@@ -125,6 +158,7 @@ class SummaryService:
             "exercise_variant": analysis.exercise_variant,
             "quality_gate_warnings": warnings,
             "top_metric_keys": metric_keys,
+            "consistency_metrics": consistency,
         }
 
         # 4. Write to analysis.summary_json

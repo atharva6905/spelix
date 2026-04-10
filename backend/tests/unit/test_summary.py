@@ -304,3 +304,56 @@ async def test_none_metrics_json_skipped() -> None:
 
     assert result["rep_count"] == 3
     assert result["top_metric_keys"] == ["knee_angle_min_deg"]
+
+
+# ---------------------------------------------------------------------------
+# FR-REPM-12: Consistency metrics
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_consistency_metrics_computed_for_multiple_reps() -> None:
+    """Std dev is computed for each numeric metric across reps."""
+    analysis = _make_analysis()
+    rep_metrics = [
+        _make_rep_metric({"depth_angle": 80.0, "torso_lean": 30.0}),
+        _make_rep_metric({"depth_angle": 85.0, "torso_lean": 32.0}),
+        _make_rep_metric({"depth_angle": 90.0, "torso_lean": 35.0}),
+    ]
+    service, _, _ = _make_service(analysis, rep_metrics)
+
+    result = await service.compute_and_store(analysis.id)
+
+    consistency = result["consistency_metrics"]
+    assert "depth_angle_std" in consistency
+    assert "torso_lean_std" in consistency
+    assert consistency["depth_angle_std"] > 0
+    assert consistency["torso_lean_std"] > 0
+
+
+@pytest.mark.asyncio
+async def test_consistency_metrics_empty_for_single_rep() -> None:
+    """Std dev is not computed when fewer than 2 reps exist."""
+    analysis = _make_analysis()
+    rep_metrics = [_make_rep_metric({"depth_angle": 80.0})]
+    service, _, _ = _make_service(analysis, rep_metrics)
+
+    result = await service.compute_and_store(analysis.id)
+
+    assert result["consistency_metrics"] == {}
+
+
+@pytest.mark.asyncio
+async def test_consistency_metrics_skips_non_numeric_fields() -> None:
+    """String fields (e.g., phase_of_max_deviation) are excluded."""
+    analysis = _make_analysis()
+    rep_metrics = [
+        _make_rep_metric({"depth_angle": 80.0, "phase_of_max_deviation": "bottom"}),
+        _make_rep_metric({"depth_angle": 85.0, "phase_of_max_deviation": "descent"}),
+    ]
+    service, _, _ = _make_service(analysis, rep_metrics)
+
+    result = await service.compute_and_store(analysis.id)
+
+    assert "depth_angle_std" in result["consistency_metrics"]
+    assert "phase_of_max_deviation_std" not in result["consistency_metrics"]
