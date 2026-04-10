@@ -690,6 +690,27 @@ class TestCoachingService:
         assert "Athlete Profile" in prompt
         assert "180" in prompt
 
+    def test_body_stats_includes_anthropometrics(self) -> None:
+        """FR-PROF-06: arm_span_cm and femur_length_cm must appear in prompt when provided."""
+        body_stats = {
+            "height_cm": 180,
+            "weight_kg": 85,
+            "arm_span_cm": 183.5,
+            "femur_length_cm": 47.2,
+        }
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats=body_stats,
+        )
+        assert "arm_span_cm" in prompt
+        assert "183.5" in prompt
+        assert "femur_length_cm" in prompt
+        assert "47.2" in prompt
+
     def test_body_stats_fallback(self) -> None:
         """When body_stats is None, prompt must apply general population standards."""
         prompt = _build_user_prompt(
