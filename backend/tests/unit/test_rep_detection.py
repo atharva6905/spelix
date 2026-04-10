@@ -415,3 +415,152 @@ class TestDetectedRepFields:
         for rep in reps:
             assert 0 <= rep.start_frame < n
             assert 0 <= rep.end_frame < n
+
+
+# ---------------------------------------------------------------------------
+# 9. Zero-rep and partial-rep edge cases (B-086)
+# ---------------------------------------------------------------------------
+
+
+class TestZeroRepAndPartialRep:
+    """Tests for videos where no rep or only a partial rep occurs."""
+
+    # --- Zero-rep scenarios ---
+
+    def test_zero_rep_constant_standing_angle(self):
+        """A flat signal at 170° (never descending) yields zero reps."""
+        angles = np.full(90, 170.0)
+        landmarks = _make_landmarks(90)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
+
+    def test_zero_rep_never_reaches_depth(self):
+        """
+        Descent to 100° — within standing hysteresis band but never deep
+        enough to cross the squat depth threshold (<90° - 5° = 85°).
+        Result: zero reps counted.
+        """
+        stand = np.full(15, 170.0)
+        # descend but only reach 100°, never crosses <85°
+        descend = np.linspace(170.0, 100.0, 20)
+        ascend = np.linspace(100.0, 170.0, 20)
+        stand2 = np.full(15, 170.0)
+        angles = np.concatenate([stand, descend, ascend, stand2])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
+
+    def test_zero_rep_signal_aborted_before_depth(self):
+        """
+        Movement starts (transitions to DESCENDING) but immediately rises
+        back to standing before reaching depth. Must count as zero reps.
+        """
+        stand = np.full(10, 170.0)
+        # Drop below standing_thresh - hysteresis = 155°, but only to 130°
+        partial_down = np.linspace(170.0, 130.0, 8)
+        # Rise back to standing immediately
+        back_up = np.linspace(130.0, 175.0, 8)
+        hold = np.full(10, 175.0)
+        angles = np.concatenate([stand, partial_down, back_up, hold])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        # Never hit depth (130° > 85°), so state aborts back to STANDING
+        assert reps == []
+
+    def test_zero_rep_single_frame_at_standing(self):
+        """A single-frame signal at standing angle returns zero reps."""
+        angles = np.array([170.0])
+        landmarks = _make_landmarks(1)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
+
+    def test_zero_rep_two_frames(self):
+        """Two frames — insufficient for any state transitions."""
+        angles = np.array([170.0, 165.0])
+        landmarks = _make_landmarks(2)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
+
+    def test_zero_rep_empty_signal(self):
+        """Empty numpy array yields empty result (no crash)."""
+        reps = detect_reps(np.array([]), [], "squat", "standard", FPS)
+        assert reps == []
+
+    def test_zero_rep_all_exercises_no_movement(self):
+        """Flat standing-angle signal returns zero reps across all exercises."""
+        for exercise, variant, standing in [
+            ("squat", "high_bar", 170.0),
+            ("bench", "flat", 170.0),
+            ("deadlift", "conventional", 170.0),
+        ]:
+            angles = np.full(60, standing)
+            landmarks = _make_landmarks(60)
+            reps = detect_reps(angles, landmarks, exercise, variant, FPS)
+            assert reps == [], f"{exercise}/{variant} should yield 0 reps"
+
+    # --- Partial-rep scenarios ---
+
+    def test_partial_rep_descent_only_no_return(self):
+        """
+        Movement descends all the way to bottom depth but the video ends
+        before the subject returns to standing. The state machine reaches
+        ASCENDING or BOTTOM but never completes the final transition.
+        Result: zero completed reps.
+        """
+        stand = np.full(15, 170.0)
+        # Descend well below depth threshold (85°), reaching 70°
+        descend = np.linspace(170.0, 70.0, 20)
+        # Partial ascent — rises to 100° but video ends before reaching 155°
+        partial_up = np.linspace(70.0, 100.0, 10)
+        angles = np.concatenate([stand, descend, partial_up])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        # Rep never completes (never returned above standing_thresh - hysteresis)
+        assert reps == []
+
+    def test_partial_rep_reaches_bottom_but_signal_ends(self):
+        """
+        Signal descends through depth and stays at bottom — video ends at
+        bottom position. No rep completes.
+        """
+        stand = np.full(10, 170.0)
+        descend = np.linspace(170.0, 70.0, 20)
+        hold_bottom = np.full(10, 70.0)
+        angles = np.concatenate([stand, descend, hold_bottom])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
+
+    def test_partial_rep_does_not_corrupt_subsequent_full_rep(self):
+        """
+        A partial attempt (descend + abort, no depth) followed by a complete
+        rep must yield exactly 1 completed rep.
+
+        The state machine should reset to STANDING after the abort and count
+        the subsequent good rep correctly.
+        """
+        stand = np.full(10, 170.0)
+        # First attempt: goes to 130° (no depth) then rises back above standing
+        partial_down = np.linspace(170.0, 130.0, 8)
+        abort_up = np.linspace(130.0, 175.0, 8)
+        stand2 = np.full(5, 175.0)
+        # Second attempt: full rep with good depth
+        full_rep = _squat_rep_angles(n_reps=1, frames_per_phase=10, standing_angle=175.0)
+        angles = np.concatenate([stand, partial_down, abort_up, stand2, full_rep])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert len(reps) == 1
+
+    def test_partial_rep_too_short_duration_not_counted(self):
+        """
+        A rep that achieves the required depth but spans only 2 frames
+        at 30 fps (< 0.5 s minimum) must NOT be counted.
+        """
+        stand = np.full(5, 170.0)
+        # Instant descent and ascent — only 2 frames
+        instant = np.array([170.0, 80.0, 170.0])
+        stand2 = np.full(5, 170.0)
+        angles = np.concatenate([stand, instant, stand2])
+        landmarks = _make_landmarks(len(angles))
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert reps == []
