@@ -247,6 +247,9 @@ async def _run_pipeline(
             rep_metrics_dicts=rep_metrics_dicts,
             storage_client=storage_client,
             repo=repo,
+            bar_path=pipeline_result.bar_path,
+            keyframes=pipeline_result.keyframes,
+            body_stats=body_stats,
         )
         await _write_heartbeat(redis)
 
@@ -294,6 +297,9 @@ async def _generate_and_upload_pdf(
     rep_metrics_dicts: list[dict],
     storage_client: Any,
     repo: AnalysisRepository,
+    bar_path: dict | None = None,
+    keyframes: list | None = None,
+    body_stats: dict | None = None,
 ) -> None:
     """Generate PDF report, upload to Storage, and write pdf_path to DB."""
     import asyncio
@@ -305,7 +311,7 @@ async def _generate_and_upload_pdf(
         upload_artifact,
     )
     from app.cv.confidence import confidence_label
-    from app.services.pdf import PDFService
+    from app.services.pdf import PDFService, generate_bar_path_plot
 
     loop = asyncio.get_event_loop()
     tmp_dir = get_temp_dir(analysis_id)
@@ -317,6 +323,32 @@ async def _generate_and_upload_pdf(
 
     coaching_dict = coaching_output.model_dump() if hasattr(coaching_output, "model_dump") else coaching_output
 
+    # Build user_info string from body stats
+    user_info = ""
+    if body_stats:
+        parts: list[str] = []
+        if "experience_level" in body_stats:
+            parts.append(body_stats["experience_level"].replace("_", " ").title())
+        if "height_cm" in body_stats:
+            parts.append(f"{body_stats['height_cm']}cm")
+        if "weight_kg" in body_stats:
+            parts.append(f"{body_stats['weight_kg']}kg")
+        if parts:
+            user_info = " · ".join(parts)
+
+    # Generate bar path plot if centroid data available
+    bar_path_plot_path: str | None = None
+    if bar_path and bar_path.get("centroids"):
+        bar_path_plot_local = os.path.join(tmp_dir, "bar_path.png")
+        try:
+            await loop.run_in_executor(
+                None, generate_bar_path_plot, bar_path, bar_path_plot_local,
+            )
+            if os.path.isfile(bar_path_plot_local):
+                bar_path_plot_path = bar_path_plot_local
+        except Exception:
+            logger.warning("Bar path plot generation failed — skipping")
+
     context = {
         "date": datetime.now(UTC).strftime("%Y-%m-%d"),
         "exercise_type": analysis.exercise_type,
@@ -327,6 +359,9 @@ async def _generate_and_upload_pdf(
         "rep_metrics": rep_metrics_dicts,
         "coaching": coaching_dict,
         "plot_path": plot_local if os.path.isfile(plot_local) else None,
+        "bar_path_plot_path": bar_path_plot_path,
+        "keyframes": keyframes or [],
+        "user_info": user_info,
         "quality_gate_result": analysis.quality_gate_result,
         "scores": {
             "form_score_safety": analysis.form_score_safety,

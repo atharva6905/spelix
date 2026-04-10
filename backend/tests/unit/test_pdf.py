@@ -483,3 +483,116 @@ class TestPhase1Citations:
         ctx = _make_context()
         html = pdf_service.render_html(ctx)
         assert "No cited sources" in html
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: User info in PDF header (FR-XPRT-02)
+# ---------------------------------------------------------------------------
+
+
+class TestUserInfo:
+    def test_user_info_rendered_in_header(self, pdf_service):
+        ctx = _make_context()
+        ctx["user_info"] = "Intermediate · 180cm · 85kg"
+        html = pdf_service.render_html(ctx)
+        assert "Intermediate · 180cm · 85kg" in html
+
+    def test_empty_user_info_renders_empty(self, pdf_service):
+        ctx = _make_context()
+        ctx["user_info"] = ""
+        html = pdf_service.render_html(ctx)
+        # Template renders the substitution but it's empty
+        assert "user_info" not in html  # no leftover placeholder
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Bar path chart (FR-XPRT-02)
+# ---------------------------------------------------------------------------
+
+
+class TestBarPathBlock:
+    def test_bar_path_plot_renders_img(self, pdf_service, tmp_path):
+        """When bar_path_plot_path points to a real PNG, renders an img tag."""
+        # Create a fake PNG
+        fake_png = tmp_path / "bar_path.png"
+        fake_png.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
+
+        ctx = _make_context()
+        ctx["bar_path_plot_path"] = str(fake_png)
+        html = pdf_service.render_html(ctx)
+        assert "Bar Path" in html
+        assert "data:image/png;base64," in html
+
+    def test_no_bar_path_renders_empty(self, pdf_service):
+        ctx = _make_context()
+        ctx["bar_path_plot_path"] = None
+        html = pdf_service.render_html(ctx)
+        assert "Bar Path" not in html
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Keyframe captures (FR-XPRT-02)
+# ---------------------------------------------------------------------------
+
+
+class TestKeyframesBlock:
+    def test_keyframes_rendered(self, pdf_service):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeKeyframe:
+            rep_index: int
+            start_image_b64: str
+            depth_image_b64: str
+            end_image_b64: str
+
+        kf = FakeKeyframe(
+            rep_index=0,
+            start_image_b64="c3RhcnQ=",  # "start" in b64
+            depth_image_b64="ZGVwdGg=",  # "depth" in b64
+            end_image_b64="ZW5k",  # "end" in b64
+        )
+
+        ctx = _make_context()
+        ctx["keyframes"] = [kf]
+        html = pdf_service.render_html(ctx)
+        assert "Rep Keyframes" in html
+        assert "Rep 1" in html
+        assert "data:image/jpeg;base64,c3RhcnQ=" in html
+        assert "Start" in html
+        assert "Depth" in html
+        assert "End" in html
+
+    def test_no_keyframes_renders_empty(self, pdf_service):
+        ctx = _make_context()
+        ctx["keyframes"] = []
+        html = pdf_service.render_html(ctx)
+        assert "Rep Keyframes" not in html
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: generate_bar_path_plot unit test
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateBarPathPlot:
+    def test_creates_png_file(self, tmp_path):
+        from app.services.pdf import generate_bar_path_plot
+
+        bar_path = {
+            "centroids": [(0.5, 0.1), (0.51, 0.3), (0.49, 0.5), (0.50, 0.7), (0.50, 0.9)],
+            "lateral_deviation_px": 0.02,
+        }
+        out = str(tmp_path / "bar_path.png")
+        result = generate_bar_path_plot(bar_path, out)
+        assert result == out
+        assert os.path.isfile(out)
+        assert os.path.getsize(out) > 100
+
+    def test_empty_centroids_still_returns(self, tmp_path):
+        from app.services.pdf import generate_bar_path_plot
+
+        bar_path = {"centroids": []}
+        out = str(tmp_path / "empty.png")
+        generate_bar_path_plot(bar_path, out)
+        # No crash — file may not exist since no data to plot

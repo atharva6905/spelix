@@ -287,6 +287,111 @@ def _build_recommended_cues(cues: list[str] | None) -> str:
     )
 
 
+def _build_bar_path_block(bar_path_plot_path: str | None) -> str:
+    """Return an <img> tag with inline base64 bar path PNG, or empty."""
+    if bar_path_plot_path is None or not os.path.isfile(bar_path_plot_path):
+        return ""
+    try:
+        with open(bar_path_plot_path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        return (
+            '<div class="section">'
+            '<div class="section-title">Bar Path</div>'
+            '<div class="plot-container">'
+            f'<img src="data:image/png;base64,{b64}" alt="Bar path plot" '
+            'style="max-width:300px;margin:0 auto;display:block;" />'
+            "</div></div>"
+        )
+    except OSError:
+        logger.warning("Could not read bar path plot at %s", bar_path_plot_path)
+        return ""
+
+
+def _build_keyframes_block(keyframes: list) -> str:
+    """Render keyframe images for each rep (start, depth, end)."""
+    if not keyframes:
+        return ""
+    html_parts = [
+        '<div class="section">',
+        '<div class="section-title">Rep Keyframes</div>',
+    ]
+    for kf in keyframes:
+        rep_num = getattr(kf, "rep_index", 0) + 1
+        html_parts.append('<div style="margin-bottom:12pt;">')
+        html_parts.append(f'<div style="font-weight:600;margin-bottom:4pt;">Rep {rep_num}</div>')
+        html_parts.append('<div style="display:flex;gap:6pt;">')
+        for label, attr in [("Start", "start_image_b64"), ("Depth", "depth_image_b64"), ("End", "end_image_b64")]:
+            b64 = getattr(kf, attr, None)
+            if b64:
+                html_parts.append(
+                    f'<div style="text-align:center;flex:1;">'
+                    f'<img src="data:image/jpeg;base64,{b64}" '
+                    f'style="max-width:150px;border:1px solid #ddd;border-radius:4px;" '
+                    f'alt="Rep {rep_num} {label}" />'
+                    f'<div style="font-size:7pt;color:#666;margin-top:2pt;">{label}</div>'
+                    f"</div>"
+                )
+        html_parts.append("</div></div>")
+    html_parts.append("</div>")
+    return "".join(html_parts)
+
+
+def generate_bar_path_plot(bar_path: dict, output_path: str) -> str:
+    """Generate a bar path scatter/line plot from centroid data.
+
+    Parameters
+    ----------
+    bar_path:
+        Dict with ``centroids`` key — list of (x, y) normalized tuples.
+    output_path:
+        Where to write the PNG file.
+
+    Returns
+    -------
+    str
+        The output_path.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    centroids = bar_path.get("centroids", [])
+    if not centroids:
+        return output_path
+
+    xs = [c[0] for c in centroids]
+    ys = [c[1] for c in centroids]
+
+    fig, ax = plt.subplots(figsize=(3, 5))
+    # Plot path with gradient coloring (start=blue, end=red)
+    n = len(xs)
+    colors = plt.cm.coolwarm([i / max(n - 1, 1) for i in range(n)])
+    ax.scatter(xs, ys, c=colors, s=4, zorder=3)
+    ax.plot(xs, ys, color="#cccccc", linewidth=0.8, alpha=0.6, zorder=2)
+
+    # Invert Y axis (image coords: y increases downward)
+    ax.invert_yaxis()
+    ax.set_xlabel("Lateral Position", fontsize=8)
+    ax.set_ylabel("Vertical Position", fontsize=8)
+    ax.set_title("Bar Path", fontsize=10, fontweight="bold")
+    ax.tick_params(labelsize=7)
+
+    # Add stats annotation
+    lateral = bar_path.get("lateral_deviation_px") or bar_path.get("horizontal_drift")
+    if lateral is not None:
+        ax.annotate(
+            f"Lateral dev: {float(lateral):.3f}",
+            xy=(0.02, 0.98), xycoords="axes fraction",
+            fontsize=7, va="top", color="#666",
+        )
+
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 # ---------------------------------------------------------------------------
 # PDFService
 # ---------------------------------------------------------------------------
@@ -377,6 +482,14 @@ class PDFService:
             ),
             # Plot
             "plot_block": _build_plot_block(context.get("plot_path")),
+            # Bar path chart (FR-XPRT-02)
+            "bar_path_block": _build_bar_path_block(
+                context.get("bar_path_plot_path")
+            ),
+            # Keyframe captures (FR-XPRT-02)
+            "keyframes_block": _build_keyframes_block(
+                context.get("keyframes") or []
+            ),
             # Coaching
             "coaching_summary": coaching.get("summary", ""),
             "coaching_strengths": _build_coaching_strengths(
