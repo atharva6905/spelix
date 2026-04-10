@@ -345,3 +345,168 @@ class TestES256JWKSAuth:
 
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+
+# ---------------------------------------------------------------------------
+# B-085: Edge branch tests — empty/missing claims, UUID format variants
+# ---------------------------------------------------------------------------
+
+
+def _make_jwt_with_payload(payload: dict) -> str:
+    """Sign a JWT with TEST_SECRET using a fully caller-supplied payload dict."""
+    return jwt.encode(payload, TEST_SECRET, algorithm=ALGORITHM)
+
+
+def _base_payload(
+    user_id: str = TEST_USER_ID,
+    email: str = TEST_EMAIL,
+) -> dict:
+    """Return a minimal valid payload that can be mutated for edge-case tests."""
+    now = datetime.now(timezone.utc)
+    return {
+        "sub": user_id,
+        "email": email,
+        "aud": AUDIENCE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+    }
+
+
+class TestSubClaimEdgeCases:
+    """Edge cases for the 'sub' (subject / user_id) claim in get_current_user."""
+
+    def test_empty_string_sub_raises_401(self):
+        """JWT with sub='' is rejected because empty string is falsy."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        payload["sub"] = ""
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_non_uuid_sub_raises_401(self):
+        """JWT with sub='not-a-uuid' is rejected because uuid.UUID() raises ValueError."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        payload["sub"] = "not-a-uuid"
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_numeric_string_sub_raises_401(self):
+        """JWT with sub='12345' (numeric, non-UUID) is rejected."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        payload["sub"] = "12345"
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_uppercase_uuid_sub_is_accepted(self):
+        """JWT with an uppercase UUID 'sub' is accepted — uuid.UUID() is case-insensitive."""
+        from app.api.deps import get_current_user
+
+        upper_id = TEST_USER_ID.upper()
+        payload = _base_payload(user_id=upper_id)
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        result = asyncio.run(get_current_user(creds))
+
+        # uuid.UUID normalises to lowercase; both strings represent the same UUID
+        assert result["id"] == uuid.UUID(TEST_USER_ID)
+
+    def test_compact_uuid_sub_is_accepted(self):
+        """JWT with a hyphen-free (compact) UUID 'sub' is accepted by uuid.UUID()."""
+        from app.api.deps import get_current_user
+
+        compact_id = TEST_USER_ID.replace("-", "")
+        assert len(compact_id) == 32, "Sanity check: compact UUID must be 32 hex chars"
+
+        payload = _base_payload(user_id=compact_id)
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["id"] == uuid.UUID(TEST_USER_ID)
+
+    def test_missing_sub_claim_raises_401(self):
+        """JWT payload without any 'sub' key is rejected (payload.get returns None)."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        del payload["sub"]
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+
+class TestEmailClaimEdgeCases:
+    """Edge cases for the 'email' claim in get_current_user."""
+
+    def test_missing_email_claim_raises_401(self):
+        """JWT without an 'email' key is rejected — deps.py treats None as falsy."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        del payload["email"]
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_empty_string_email_raises_401(self):
+        """JWT with email='' is rejected because empty string is falsy."""
+        from app.api.deps import get_current_user
+
+        payload = _base_payload()
+        payload["email"] = ""
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_valid_email_in_payload_is_passed_through(self):
+        """Email value from JWT payload is returned verbatim in CurrentUser."""
+        from app.api.deps import get_current_user
+
+        custom_email = "coach@spelix.app"
+        payload = _base_payload(email=custom_email)
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["email"] == custom_email
