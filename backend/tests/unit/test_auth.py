@@ -500,6 +500,7 @@ def _base_payload(
         "sub": user_id,
         "email": email,
         "aud": AUDIENCE,
+        "iss": TEST_ISSUER,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(hours=1)).timestamp()),
     }
@@ -508,10 +509,11 @@ def _base_payload(
 class TestSubClaimEdgeCases:
     """Edge cases for the 'sub' (subject / user_id) claim in get_current_user."""
 
-    def test_empty_string_sub_raises_401(self):
+    def test_empty_string_sub_raises_401(self, monkeypatch):
         """JWT with sub='' is rejected because empty string is falsy."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         payload["sub"] = ""
         token = _make_jwt_with_payload(payload)
@@ -523,10 +525,11 @@ class TestSubClaimEdgeCases:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
 
-    def test_non_uuid_sub_raises_401(self):
+    def test_non_uuid_sub_raises_401(self, monkeypatch):
         """JWT with sub='not-a-uuid' is rejected because uuid.UUID() raises ValueError."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         payload["sub"] = "not-a-uuid"
         token = _make_jwt_with_payload(payload)
@@ -538,10 +541,11 @@ class TestSubClaimEdgeCases:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
 
-    def test_numeric_string_sub_raises_401(self):
+    def test_numeric_string_sub_raises_401(self, monkeypatch):
         """JWT with sub='12345' (numeric, non-UUID) is rejected."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         payload["sub"] = "12345"
         token = _make_jwt_with_payload(payload)
@@ -553,10 +557,11 @@ class TestSubClaimEdgeCases:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
 
-    def test_uppercase_uuid_sub_is_accepted(self):
+    def test_uppercase_uuid_sub_is_accepted(self, monkeypatch):
         """JWT with an uppercase UUID 'sub' is accepted — uuid.UUID() is case-insensitive."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         upper_id = TEST_USER_ID.upper()
         payload = _base_payload(user_id=upper_id)
         token = _make_jwt_with_payload(payload)
@@ -567,10 +572,11 @@ class TestSubClaimEdgeCases:
         # uuid.UUID normalises to lowercase; both strings represent the same UUID
         assert result["id"] == uuid.UUID(TEST_USER_ID)
 
-    def test_compact_uuid_sub_is_accepted(self):
+    def test_compact_uuid_sub_is_accepted(self, monkeypatch):
         """JWT with a hyphen-free (compact) UUID 'sub' is accepted by uuid.UUID()."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         compact_id = TEST_USER_ID.replace("-", "")
         assert len(compact_id) == 32, "Sanity check: compact UUID must be 32 hex chars"
 
@@ -582,10 +588,11 @@ class TestSubClaimEdgeCases:
 
         assert result["id"] == uuid.UUID(TEST_USER_ID)
 
-    def test_missing_sub_claim_raises_401(self):
+    def test_missing_sub_claim_raises_401(self, monkeypatch):
         """JWT payload without any 'sub' key is rejected (payload.get returns None)."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         del payload["sub"]
         token = _make_jwt_with_payload(payload)
@@ -601,10 +608,11 @@ class TestSubClaimEdgeCases:
 class TestEmailClaimEdgeCases:
     """Edge cases for the 'email' claim in get_current_user."""
 
-    def test_missing_email_claim_raises_401(self):
+    def test_missing_email_claim_raises_401(self, monkeypatch):
         """JWT without an 'email' key is rejected — deps.py treats None as falsy."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         del payload["email"]
         token = _make_jwt_with_payload(payload)
@@ -616,10 +624,11 @@ class TestEmailClaimEdgeCases:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
 
-    def test_empty_string_email_raises_401(self):
+    def test_empty_string_email_raises_401(self, monkeypatch):
         """JWT with email='' is rejected because empty string is falsy."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         payload = _base_payload()
         payload["email"] = ""
         token = _make_jwt_with_payload(payload)
@@ -631,10 +640,11 @@ class TestEmailClaimEdgeCases:
         assert exc_info.value.status_code == 401
         assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
 
-    def test_valid_email_in_payload_is_passed_through(self):
+    def test_valid_email_in_payload_is_passed_through(self, monkeypatch):
         """Email value from JWT payload is returned verbatim in CurrentUser."""
         from app.api.deps import get_current_user
 
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         custom_email = "coach@spelix.app"
         payload = _base_payload(email=custom_email)
         token = _make_jwt_with_payload(payload)
