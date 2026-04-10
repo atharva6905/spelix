@@ -378,6 +378,140 @@ class TestCoachingService:
             f"score={score}: expected label '{expected_label}' in prompt, got:\n{prompt}"
         )
 
+    # ---------------------------------------------------------------------------
+    # B-084: retry path tests (529, timeout, 400)
+    # ---------------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_529_retries_three_times_with_backoff(self) -> None:
+        """529 overload response → retries 3 times with backoff, then raises."""
+        import anthropic
+
+        mock_client = MagicMock()
+
+        # Build a 529 APIStatusError using a mock httpx.Response
+        overload_error = anthropic.APIStatusError(
+            message="Overloaded",
+            response=MagicMock(status_code=529),
+            body={"error": {"type": "overloaded_error", "message": "Overloaded"}},
+        )
+        # Confirm the service recognises it as retryable
+        from app.services.coaching import _is_retryable
+
+        assert _is_retryable(overload_error), "529 must be classified as retryable"
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=overload_error)
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.APIStatusError) as exc_info:
+                    await service.generate_coaching(
+                        exercise_type="squat",
+                        exercise_variant="high_bar",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.90,
+                        thresholds=ThresholdConfig(),
+                    )
+
+        # Final exception must be the 529 overload error
+        assert exc_info.value.status_code == 529
+        # Three backoff sleeps: 1s, 2s, 4s
+        assert sleep_calls == [1.0, 2.0, 4.0]
+        # Four total calls: 1 initial + 3 retries
+        assert mock_instructor.chat.completions.create.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_timeout_retries_three_times_with_backoff(self) -> None:
+        """APITimeoutError → treated as retryable, retries 3 times with backoff."""
+        import anthropic
+        import httpx
+
+        mock_client = MagicMock()
+
+        timeout_error = anthropic.APITimeoutError(
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+        from app.services.coaching import _is_retryable
+
+        assert _is_retryable(timeout_error), "APITimeoutError must be classified as retryable"
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=timeout_error)
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.APITimeoutError):
+                    await service.generate_coaching(
+                        exercise_type="deadlift",
+                        exercise_variant="conventional",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.85,
+                        thresholds=ThresholdConfig(),
+                    )
+
+        # Three backoff sleeps: 1s, 2s, 4s
+        assert sleep_calls == [1.0, 2.0, 4.0]
+        # Four total calls: 1 initial + 3 retries
+        assert mock_instructor.chat.completions.create.call_count == 4
+
+    @pytest.mark.asyncio
+    async def test_400_fails_immediately_no_retry(self) -> None:
+        """400 bad request → fails immediately, no retries, no backoff sleeps."""
+        import anthropic
+
+        mock_client = MagicMock()
+
+        bad_request_error = anthropic.BadRequestError(
+            message="Invalid request",
+            response=MagicMock(status_code=400),
+            body={"error": {"type": "invalid_request_error", "message": "Invalid request"}},
+        )
+        from app.services.coaching import _is_retryable
+
+        assert not _is_retryable(bad_request_error), "400 must NOT be classified as retryable"
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=bad_request_error)
+
+        sleep_call_count = 0
+
+        async def mock_sleep(seconds: float) -> None:
+            nonlocal sleep_call_count
+            sleep_call_count += 1
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.BadRequestError):
+                    await service.generate_coaching(
+                        exercise_type="bench",
+                        exercise_variant="flat",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.88,
+                        thresholds=ThresholdConfig(),
+                    )
+
+        # Must not sleep (no backoff on 400)
+        assert sleep_call_count == 0
+        # Must only call create once — no retries
+        assert mock_instructor.chat.completions.create.call_count == 1
+
     @pytest.mark.asyncio
     async def test_mock_client_none_raises_value_error(self) -> None:
         """Passing None as client when no mock mode raises ValueError."""
