@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import {
   getAnalysisStatus,
   type AnalysisStatus,
+  type DetectionResult,
   type QualityGateResult,
 } from "@/api/analyses";
 
@@ -39,6 +40,7 @@ export interface UseAnalysisStatusResult {
   statusLabel: string | null;
   isLoading: boolean;
   error: string | null;
+  detectionResult: DetectionResult | null;
   qualityGateResult: QualityGateResult | null;
   retryCount: number;
   isReconnecting: boolean;
@@ -48,6 +50,8 @@ export function useAnalysisStatus(
   analysisId: string,
 ): UseAnalysisStatusResult {
   const [status, setStatus] = useState<AnalysisStatus | null>(null);
+  const [detectionResult, setDetectionResult] =
+    useState<DetectionResult | null>(null);
   const [qualityGateResult, setQualityGateResult] =
     useState<QualityGateResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -61,10 +65,14 @@ export function useAnalysisStatus(
 
   function applyUpdate(row: {
     status: AnalysisStatus;
+    detection_result?: DetectionResult | null;
     quality_gate_result?: QualityGateResult | null;
     retry_count?: number;
   }) {
     setStatus(row.status);
+    if (row.detection_result !== undefined) {
+      setDetectionResult(row.detection_result);
+    }
     setQualityGateResult(row.quality_gate_result ?? null);
     setRetryCount(row.retry_count ?? 0);
     setIsLoading(false);
@@ -148,6 +156,7 @@ export function useAnalysisStatus(
     statusLabel,
     isLoading,
     error,
+    detectionResult,
     qualityGateResult,
     retryCount,
     isReconnecting,

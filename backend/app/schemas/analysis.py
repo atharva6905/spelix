@@ -89,12 +89,23 @@ class AnalysisStartResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class DetectionResultSchema(BaseModel):
+    """Exercise auto-detection result (FR-XDET-07)."""
+
+    detected_type: str
+    detected_variant: str
+    confidence: float
+    method: str
+    details: dict | None = None
+
+
 class AnalysisStatusResponse(BaseModel):
     """200 response for GET /api/v1/analyses/{id}/status."""
 
     id: UUID
     status: str
     updated_at: datetime
+    detection_result: DetectionResultSchema | None = None
 
     model_config = {"from_attributes": True}
 
@@ -159,6 +170,7 @@ class AnalysisDetail(BaseModel):
     plot_path: str | None
     pdf_path: str | None
     tags: list[str] | None
+    detection_result: DetectionResultSchema | None = None
     quality_gate_result: dict | None
     summary_json: dict | None
     created_at: datetime

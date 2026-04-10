@@ -336,6 +336,12 @@ class TestGetAnalysisDetail:
         obj.tags = ["competition", "pr"]
         obj.quality_gate_result = None
         obj.summary_json = None
+        obj.detection_result = None
+        obj.form_score_safety = None
+        obj.form_score_technique = None
+        obj.form_score_path_balance = None
+        obj.form_score_control = None
+        obj.form_score_overall = None
         # Nested relationships — empty for simplicity
         obj.coaching_result = None
         obj.rep_metrics = []
@@ -473,6 +479,7 @@ class TestGetAnalysisStatus:
 
     def _make_status_analysis(self, status="processing"):
         obj = _make_mock_analysis(status=status)
+        obj.detection_result = None
         return obj
 
     def test_get_status_returns_200_with_status_fields(self):
@@ -583,4 +590,40 @@ class TestGetAnalysisStatus:
         assert resp.status_code == 200
         body = resp.json()
         # Only the three AnalysisStatusResponse fields should be present
-        assert set(body.keys()) == {"id", "status", "updated_at"}
+        assert set(body.keys()) == {"id", "status", "updated_at", "detection_result"}
+
+    def test_get_status_includes_detection_result(self):
+        """Status response exposes detection_result when set (FR-XDET-07)."""
+        analysis = self._make_status_analysis(status="processing")
+        analysis.detection_result = {
+            "detected_type": "squat",
+            "detected_variant": "high_bar",
+            "confidence": 0.87,
+            "method": "heuristic",
+            "details": {"scores": {"squat": 0.87, "bench": 0.08, "deadlift": 0.05}},
+        }
+        mock_service = AsyncMock()
+        mock_service.get_analysis_status.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}/status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["detection_result"]["detected_type"] == "squat"
+        assert body["detection_result"]["detected_variant"] == "high_bar"
+        assert body["detection_result"]["confidence"] == 0.87
+        assert body["detection_result"]["method"] == "heuristic"
+
+    def test_get_status_detection_result_null_when_unset(self):
+        """detection_result is null when not yet populated."""
+        analysis = self._make_status_analysis(status="queued")
+        # detection_result already None from factory
+        mock_service = AsyncMock()
+        mock_service.get_analysis_status.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}/status")
+
+        assert resp.status_code == 200
+        assert resp.json()["detection_result"] is None

@@ -21,6 +21,7 @@ export default function AnalysisStatusPage() {
     statusLabel,
     isLoading,
     error,
+    detectionResult,
     qualityGateResult,
     retryCount,
     isReconnecting,
@@ -92,6 +93,28 @@ export default function AnalysisStatusPage() {
           <div className="space-y-6">
             {/* User-facing status label */}
             <p className="text-lg font-medium text-gray-800">{statusLabel}</p>
+
+            {/* Exercise auto-detection result (FR-XDET-07) */}
+            {detectionResult && (
+              <div className="rounded-md bg-blue-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  Detected Exercise
+                </p>
+                <p className="mt-1 text-sm text-blue-900">
+                  {detectionResult.detected_type.charAt(0).toUpperCase() +
+                    detectionResult.detected_type.slice(1)}
+                  {" — "}
+                  {detectionResult.detected_variant.replace(/_/g, " ")}
+                </p>
+                <p className="mt-1 text-xs text-blue-700">
+                  {detectionResult.method === "vision_fallback"
+                    ? "Confirmed by vision analysis"
+                    : `Matched with ${Math.round(
+                        detectionResult.confidence * 100,
+                      )}% confidence`}
+                </p>
+              </div>
+            )}
 
             {/* In-progress statuses: show spinner */}
             {status !== null &&

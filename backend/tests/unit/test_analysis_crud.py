@@ -60,6 +60,12 @@ def _make_mock_analysis(
     obj.tags = tags or []
     obj.quality_gate_result = {"passed": True}
     obj.summary_json = {"reps": 5}
+    obj.detection_result = None
+    obj.form_score_safety = None
+    obj.form_score_technique = None
+    obj.form_score_path_balance = None
+    obj.form_score_control = None
+    obj.form_score_overall = None
     obj.created_at = datetime.now(timezone.utc)
     obj.updated_at = datetime.now(timezone.utc)
     obj.retry_count = 0

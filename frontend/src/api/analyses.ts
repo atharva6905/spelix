@@ -59,10 +59,19 @@ export interface QualityGateResult {
   checks: QualityGateCheck[];
 }
 
+export interface DetectionResult {
+  detected_type: ExerciseType;
+  detected_variant: string;
+  confidence: number;
+  method: "heuristic" | "vision_fallback";
+  details?: Record<string, unknown> | null;
+}
+
 export interface AnalysisStatusResponse {
   id: string;
   status: AnalysisStatus;
   updated_at: string;
+  detection_result?: DetectionResult | null;
   quality_gate_result?: QualityGateResult | null;
   retry_count?: number;
   error_message?: string | null;
@@ -106,6 +115,7 @@ export interface AnalysisDetail {
   exercise_type: string;
   exercise_variant: string;
   confidence_score: number | null;
+  detection_result?: DetectionResult | null;
   video_path: string | null;
   annotated_video_path: string | null;
   plot_path: string | null;
