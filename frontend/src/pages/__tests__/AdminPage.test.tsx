@@ -223,12 +223,10 @@ describe("AdminPage", () => {
       expect(screen.getByText("high-bar")).toBeInTheDocument();
       expect(screen.getByText("deadlift")).toBeInTheDocument();
       expect(screen.getByText("conventional")).toBeInTheDocument();
-      // Status badges — use getAllByText because the status filter dropdown
-      // also contains these strings as <option> values
-      const completedEls = screen.getAllByText("completed");
-      expect(completedEls.length).toBeGreaterThanOrEqual(2); // option + badge
-      const failedEls = screen.getAllByText("failed");
-      expect(failedEls.length).toBeGreaterThanOrEqual(2);
+      // Status badges show user-friendly labels (B-082).
+      // The dropdown <option> still uses raw values — only 1 occurrence each.
+      expect(screen.getByText("Completed")).toBeInTheDocument();
+      expect(screen.getByText("Failed")).toBeInTheDocument();
     });
   });
 
@@ -450,6 +448,106 @@ describe("AdminPage", () => {
   });
 
   // Disable user — Phase 1 stub
+  // B-082: user-friendly status labels — raw strings must NOT appear as badge text
+  it("shows user-friendly status label for quality_gate_pending (B-082)", async () => {
+    vi.mocked(supabase.auth.getSession).mockResolvedValue(MOCK_ADMIN_SESSION as never);
+    vi.mocked(listAdminUsers).mockResolvedValue([]);
+    vi.mocked(listAdminAnalyses).mockResolvedValue([
+      {
+        id: "eeeeeeee-0000-0000-0000-000000000005",
+        user_id: "aaaaaaaa-0000-0000-0000-000000000001",
+        status: "quality_gate_pending",
+        exercise_type: "squat",
+        exercise_variant: "high_bar",
+        confidence_score: null,
+        created_at: "2024-04-01T10:00:00Z",
+        updated_at: "2024-04-01T10:00:00Z",
+      },
+    ]);
+    vi.mocked(getAdminHealth).mockResolvedValue(MOCK_HEALTH);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Preparing to analyse\u2026")).toBeInTheDocument();
+    });
+    // Raw string must not appear in a badge
+    const rawEls = screen.queryAllByText("quality_gate_pending");
+    // Only the filter dropdown <option> may contain it — not a badge span
+    const badgeEls = screen
+      .queryAllByText("quality_gate_pending")
+      .filter((el) => el.tagName !== "OPTION");
+    expect(badgeEls.length).toBe(0);
+  });
+
+  it("shows user-friendly status label for quality_gate_rejected (B-082)", async () => {
+    vi.mocked(supabase.auth.getSession).mockResolvedValue(MOCK_ADMIN_SESSION as never);
+    vi.mocked(listAdminUsers).mockResolvedValue([]);
+    vi.mocked(listAdminAnalyses).mockResolvedValue([
+      {
+        id: "ffffffff-0000-0000-0000-000000000006",
+        user_id: "aaaaaaaa-0000-0000-0000-000000000001",
+        status: "quality_gate_rejected",
+        exercise_type: "bench",
+        exercise_variant: "flat",
+        confidence_score: null,
+        created_at: "2024-04-02T10:00:00Z",
+        updated_at: "2024-04-02T10:00:00Z",
+      },
+    ]);
+    vi.mocked(getAdminHealth).mockResolvedValue(MOCK_HEALTH);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Video could not be processed")).toBeInTheDocument();
+    });
+  });
+
+  it("shows unknown status gracefully with a warning indicator (B-082)", async () => {
+    vi.mocked(supabase.auth.getSession).mockResolvedValue(MOCK_ADMIN_SESSION as never);
+    vi.mocked(listAdminUsers).mockResolvedValue([]);
+    vi.mocked(listAdminAnalyses).mockResolvedValue([
+      {
+        id: "aaaaaaaa-1111-0000-0000-000000000007",
+        user_id: "aaaaaaaa-0000-0000-0000-000000000001",
+        status: "unknown_future_status",
+        exercise_type: "deadlift",
+        exercise_variant: "conventional",
+        confidence_score: null,
+        created_at: "2024-04-03T10:00:00Z",
+        updated_at: "2024-04-03T10:00:00Z",
+      },
+    ]);
+    vi.mocked(getAdminHealth).mockResolvedValue(MOCK_HEALTH);
+
+    renderPage();
+
+    await waitFor(() => {
+      // Raw value shown with "?" warning indicator
+      expect(screen.getByText(/unknown_future_status/)).toBeInTheDocument();
+      expect(screen.getByText(/\?/)).toBeInTheDocument();
+    });
+  });
+
+  it("status filter dropdown still uses raw internal values (B-082)", async () => {
+    setupAdminMocks();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/filter by status/i)).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText(/filter by status/i) as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toContain("quality_gate_pending");
+    expect(options).toContain("quality_gate_rejected");
+    expect(options).toContain("completed");
+    expect(options).toContain("failed");
+    // Invalid status from old list must not be present
+    expect(options).not.toContain("quality_gate_passed");
+  });
+
   it("shows Phase 1 feature message when disable is clicked", async () => {
     setupAdminMocks();
     renderPage();
