@@ -33,9 +33,10 @@ _NUM_FRAMES = 90  # 3 seconds
 def _make_landmark_frame(visibility: float = 0.9) -> np.ndarray:
     """Return a (33, 5) landmark array with uniform values."""
     frame = np.zeros((33, 5), dtype=np.float32)
-    frame[:, 3] = visibility  # col 3 = visibility
     frame[:, 0] = 0.5  # x
     frame[:, 1] = 0.5  # y
+    frame[:, 3] = visibility  # col 3 = visibility
+    frame[:, 4] = visibility  # col 4 = presence (needed for Tier 1–5 confidence)
     return frame
 
 
@@ -160,7 +161,7 @@ async def test_happy_path_all_steps_execute():
     mock_angles.assert_called_once()
     mock_reps.assert_called_once()
     mock_metrics.assert_called_once()
-    mock_confidence.assert_called_once_with([0.85, 0.90])
+    mock_confidence.assert_called_once()  # args are Tier 5 values from compute_confidence_result
     mock_bar.assert_called_once()
     mock_annotated.assert_called_once()
     mock_plot.assert_called_once()
@@ -175,6 +176,8 @@ async def test_happy_path_all_steps_execute():
     assert result.rep_metrics is rep_metrics
     assert result.session_confidence == pytest.approx(0.875)
     assert result.bar_path == bar_path
+    assert result.detection_result is not None
+    assert result.detection_result.method == "heuristic"
 
     # Status transitions happened
     assert analysis.status == "processing"

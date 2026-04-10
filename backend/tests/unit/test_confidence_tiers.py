@@ -156,9 +156,9 @@ class TestTier4:
         cfg = ThresholdConfig()
         result = _tier4_phase_adjusted(
             tier3_score=0.8,
-            frame_offset=10,
+            frame_offset=50,
             depth_frame_offset=5,
-            rep_frame_count=100,  # large so frame 10 is far from depth
+            rep_frame_count=100,  # bottom_window=10, frame 50 is well outside ±10 of depth at 5
             exercise_type="squat",
             cfg=cfg,
         )
@@ -255,7 +255,7 @@ class TestComputeConfidenceResult:
             start_frame=0,
             end_frame=9,
             exercise_type="squat",
-            depth_frame_idx=5,
+            depth_frame_idx=50,  # outside range → no occlusion penalty, all transition/static_peak
             cfg=cfg,
         )
         assert result.label == "High"
