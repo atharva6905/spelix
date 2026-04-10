@@ -24,28 +24,28 @@ B-055–B-070 (HIGH): ErrorBoundary wired, button disabled fixed, sortable table
 
 | ID | Title | Status | Size | Deps | SRS IDs | Audit Ref | Files |
 |----|-------|--------|------|------|---------|-----------|-------|
-| B-071 | Refactor InsightsService + AdminService to use repositories | todo | M | — | — | M-1 | `services/insights.py`, `services/admin.py` |
-| B-072 | Use Literal types in AnalysisCreate schema | todo | S | — | — | M-2 | `schemas/analysis.py` |
-| B-073 | Add `weight_kg` to AnalysisCreate schema | todo | S | — | FR-REPM-06 | M-4 | `schemas/analysis.py` |
+| B-071 | Refactor InsightsService + AdminService to use repositories | done | M | — | — | M-1 | `services/insights.py`, `services/admin.py` |
+| B-072 | Use Literal types in AnalysisCreate schema | done | S | — | — | M-2 | `schemas/analysis.py` |
+| B-073 | Add `weight_kg` to AnalysisCreate schema | done | S | — | FR-REPM-06 | M-4 | `schemas/analysis.py` |
 | B-074 | Pin mediapipe to exact version | done | S | — | — | M-6 | `pyproject.toml` |
 | B-075 | Add JWT issuer validation | done | S | — | — | M-7 | `api/deps.py` |
 | B-076 | Add `.nvmrc` + `engines` field | done | S | — | — | M-9 | `frontend/.nvmrc`, `frontend/package.json` |
 | B-077 | CI: use `uv sync --frozen` | done | S | — | — | M-10 | `.github/workflows/ci.yml` |
 | B-078 | Pin `uv` Docker image tag | done | S | — | — | M-11 | `backend/Dockerfile` |
-| B-079 | Multi-stage Dockerfile | todo | M | B-064, B-065 | — | M-12 | `backend/Dockerfile` |
+| B-079 | Multi-stage Dockerfile | done | M | B-064, B-065 | — | M-12 | `backend/Dockerfile` |
 | B-080 | Add `.env.*` wildcard to `.gitignore` | done | S | — | — | M-13 | `.gitignore` |
-| B-081 | Fix TrendChart tooltip — show label not decimal | todo | S | — | FR-RESL-08 | M-14 | `TrendChart.tsx` |
-| B-082 | Fix AdminPage raw status strings + invalid status | todo | S | — | Appendix B | M-15 | `AdminPage.tsx` |
-| B-083 | Extract shared API_BASE constant | todo | S | — | — | M-16 | `src/api/*.ts`, `ResultsPage.tsx` |
+| B-081 | Fix TrendChart tooltip — show label not decimal | done | S | — | FR-RESL-08 | M-14 | `TrendChart.tsx` |
+| B-082 | Fix AdminPage raw status strings + invalid status | done | S | — | Appendix B | M-15 | `AdminPage.tsx` |
+| B-083 | Extract shared API_BASE constant | done | S | — | — | M-16 | `src/api/*.ts`, `ResultsPage.tsx` |
 | B-084 | Test coaching retry paths (529, timeout, 400) | done | S | — | — | M-17 | `tests/unit/test_coaching.py` |
 | B-085 | Test deps.py edge branches (empty sub/email, UUID) | done | S | — | — | M-18 | `tests/unit/test_auth.py` |
 | B-086 | Test rep detection zero-rep + partial rep | done | S | — | — | M-19 | `tests/unit/test_rep_detection.py` |
 | B-087 | Test GET /analyses/{id} and /status endpoints | done | S | — | — | M-20 | `tests/unit/test_analysis_api.py` |
 | B-088 | Test rate limit 10th-request boundary | done | S | — | — | M-21 | `tests/unit/test_rate_limit.py` |
 | B-089 | Test account deletion cascade (rep_metrics, coaching) | done | S | — | — | M-22 | `tests/unit/test_account_deletion.py` |
-| B-090 | Frontend tests: HomePage, AppLayout, hooks | todo | M | — | — | M-23 | `frontend/src/` |
-| B-091 | Fix weak test assertions (heartbeat TTL, QG message) | todo | S | — | — | M-24, M-25 | `test_analysis_worker.py`, `test_quality_gates.py` |
-| B-092 | Fix `datetime.utcnow()` deprecation | todo | S | — | — | M-26 | `test_repositories.py:109` |
+| B-090 | Frontend tests: HomePage, AppLayout, hooks | done | M | — | — | M-23 | `frontend/src/` |
+| B-091 | Fix weak test assertions (heartbeat TTL, QG message) | done | S | — | — | M-24, M-25 | `test_analysis_worker.py`, `test_quality_gates.py` |
+| B-092 | Fix `datetime.utcnow()` deprecation | done | S | — | — | M-26 | `test_repositories.py:109` |
 | B-093 | Implement lighting + stability warning gates | todo | M | — | FR-CVPL-08/09 | M-3 | `cv/quality_gates.py` |
 
 ---
