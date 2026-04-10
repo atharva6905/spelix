@@ -1,7 +1,7 @@
 # Spelix
 
 Science-based barbell form coaching platform. Users upload squat/bench/deadlift videos → CV pipeline extracts pose + reps + metrics → AI generates structured coaching feedback. Private web app at spelix.app.
-**Current phase: Phase 1 IN PROGRESS** — Phase 0 complete (93 backlog items, B-001–B-093). Phase 1 delivers: GPT-4o keyframe analysis, form scoring system (4 dimensions + composite), SSE streaming coaching, Tier 1–5 confidence, ThresholdConfig v1, prompt caching. Authoritative requirements: `@docs/SRS.md` — use it for phase definitions, requirement IDs, threshold values. Do not duplicate SRS content here.
+**Current phase: Phase 1 COMPLETE → Phase 2 PLANNING** — Phase 0 complete (93 backlog items, B-001–B-093). Phase 1 delivered: GPT-4o keyframe analysis, form scoring system (4 dimensions + composite), SSE streaming coaching, Tier 1–5 confidence, ThresholdConfig v1, prompt caching, exercise auto-detection with GPT-4o fallback, complete PDF report with bar path + keyframes, full per-rep metrics (eccentric duration, lockout quality, phase of max deviation, rep-to-rep consistency). Phase 2 delivers: RAG infrastructure (Qdrant, Cohere), document ingestion pipeline, citation-grounded coaching, CoVe verification, follow-up chat. Authoritative requirements: `@docs/SRS.md` — use it for phase definitions, requirement IDs, threshold values. Do not duplicate SRS content here.
 Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at migration 001.
 
 ## Stack
