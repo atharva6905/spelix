@@ -555,3 +555,190 @@ describe("ResultsPage", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 1: Form Score Cards (FR-RESL-01, FR-SCOR-01 through FR-SCOR-08)
+// ---------------------------------------------------------------------------
+
+describe("ResultsPage — Phase 1 Form Score Cards", () => {
+  beforeEach(() => {
+    mockUseAnalysisDetail.mockReset();
+  });
+
+  it("renders all four dimension score cards when scores are present", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        form_score_safety: 8.2,
+        form_score_technique: 7.0,
+        form_score_path_balance: 6.5,
+        form_score_control: 5.8,
+        form_score_overall: 7.1,
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("form-score-cards")).toBeInTheDocument();
+    expect(screen.getByTestId("score-overall")).toBeInTheDocument();
+    expect(screen.getByTestId("score-safety")).toBeInTheDocument();
+    expect(screen.getByTestId("score-technique")).toBeInTheDocument();
+    expect(screen.getByTestId("score-path-balance")).toBeInTheDocument();
+    expect(screen.getByTestId("score-control")).toBeInTheDocument();
+
+    // Score values rendered
+    expect(screen.getByTestId("score-overall")).toHaveTextContent("7.1");
+    expect(screen.getByTestId("score-safety")).toHaveTextContent("8.2");
+  });
+
+  it("displays Movement Quality label (not 'Safety Score')", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({ form_score_safety: 6.0, form_score_overall: 6.0 }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("score-safety")).toHaveTextContent(
+      /Movement Quality/i,
+    );
+    expect(screen.queryByText(/Safety Score/i)).not.toBeInTheDocument();
+  });
+
+  it("shows Movement Quality alert when safety score < 3.0", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        form_score_safety: 2.5,
+        form_score_overall: 4.0,
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("movement-quality-alert")).toBeInTheDocument();
+  });
+
+  it("does not show Movement Quality alert when safety score >= 3.0", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        form_score_safety: 7.5,
+        form_score_overall: 7.5,
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.queryByTestId("movement-quality-alert")).not.toBeInTheDocument();
+  });
+
+  it("hides the form score section entirely when no scores present (Phase 0 fallback)", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        form_score_safety: null,
+        form_score_technique: null,
+        form_score_path_balance: null,
+        form_score_control: null,
+        form_score_overall: null,
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.queryByTestId("form-score-cards")).not.toBeInTheDocument();
+  });
+
+  it("renders score descriptor text for overall rating", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({ form_score_overall: 9.2 }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("score-overall")).toHaveTextContent(/Elite/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 1: Extended coaching sections (FR-AICP-03)
+// ---------------------------------------------------------------------------
+
+describe("ResultsPage — Phase 1 coaching extensions", () => {
+  beforeEach(() => {
+    mockUseAnalysisDetail.mockReset();
+  });
+
+  it("renders safety_warnings when present", () => {
+    const analysis = makeAnalysis();
+    (analysis.coaching_result!.structured_output_json! as Record<
+      string,
+      unknown
+    >).safety_warnings = ["Significant knee cave detected on rep 3"];
+
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis,
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("coaching-safety-warnings")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Significant knee cave detected on rep 3/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders recommended_cues when present", () => {
+    const analysis = makeAnalysis();
+    (analysis.coaching_result!.structured_output_json! as Record<
+      string,
+      unknown
+    >).recommended_cues = ["Push knees out", "Drive through heels"];
+
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis,
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("coaching-recommended-cues")).toBeInTheDocument();
+    expect(screen.getByText(/Push knees out/i)).toBeInTheDocument();
+  });
+
+  it("renders citations with authors, year, title, and DOI", () => {
+    const analysis = makeAnalysis();
+    (analysis.coaching_result!.structured_output_json! as Record<
+      string,
+      unknown
+    >).citations = [
+      {
+        title: "Squat biomechanics review",
+        authors: ["Schoenfeld, B.", "Grgic, J."],
+        year: 2020,
+        doi: "10.1234/example",
+      },
+    ];
+
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis,
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("coaching-citations")).toBeInTheDocument();
+    expect(screen.getByText(/Schoenfeld/i)).toBeInTheDocument();
+    expect(screen.getByText(/Squat biomechanics review/i)).toBeInTheDocument();
+    expect(screen.getByText(/10\.1234\/example/i)).toBeInTheDocument();
+  });
+});

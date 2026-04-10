@@ -81,6 +81,146 @@ const SEVERITY_BADGE_STYLES: Record<CoachingIssue["severity"], string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Form score descriptors (FR-SCOR-07)
+// ---------------------------------------------------------------------------
+
+function scoreDescriptor(score: number): string {
+  if (score >= 9.0) return "Elite";
+  if (score >= 7.5) return "Advanced";
+  if (score >= 5.0) return "Intermediate";
+  if (score >= 3.0) return "Needs Work";
+  return "Needs Attention";
+}
+
+function scoreColorClass(score: number): string {
+  if (score >= 7.5) return "bg-green-50 text-green-800 border-green-200";
+  if (score >= 5.0) return "bg-amber-50 text-amber-800 border-amber-200";
+  return "bg-red-50 text-red-800 border-red-200";
+}
+
+// ---------------------------------------------------------------------------
+// Form score cards (FR-RESL-01, FR-SCOR-01 through FR-SCOR-08)
+// ---------------------------------------------------------------------------
+
+interface FormScoreCardsProps {
+  safety: number | null | undefined;
+  technique: number | null | undefined;
+  pathBalance: number | null | undefined;
+  control: number | null | undefined;
+  overall: number | null | undefined;
+}
+
+function FormScoreCards({
+  safety,
+  technique,
+  pathBalance,
+  control,
+  overall,
+}: FormScoreCardsProps) {
+  // If no scores exist at all, don't render the section (Phase 0 fallback)
+  if (
+    overall == null &&
+    safety == null &&
+    technique == null &&
+    pathBalance == null &&
+    control == null
+  ) {
+    return null;
+  }
+
+  const dimensions: Array<{
+    label: string;
+    score: number | null | undefined;
+    testId: string;
+  }> = [
+    { label: "Movement Quality", score: safety, testId: "score-safety" },
+    { label: "Technique", score: technique, testId: "score-technique" },
+    {
+      label: "Path & Balance",
+      score: pathBalance,
+      testId: "score-path-balance",
+    },
+    { label: "Control", score: control, testId: "score-control" },
+  ];
+
+  // Highlight Movement Quality if below 3.0 (FR-RESL-01)
+  const movementQualityWarning = typeof safety === "number" && safety < 3.0;
+
+  return (
+    <div
+      className="rounded-lg bg-white p-6 shadow-sm"
+      data-testid="form-score-cards"
+    >
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">
+        Form Assessment
+      </h2>
+
+      {/* Overall Form Rating */}
+      {typeof overall === "number" && (
+        <div
+          className="mb-4 rounded-md border-2 border-blue-200 bg-blue-50 px-6 py-4 text-center"
+          data-testid="score-overall"
+        >
+          <div className="text-4xl font-bold text-blue-900">
+            {overall.toFixed(1)}
+          </div>
+          <div className="mt-1 text-sm font-medium uppercase tracking-wide text-blue-700">
+            Overall Form Rating — {scoreDescriptor(overall)}
+          </div>
+        </div>
+      )}
+
+      {/* Movement Quality alert (FR-RESL-01 — Movement Quality < 3.0 highlight) */}
+      {movementQualityWarning && (
+        <div
+          className="mb-4 rounded-md bg-red-50 p-3 text-sm text-red-800"
+          data-testid="movement-quality-alert"
+        >
+          <strong>Movement Quality Alert:</strong> Your Movement Quality score
+          is below 3.0. Review the coaching feedback below before your next
+          session.
+        </div>
+      )}
+
+      {/* Four dimension cards */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {dimensions.map(({ label, score, testId }) => {
+          if (typeof score !== "number") {
+            return (
+              <div
+                key={testId}
+                className="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-center"
+                data-testid={testId}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {label}
+                </div>
+                <div className="mt-1 text-sm text-gray-400">Not available</div>
+              </div>
+            );
+          }
+          return (
+            <div
+              key={testId}
+              className={`rounded-md border px-4 py-3 text-center ${scoreColorClass(
+                score,
+              )}`}
+              data-testid={testId}
+            >
+              <div className="text-xs font-semibold uppercase tracking-wide">
+                {label}
+              </div>
+              <div className="mt-1 text-2xl font-bold">{score.toFixed(1)}</div>
+              <div className="mt-0.5 text-xs">{scoreDescriptor(score)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -237,6 +377,15 @@ interface CoachingOutputProps {
     issues?: CoachingIssue[];
     correction_plan?: string[];
     disclaimer?: string;
+    // Phase 1 fields (FR-AICP-03, FR-AICP-06)
+    safety_warnings?: string[];
+    recommended_cues?: string[];
+    citations?: Array<{
+      title: string;
+      authors: string[];
+      year: number;
+      doi?: string | null;
+    }>;
   };
 }
 
@@ -315,6 +464,59 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
               </li>
             ))}
           </ol>
+        </div>
+      )}
+
+      {/* Phase 1: Movement Quality warnings (FR-AICP-03) */}
+      {structured.safety_warnings && structured.safety_warnings.length > 0 && (
+        <div
+          data-testid="coaching-safety-warnings"
+          className="rounded-md border-l-4 border-red-400 bg-red-50 p-4"
+        >
+          <h3 className="mb-2 text-base font-semibold text-red-900">
+            Movement Quality Alerts
+          </h3>
+          <ul className="list-disc space-y-1 pl-5">
+            {structured.safety_warnings.map((w, i) => (
+              <li key={i} className="text-red-800">
+                {w}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Phase 1: Recommended cues (FR-AICP-03) */}
+      {structured.recommended_cues && structured.recommended_cues.length > 0 && (
+        <div data-testid="coaching-recommended-cues">
+          <h3 className="mb-2 text-base font-semibold text-gray-900">
+            Recommended Cues
+          </h3>
+          <ul className="list-disc space-y-1 pl-5">
+            {structured.recommended_cues.map((cue, i) => (
+              <li key={i} className="text-gray-700">
+                {cue}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Phase 1: Citations (FR-AICP-06) */}
+      {structured.citations && structured.citations.length > 0 && (
+        <div data-testid="coaching-citations">
+          <h3 className="mb-2 text-base font-semibold text-gray-900">
+            Cited Sources
+          </h3>
+          <ul className="space-y-2">
+            {structured.citations.map((c, i) => (
+              <li key={i} className="text-sm text-gray-600">
+                {c.authors.join(", ")} ({c.year}).{" "}
+                <em>{c.title}</em>
+                {c.doi && <span> — DOI: {c.doi}</span>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -414,6 +616,15 @@ export default function ResultsPage() {
             <ConfidenceBadge score={analysis.confidence_score} />
           </div>
         </div>
+
+        {/* Phase 1: Form Score Cards (FR-RESL-01, FR-SCOR-01–08) */}
+        <FormScoreCards
+          safety={analysis.form_score_safety}
+          technique={analysis.form_score_technique}
+          pathBalance={analysis.form_score_path_balance}
+          control={analysis.form_score_control}
+          overall={analysis.form_score_overall}
+        />
 
         {/* Annotated video player (FR-RESL-02) */}
         {analysis.annotated_video_path && (

@@ -88,12 +88,25 @@ export interface CoachingIssue {
   severity: "High" | "Medium" | "Low";
 }
 
+export interface Citation {
+  title: string;
+  authors: string[];
+  year: number;
+  doi?: string | null;
+}
+
 export interface CoachingOutput {
   summary: string;
   strengths: string[];
   issues: CoachingIssue[];
   correction_plan: string[];
   disclaimer: string;
+  // Phase 1 extended fields (FR-AICP-03, FR-AICP-06)
+  recommended_cues?: string[];
+  citations?: Citation[];
+  confidence_level?: string;
+  safety_warnings?: string[];
+  dimension_addressed?: string;
 }
 
 export interface CoachingResultDetail {
@@ -115,6 +128,12 @@ export interface AnalysisDetail {
   exercise_type: string;
   exercise_variant: string;
   confidence_score: number | null;
+  // Phase 1 form scores (FR-SCOR-01 through FR-SCOR-05)
+  form_score_safety?: number | null;
+  form_score_technique?: number | null;
+  form_score_path_balance?: number | null;
+  form_score_control?: number | null;
+  form_score_overall?: number | null;
   detection_result?: DetectionResult | null;
   video_path: string | null;
   annotated_video_path: string | null;
