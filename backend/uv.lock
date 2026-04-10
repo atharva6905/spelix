@@ -2686,7 +2686,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "instructor", specifier = ">=1.15.1" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "mediapipe", specifier = ">=0.10.33" },
+    { name = "mediapipe", specifier = "==0.10.33" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "opencv-python-headless", specifier = ">=4.13.0.92" },
     { name = "pydantic", specifier = ">=2.12.5" },
