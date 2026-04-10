@@ -32,7 +32,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Ruff check
         working-directory: backend
@@ -86,7 +86,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend
-        run: uv sync
+        run: uv sync --frozen
 
       - name: Create test database tables
         working-directory: backend
