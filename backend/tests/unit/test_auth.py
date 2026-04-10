@@ -36,6 +36,8 @@ TEST_USER_ID = str(uuid.uuid4())
 TEST_EMAIL = "test@example.com"
 ALGORITHM = "HS256"
 AUDIENCE = "authenticated"
+TEST_SUPABASE_URL = "https://testproject.supabase.co"
+TEST_ISSUER = f"{TEST_SUPABASE_URL}/auth/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +78,7 @@ def _make_es256_jwt(
     email: str = TEST_EMAIL,
     role: str = "user",
     expired: bool = False,
+    issuer: str | None = TEST_ISSUER,
 ) -> str:
     """Sign a JWT with the given ES256 private key."""
     now = datetime.now(timezone.utc)
@@ -88,6 +91,8 @@ def _make_es256_jwt(
         "exp": int(exp.timestamp()),
         "user_metadata": {"role": role},
     }
+    if issuer is not None:
+        payload["iss"] = issuer
     headers = {"kid": kid}
     return jwt.encode(payload, private_key, algorithm="ES256", headers=headers)
 
@@ -98,6 +103,7 @@ def make_jwt(
     role: str | None = "user",
     expired: bool = False,
     audience: str = AUDIENCE,
+    issuer: str | None = TEST_ISSUER,
 ) -> str:
     """Generate a test JWT signed with TEST_SECRET."""
     now = datetime.now(timezone.utc)
@@ -111,13 +117,17 @@ def make_jwt(
     }
     if role is not None:
         payload["user_metadata"] = {"role": role}
+    if issuer is not None:
+        payload["iss"] = issuer
     return jwt.encode(payload, TEST_SECRET, algorithm=ALGORITHM)
 
 
 @pytest.fixture(autouse=True)
 def set_jwt_secret(monkeypatch):
-    """Inject test JWT secret into environment for all tests in this module."""
+    """Inject test JWT secret and Supabase URL into environment for all tests."""
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+    monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+    monkeypatch.delenv("SUPABASE_JWT_ISSUER", raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +281,7 @@ class TestES256JWKSAuth:
     def test_es256_verification_with_mock_jwks(self, monkeypatch):
         """ES256 JWT signed with a real private key verifies via mocked JWKS endpoint."""
         monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
-        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         self._reset_jwks_cache()
 
         private_key, public_key = _generate_es256_keypair()
@@ -294,7 +304,7 @@ class TestES256JWKSAuth:
     def test_jwks_cache_hit_fetches_endpoint_only_once(self, monkeypatch):
         """JWKS endpoint is called only once when two JWTs are verified back-to-back."""
         monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
-        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         self._reset_jwks_cache()
 
         private_key, public_key = _generate_es256_keypair()
@@ -328,7 +338,7 @@ class TestES256JWKSAuth:
     ):
         """When JWKS fetch fails AND HS256 secret is absent, get_current_user raises 401."""
         monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
-        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
         self._reset_jwks_cache()
 
         # Use a plain HS256 token — JWKS will fail (httpx raises), no secret → 401
@@ -337,6 +347,129 @@ class TestES256JWKSAuth:
 
         with patch(
             "app.api.deps.httpx.get", side_effect=Exception("JWKS endpoint unreachable")
+        ):
+            from app.api.deps import get_current_user
+
+            with pytest.raises(HTTPException) as exc_info:
+                asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+
+# ---------------------------------------------------------------------------
+# B-075: JWT issuer validation
+# ---------------------------------------------------------------------------
+
+
+def make_jwt_with_issuer(
+    issuer: str | None = None,
+    user_id: str = TEST_USER_ID,
+    email: str = TEST_EMAIL,
+    role: str = "user",
+) -> str:
+    """Generate a test JWT that includes (or omits) an 'iss' claim."""
+    now = datetime.now(timezone.utc)
+    payload: dict = {
+        "sub": user_id,
+        "email": email,
+        "aud": AUDIENCE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+        "user_metadata": {"role": role},
+    }
+    if issuer is not None:
+        payload["iss"] = issuer
+    return jwt.encode(payload, TEST_SECRET, algorithm=ALGORITHM)
+
+
+class TestIssuerValidation:
+    """Tests for JWT issuer ('iss') claim validation (B-075)."""
+
+    def test_correct_issuer_derived_from_supabase_url_passes(self, monkeypatch):
+        """JWT whose 'iss' matches {SUPABASE_URL}/auth/v1 is accepted."""
+        import app.api.deps as deps_module
+
+        monkeypatch.setenv("SUPABASE_URL", "https://abcdef.supabase.co")
+        monkeypatch.delenv("SUPABASE_JWT_ISSUER", raising=False)
+        deps_module._jwks_cache = None
+        deps_module._jwks_fetched_at = 0
+
+        token = make_jwt_with_issuer(issuer="https://abcdef.supabase.co/auth/v1")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with patch(
+            "app.api.deps.httpx.get", side_effect=Exception("JWKS not needed")
+        ):
+            from app.api.deps import get_current_user
+
+            result = asyncio.run(get_current_user(creds))
+
+        assert str(result["id"]) == TEST_USER_ID
+
+    def test_wrong_issuer_raises_401(self, monkeypatch):
+        """JWT whose 'iss' does not match the expected issuer is rejected with 401."""
+        import app.api.deps as deps_module
+
+        monkeypatch.setenv("SUPABASE_URL", "https://abcdef.supabase.co")
+        monkeypatch.delenv("SUPABASE_JWT_ISSUER", raising=False)
+        deps_module._jwks_cache = None
+        deps_module._jwks_fetched_at = 0
+
+        token = make_jwt_with_issuer(issuer="https://attacker.evil.com/auth/v1")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with patch(
+            "app.api.deps.httpx.get", side_effect=Exception("JWKS not needed")
+        ):
+            from app.api.deps import get_current_user
+
+            with pytest.raises(HTTPException) as exc_info:
+                asyncio.run(get_current_user(creds))
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail["error"]["code"] == "INVALID_TOKEN"
+
+    def test_explicit_supabase_jwt_issuer_env_var_takes_precedence(self, monkeypatch):
+        """When SUPABASE_JWT_ISSUER is set explicitly, it overrides the derived value."""
+        import app.api.deps as deps_module
+
+        monkeypatch.setenv("SUPABASE_URL", "https://abcdef.supabase.co")
+        monkeypatch.setenv(
+            "SUPABASE_JWT_ISSUER", "https://custom-issuer.example.com/auth/v1"
+        )
+        deps_module._jwks_cache = None
+        deps_module._jwks_fetched_at = 0
+
+        token = make_jwt_with_issuer(
+            issuer="https://custom-issuer.example.com/auth/v1"
+        )
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with patch(
+            "app.api.deps.httpx.get", side_effect=Exception("JWKS not needed")
+        ):
+            from app.api.deps import get_current_user
+
+            result = asyncio.run(get_current_user(creds))
+
+        assert str(result["id"]) == TEST_USER_ID
+
+    def test_missing_iss_claim_raises_401_when_issuer_configured(self, monkeypatch):
+        """A JWT without an 'iss' claim is rejected when issuer validation is active."""
+        import app.api.deps as deps_module
+
+        monkeypatch.setenv("SUPABASE_URL", "https://abcdef.supabase.co")
+        monkeypatch.delenv("SUPABASE_JWT_ISSUER", raising=False)
+        deps_module._jwks_cache = None
+        deps_module._jwks_fetched_at = 0
+
+        # No iss claim at all
+        token = make_jwt_with_issuer(issuer=None)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        with patch(
+            "app.api.deps.httpx.get", side_effect=Exception("JWKS not needed")
         ):
             from app.api.deps import get_current_user
 
