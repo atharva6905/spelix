@@ -80,6 +80,7 @@ async def _run_pipeline(
     # Build dependencies
     storage_client = _build_supabase_client()
     rep_metric_repo = RepMetricRepository(repo.db)
+    thresholds = ThresholdConfig()
 
     try:
         # ------------------------------------------------------------------ #
@@ -102,6 +103,10 @@ async def _run_pipeline(
             raise ValueError(f"Analysis {analysis_id} disappeared during pipeline")
 
         analysis.status = transition(analysis.status, "coaching")
+
+        # FR-SCOR-11: freeze threshold_version at analysis time
+        analysis.threshold_version = thresholds.version
+
         await repo.update(analysis)
         await _write_heartbeat(redis)
 
@@ -109,7 +114,6 @@ async def _run_pipeline(
         # Coaching: call Claude Sonnet via CoachingService (B-024)
         # ------------------------------------------------------------------ #
         coaching_repo = CoachingResultRepository(repo.db)
-        thresholds = ThresholdConfig()
 
         # Build rep metrics dicts for coaching prompt
         rep_metric_repo = RepMetricRepository(repo.db)

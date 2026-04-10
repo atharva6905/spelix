@@ -1,0 +1,190 @@
+{
+  "version": "v1",
+
+  "squat": {
+    "knee_valgus_caution_deg": {
+      "value": 5.0,
+      "unit": "degrees",
+      "provenance_citation": "Myer et al. 2010",
+      "last_modified_by": "expert_reviewer"
+    },
+    "knee_valgus_high_deg": {
+      "value": 10.0,
+      "unit": "degrees",
+      "provenance_citation": "Hewett et al. 2005 (contested — Krosshaug 2016, Nilstad 2021)",
+      "last_modified_by": "expert_reviewer"
+    },
+    "lumbar_flexion_caution_deg": {
+      "value": 28.0,
+      "unit": "degrees",
+      "provenance_citation": "McGill 2007 — ~50% max ROM",
+      "last_modified_by": "expert_reviewer"
+    },
+    "lumbar_flexion_high_deg": {
+      "value": 44.0,
+      "unit": "degrees",
+      "provenance_citation": "McGill 2007 — ~80% max ROM",
+      "last_modified_by": "expert_reviewer"
+    },
+    "depth_parallel_hip_angle_deg": {
+      "value": 90.0,
+      "unit": "degrees",
+      "provenance_citation": "Schoenfeld 2010 — parallel depth marker",
+      "last_modified_by": "expert_reviewer"
+    },
+    "torso_lean_caution_deg": {
+      "value": 45.0,
+      "unit": "degrees",
+      "provenance_citation": "Fry et al. 2003",
+      "last_modified_by": "expert_reviewer"
+    },
+    "torso_lean_high_deg": {
+      "value": 60.0,
+      "unit": "degrees",
+      "provenance_citation": "Fry et al. 2003",
+      "last_modified_by": "expert_reviewer"
+    },
+    "toe_out_nominal_deg": {
+      "value": 30.0,
+      "unit": "degrees",
+      "provenance_citation": "Swinton et al. 2012",
+      "last_modified_by": "expert_reviewer"
+    },
+    "toe_out_tolerance_deg": {
+      "value": 15.0,
+      "unit": "degrees",
+      "provenance_citation": "Swinton et al. 2012",
+      "last_modified_by": "expert_reviewer"
+    }
+  },
+
+  "bench": {
+    "grip_width_biacromial_ratio_max": {
+      "value": 1.5,
+      "unit": "ratio",
+      "provenance_citation": "Green & Comfort 2007",
+      "last_modified_by": "expert_reviewer"
+    },
+    "elbow_flare_caution_deg": {
+      "value": 45.0,
+      "unit": "degrees",
+      "provenance_citation": "Green & Comfort 2007",
+      "last_modified_by": "expert_reviewer"
+    },
+    "elbow_flare_high_deg": {
+      "value": 60.0,
+      "unit": "degrees",
+      "provenance_citation": "Green & Comfort 2007",
+      "last_modified_by": "expert_reviewer"
+    },
+    "wrist_alignment_tolerance_deg": {
+      "value": 15.0,
+      "unit": "degrees",
+      "provenance_citation": "Lehman 2005",
+      "last_modified_by": "expert_reviewer"
+    }
+  },
+
+  "deadlift": {
+    "lumbar_flexion_caution_deg": {
+      "value": 28.0,
+      "unit": "degrees",
+      "provenance_citation": "McGill 2007 — ~50% max ROM",
+      "last_modified_by": "expert_reviewer"
+    },
+    "lumbar_flexion_high_deg": {
+      "value": 44.0,
+      "unit": "degrees",
+      "provenance_citation": "McGill 2007 — ~80% max ROM",
+      "last_modified_by": "expert_reviewer"
+    },
+    "hip_hinge_min_deg": {
+      "value": 70.0,
+      "unit": "degrees",
+      "provenance_citation": "Cholewicki et al. 1991",
+      "last_modified_by": "expert_reviewer"
+    },
+    "bar_drift_caution_cm": {
+      "value": 5.0,
+      "unit": "centimeters",
+      "provenance_citation": "Nuckols — bar-over-midfoot principle",
+      "last_modified_by": "expert_reviewer"
+    },
+    "bar_drift_high_cm": {
+      "value": 10.0,
+      "unit": "centimeters",
+      "provenance_citation": "Nuckols — bar-over-midfoot principle",
+      "last_modified_by": "expert_reviewer"
+    }
+  },
+
+  "experience_tolerance": {
+    "beginner_deg": {
+      "value": 3.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-SCOR-00 Phase 0 defaults",
+      "last_modified_by": "expert_reviewer"
+    },
+    "intermediate_deg": {
+      "value": 4.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-SCOR-00 Phase 0 defaults",
+      "last_modified_by": "expert_reviewer"
+    },
+    "advanced_deg": {
+      "value": 5.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-SCOR-00 Phase 0 defaults",
+      "last_modified_by": "expert_reviewer"
+    }
+  },
+
+  "scoring_weights": {
+    "_comment": "FR-SCOR-05: Overall Form Rating weighted composite",
+    "movement_quality": 0.40,
+    "technique": 0.30,
+    "path_balance": 0.20,
+    "control": 0.10
+  },
+
+  "score_descriptors": {
+    "_comment": "FR-SCOR-07: score-to-label mapping",
+    "elite_min": 9.0,
+    "advanced_min": 7.5,
+    "intermediate_min": 5.0,
+    "needs_work_min": 3.0
+  },
+
+  "confidence_landmark_weights": {
+    "_comment": "FR-CVPL-22: exercise-specific landmark weights for Tier 3 per-frame confidence",
+    "squat": {
+      "23": 1.0, "24": 1.0,
+      "25": 1.0, "26": 1.0,
+      "27": 1.0, "28": 1.0,
+      "11": 0.5, "12": 0.5
+    },
+    "deadlift": {
+      "23": 1.0, "24": 1.0,
+      "25": 1.0, "26": 1.0,
+      "27": 1.0, "28": 1.0,
+      "11": 0.5, "12": 0.5
+    },
+    "bench": {
+      "11": 1.0, "12": 1.0,
+      "13": 1.0, "14": 1.0,
+      "15": 1.0, "16": 1.0,
+      "23": 0.5, "24": 0.5
+    }
+  },
+
+  "phase_multipliers": {
+    "_comment": "FR-CVPL-23: Tier 4 phase-adjusted confidence multipliers",
+    "static_peak": 1.0,
+    "transition": 0.90,
+    "high_occlusion": {
+      "squat_deep_hip_fold": 0.75,
+      "sumo_stance": 0.75,
+      "bench_supine": 0.80
+    }
+  }
+}

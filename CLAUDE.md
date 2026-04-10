@@ -1,8 +1,7 @@
 # Spelix
 
 Science-based barbell form coaching platform. Users upload squat/bench/deadlift videos → CV pipeline extracts pose + reps + metrics → AI generates structured coaching feedback. Private web app at spelix.app.
-**Current phase: Phase 0 COMPLETE** — core platform built, all 93 backlog items (B-001–B-093) done. 
-Ready for Phase 1 (scoring dimensions, SSE coaching, advanced CV). Authoritative requirements: `@docs/SRS.md` — use it for phase definitions, requirement IDs, threshold values. Do not duplicate SRS content here.
+**Current phase: Phase 1 IN PROGRESS** — Phase 0 complete (93 backlog items, B-001–B-093). Phase 1 delivers: GPT-4o keyframe analysis, form scoring system (4 dimensions + composite), SSE streaming coaching, Tier 1–5 confidence, ThresholdConfig v1, prompt caching. Authoritative requirements: `@docs/SRS.md` — use it for phase definitions, requirement IDs, threshold values. Do not duplicate SRS content here.
 Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at migration 001.
 
 ## Stack
@@ -10,7 +9,7 @@ Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at mi
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, ARQ + Redis, MediaPipe BlazePose Heavy, OpenCV (headless), WeasyPrint
 - **Database**: Supabase Postgres (public schema only; auth schema is Supabase-managed)
 - **Storage/Auth/Realtime**: Supabase (Storage for artifacts, Auth for JWT, Realtime for status push)
-- **AI (Phase 0)**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching — no RAG, no vision yet
+- **AI (Phase 1)**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching with prompt caching; OpenAI GPT-4o (`gpt-4o`) for keyframe analysis + exercise auto-detect fallback
 - **Frontend**: React 19, Vite 8, TypeScript strict, Tailwind CSS 4, shadcn/ui, Recharts
 - **Infra**: DigitalOcean 2GB droplet behind Caddy, Vercel for frontend, Qdrant Cloud (Phase 2+)
 
@@ -110,7 +109,7 @@ when a task matches an agent's description, or invoke explicitly:
 - `spelix-security-reviewer` — pre-merge auth/RLS/language checks
 - `spelix-migration` — Alembic migrations and schema changes
 
-**Activate at Phase 1:**
+**Active agents (Phase 1):**
 - `spelix-cv-engineer` — all tasks in `backend/app/cv/`
 - `spelix-coaching-engineer` — coaching service, SSE, LLM prompt work
 

@@ -81,25 +81,27 @@ def _make_coaching_output(**overrides: Any) -> CoachingOutput:
 
 
 class TestThresholdConfig:
-    def test_loads_version(self) -> None:
+    """Tests for ThresholdConfig v1 (default) and v0 backward compat."""
+
+    def test_loads_v1_version(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.version == "v0"
+        assert cfg.version == "v1"
 
     def test_get_squat_knee_valgus_caution(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5
+        assert cfg.get("squat", "knee_valgus_caution_deg") == 5.0
 
     def test_get_squat_knee_valgus_high(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "knee_valgus_high_deg") == 10
+        assert cfg.get("squat", "knee_valgus_high_deg") == 10.0
 
     def test_get_squat_lumbar_flexion_caution(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "lumbar_flexion_caution_deg") == 28
+        assert cfg.get("squat", "lumbar_flexion_caution_deg") == 28.0
 
     def test_get_squat_lumbar_flexion_high(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "lumbar_flexion_high_deg") == 44
+        assert cfg.get("squat", "lumbar_flexion_high_deg") == 44.0
 
     def test_get_bench_grip_width_ratio(self) -> None:
         cfg = ThresholdConfig()
@@ -107,15 +109,15 @@ class TestThresholdConfig:
 
     def test_get_deadlift_lumbar_flexion_caution(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("deadlift", "lumbar_flexion_caution_deg") == 28
+        assert cfg.get("deadlift", "lumbar_flexion_caution_deg") == 28.0
 
     def test_get_experience_tolerance_beginner(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("experience_tolerance", "beginner_deg") == 3
+        assert cfg.get("experience_tolerance", "beginner_deg") == 3.0
 
     def test_get_experience_tolerance_advanced(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("experience_tolerance", "advanced_deg") == 5
+        assert cfg.get("experience_tolerance", "advanced_deg") == 5.0
 
     def test_get_unknown_key_raises(self) -> None:
         cfg = ThresholdConfig()
@@ -126,6 +128,86 @@ class TestThresholdConfig:
         cfg = ThresholdConfig()
         with pytest.raises(KeyError):
             cfg.get("nonexistent_exercise", "knee_valgus_caution_deg")
+
+    # --- v1-specific: nested object unwrapping ---
+
+    def test_v1_get_unwraps_nested_value(self) -> None:
+        """v1 thresholds are {value, unit, ...} objects; get() returns just the value."""
+        cfg = ThresholdConfig()
+        raw = cfg.get_raw("squat", "knee_valgus_caution_deg")
+        assert isinstance(raw, dict)
+        assert raw["value"] == 5.0
+        assert cfg.get("squat", "knee_valgus_caution_deg") == 5.0
+
+    def test_v1_get_citation(self) -> None:
+        """get_citation() returns provenance string for nested thresholds."""
+        cfg = ThresholdConfig()
+        citation = cfg.get_citation("squat", "knee_valgus_caution_deg")
+        assert citation == "Myer et al. 2010"
+
+    def test_v1_get_citation_returns_none_for_flat_value(self) -> None:
+        """get_citation() returns None for non-nested values (e.g. scoring_weights)."""
+        cfg = ThresholdConfig()
+        citation = cfg.get_citation("scoring_weights", "movement_quality")
+        assert citation is None
+
+    def test_v1_scoring_weights(self) -> None:
+        """FR-SCOR-05: scoring weights accessible via get()."""
+        cfg = ThresholdConfig()
+        assert cfg.get("scoring_weights", "movement_quality") == 0.40
+        assert cfg.get("scoring_weights", "technique") == 0.30
+        assert cfg.get("scoring_weights", "path_balance") == 0.20
+        assert cfg.get("scoring_weights", "control") == 0.10
+
+    def test_v1_score_descriptors(self) -> None:
+        """FR-SCOR-07: score descriptor boundaries."""
+        cfg = ThresholdConfig()
+        assert cfg.get("score_descriptors", "elite_min") == 9.0
+        assert cfg.get("score_descriptors", "advanced_min") == 7.5
+        assert cfg.get("score_descriptors", "intermediate_min") == 5.0
+        assert cfg.get("score_descriptors", "needs_work_min") == 3.0
+
+    def test_v1_phase_multipliers(self) -> None:
+        """FR-CVPL-23: phase multipliers for Tier 4 confidence."""
+        cfg = ThresholdConfig()
+        assert cfg.get("phase_multipliers", "static_peak") == 1.0
+        assert cfg.get("phase_multipliers", "transition") == 0.90
+
+    def test_v1_confidence_landmark_weights(self) -> None:
+        """FR-CVPL-22: exercise-specific landmark weights for Tier 3."""
+        cfg = ThresholdConfig()
+        squat_weights = cfg.get_section("confidence_landmark_weights")["squat"]
+        assert squat_weights["23"] == 1.0
+        assert squat_weights["11"] == 0.5
+
+    def test_v1_all_for_exercise_alias(self) -> None:
+        """all_for_exercise() is backward-compat alias for get_section()."""
+        cfg = ThresholdConfig()
+        section = cfg.all_for_exercise("squat")
+        assert "knee_valgus_caution_deg" in section
+
+    # --- v0 backward compat ---
+
+    def test_v0_still_loads(self) -> None:
+        """v0 config still works when explicitly loaded."""
+        from pathlib import Path
+
+        v0_path = Path(__file__).parent.parent.parent / "config" / "thresholds_v0.json"
+        if not v0_path.exists():
+            pytest.skip("thresholds_v0.json not present")
+        cfg = ThresholdConfig(path=v0_path)
+        assert cfg.version == "v0"
+        assert cfg.get("squat", "knee_valgus_caution_deg") == 5
+
+    def test_v0_get_citation_returns_none(self) -> None:
+        """v0 flat values have no provenance — get_citation() returns None."""
+        from pathlib import Path
+
+        v0_path = Path(__file__).parent.parent.parent / "config" / "thresholds_v0.json"
+        if not v0_path.exists():
+            pytest.skip("thresholds_v0.json not present")
+        cfg = ThresholdConfig(path=v0_path)
+        assert cfg.get_citation("squat", "knee_valgus_caution_deg") is None
 
 
 # ---------------------------------------------------------------------------
