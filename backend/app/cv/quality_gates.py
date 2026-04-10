@@ -51,6 +51,13 @@ _MAX_JUMP_COUNT: int = 2
 # Resolution gate — minimum dimension in pixels (FR-CVPL-07)
 _MIN_RESOLUTION_DIM: int = 720
 
+# Lighting gate — mean brightness thresholds (FR-CVPL-08)
+_LIGHTING_MIN_BRIGHTNESS: float = 60.0
+_LIGHTING_MAX_BRIGHTNESS: float = 240.0
+
+# Camera stability gate — optical flow magnitude threshold (FR-CVPL-09)
+_STABILITY_FLOW_THRESHOLD: float = 3.0
+
 # Occlusion warning — per-exercise landmark map
 _EXERCISE_LANDMARKS: dict[str, dict[int, str]] = {
     "squat": {
@@ -465,6 +472,141 @@ def check_occlusion(
 
 
 # ---------------------------------------------------------------------------
+# Gate 6: Lighting warning (FR-CVPL-08)
+# ---------------------------------------------------------------------------
+
+
+def check_lighting(frames_gray: list[np.ndarray]) -> GateCheckResult:
+    """Warn if mean brightness across first 10 grayscale frames is too low or too high.
+
+    Parameters
+    ----------
+    frames_gray:
+        List of 2-D uint8 grayscale frame arrays. Only first 10 used.
+
+    Returns
+    -------
+    GateCheckResult
+        Warning-level only — never rejects.
+    """
+    sample = frames_gray[:10]
+    if not sample:
+        return GateCheckResult(
+            passed=True,
+            name="lighting",
+            level="warning",
+            metric_value=0.0,
+            threshold=_LIGHTING_MIN_BRIGHTNESS,
+            user_message="",
+        )
+
+    import cv2
+
+    brightness_values = [float(cv2.mean(f)[0]) for f in sample]
+    mean_brightness = float(np.mean(brightness_values))
+
+    if mean_brightness < _LIGHTING_MIN_BRIGHTNESS:
+        return GateCheckResult(
+            passed=True,  # Warning only — does not reject
+            name="lighting",
+            level="warning",
+            metric_value=mean_brightness,
+            threshold=_LIGHTING_MIN_BRIGHTNESS,
+            user_message="Poor lighting detected — try filming in a brighter environment for better results.",
+        )
+    if mean_brightness > _LIGHTING_MAX_BRIGHTNESS:
+        return GateCheckResult(
+            passed=True,
+            name="lighting",
+            level="warning",
+            metric_value=mean_brightness,
+            threshold=_LIGHTING_MAX_BRIGHTNESS,
+            user_message="Poor lighting detected — the scene appears overexposed. Reduce direct lighting.",
+        )
+
+    return GateCheckResult(
+        passed=True,
+        name="lighting",
+        level="warning",
+        metric_value=mean_brightness,
+        threshold=_LIGHTING_MIN_BRIGHTNESS,
+        user_message="",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Gate 7: Camera stability warning (FR-CVPL-09)
+# ---------------------------------------------------------------------------
+
+
+def check_camera_stability(frames_gray: list[np.ndarray]) -> GateCheckResult:
+    """Warn if mean optical flow magnitude exceeds threshold, suggesting camera movement.
+
+    Uses Farneback dense optical flow on up to 5 consecutive frame pairs.
+
+    Parameters
+    ----------
+    frames_gray:
+        List of 2-D uint8 grayscale frame arrays. Needs at least 2 frames.
+
+    Returns
+    -------
+    GateCheckResult
+        Warning-level only — never rejects.
+    """
+    if len(frames_gray) < 2:
+        return GateCheckResult(
+            passed=True,
+            name="camera_stability",
+            level="warning",
+            metric_value=0.0,
+            threshold=_STABILITY_FLOW_THRESHOLD,
+            user_message="",
+        )
+
+    import cv2
+
+    pairs = min(5, len(frames_gray) - 1)
+    magnitudes: list[float] = []
+    for i in range(pairs):
+        flow = cv2.calcOpticalFlowFarneback(
+            frames_gray[i],
+            frames_gray[i + 1],
+            None,
+            pyr_scale=0.5,
+            levels=3,
+            winsize=15,
+            iterations=3,
+            poly_n=5,
+            poly_sigma=1.2,
+            flags=0,
+        )
+        mag, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
+        magnitudes.append(float(np.mean(mag)))
+
+    mean_flow = float(np.mean(magnitudes))
+
+    if mean_flow > _STABILITY_FLOW_THRESHOLD:
+        return GateCheckResult(
+            passed=True,  # Warning only
+            name="camera_stability",
+            level="warning",
+            metric_value=mean_flow,
+            threshold=_STABILITY_FLOW_THRESHOLD,
+            user_message="Camera appears to be moving — use a tripod or stable surface for better results.",
+        )
+
+    return GateCheckResult(
+        passed=True,
+        name="camera_stability",
+        level="warning",
+        metric_value=mean_flow,
+        threshold=_STABILITY_FLOW_THRESHOLD,
+        user_message="",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Combined runner
 # ---------------------------------------------------------------------------
 
@@ -475,6 +617,7 @@ def run_quality_gates(
     frame_height: int,
     video_path: str | None = None,
     exercise_type: str = "squat",
+    frames_gray: list[np.ndarray] | None = None,
 ) -> QualityGateResult:
     """
     Run all Phase 0 quality gates and return an aggregated result.
@@ -491,6 +634,9 @@ def run_quality_gates(
     exercise_type:
         Exercise type for occlusion warnings (``"squat"``, ``"bench"``,
         ``"deadlift"``).  Defaults to ``"squat"``.
+    frames_gray:
+        Optional list of 2-D uint8 grayscale frame arrays for lighting
+        and camera stability gates (FR-CVPL-08, FR-CVPL-09).
 
     Returns
     -------
@@ -522,6 +668,11 @@ def run_quality_gates(
     # Occlusion warnings (non-rejecting)
     occlusion_warnings = check_occlusion(landmarks_per_frame, exercise_type)
     checks.extend(occlusion_warnings)
+
+    # Frame-based warning gates (FR-CVPL-08, FR-CVPL-09)
+    if frames_gray is not None:
+        checks.append(check_lighting(frames_gray))
+        checks.append(check_camera_stability(frames_gray))
 
     # Overall pass only if no error-level gate failed
     overall_passed = all(c.passed for c in checks if c.level == "error")

@@ -604,3 +604,118 @@ class TestCheckOcclusion:
         # Should not raise
         results = check_occlusion(frames, "unknown_exercise")
         assert isinstance(results, list)
+
+
+# ---------------------------------------------------------------------------
+# Gate 6: Lighting (FR-CVPL-08)
+# ---------------------------------------------------------------------------
+
+
+class TestLightingGate:
+    """Tests for check_lighting — warning-level only."""
+
+    def test_dark_frames_produce_warning(self):
+        from app.cv.quality_gates import check_lighting
+
+        # Mean brightness ~30 (well below 60 threshold)
+        dark_frames = [np.full((100, 100), 30, dtype=np.uint8) for _ in range(10)]
+        result = check_lighting(dark_frames)
+        assert result.name == "lighting"
+        assert result.level == "warning"
+        assert result.passed is True  # Warnings never reject
+        assert result.metric_value < 60.0
+        assert "lighting" in result.user_message.lower()
+
+    def test_overexposed_frames_produce_warning(self):
+        from app.cv.quality_gates import check_lighting
+
+        # Mean brightness ~245 (above 240 threshold)
+        bright_frames = [np.full((100, 100), 245, dtype=np.uint8) for _ in range(10)]
+        result = check_lighting(bright_frames)
+        assert result.name == "lighting"
+        assert result.level == "warning"
+        assert result.passed is True
+        assert result.metric_value > 240.0
+        assert "overexposed" in result.user_message.lower()
+
+    def test_good_lighting_passes_silently(self):
+        from app.cv.quality_gates import check_lighting
+
+        # Mean brightness ~128 (well within 60–240 range)
+        ok_frames = [np.full((100, 100), 128, dtype=np.uint8) for _ in range(10)]
+        result = check_lighting(ok_frames)
+        assert result.name == "lighting"
+        assert result.passed is True
+        assert result.user_message == ""
+
+    def test_empty_frames_passes(self):
+        from app.cv.quality_gates import check_lighting
+
+        result = check_lighting([])
+        assert result.passed is True
+        assert result.user_message == ""
+
+    def test_uses_only_first_10_frames(self):
+        from app.cv.quality_gates import check_lighting
+
+        # 15 frames: first 10 bright (ok), last 5 dark — should pass
+        frames = [np.full((100, 100), 128, dtype=np.uint8) for _ in range(10)]
+        frames += [np.full((100, 100), 10, dtype=np.uint8) for _ in range(5)]
+        result = check_lighting(frames)
+        assert result.passed is True
+        assert result.user_message == ""
+
+
+# ---------------------------------------------------------------------------
+# Gate 7: Camera stability (FR-CVPL-09)
+# ---------------------------------------------------------------------------
+
+
+class TestCameraStabilityGate:
+    """Tests for check_camera_stability — warning-level only."""
+
+    def test_static_frames_pass(self):
+        from app.cv.quality_gates import check_camera_stability
+
+        # Identical frames → zero optical flow
+        static = [np.full((100, 100), 128, dtype=np.uint8) for _ in range(6)]
+        result = check_camera_stability(static)
+        assert result.name == "camera_stability"
+        assert result.passed is True
+        assert result.metric_value < 3.0
+        assert result.user_message == ""
+
+    def test_moving_frames_produce_warning(self):
+        from app.cv.quality_gates import check_camera_stability
+
+        # Simulate large movement: create gradient frames shifted heavily
+        # Use a textured pattern so optical flow has features to track
+        np.random.seed(42)
+        base = np.random.randint(0, 256, (200, 200), dtype=np.uint8)
+        frames = []
+        for i in range(6):
+            # Roll the image by 30px each frame — big movement
+            shifted = np.roll(base, i * 30, axis=1)
+            frames.append(shifted)
+        result = check_camera_stability(frames)
+        assert result.name == "camera_stability"
+        assert result.passed is True  # Warning only
+        assert result.level == "warning"
+        assert result.metric_value > 3.0
+        assert "moving" in result.user_message.lower()
+
+    def test_single_frame_passes(self):
+        from app.cv.quality_gates import check_camera_stability
+
+        # Need at least 2 frames for flow
+        result = check_camera_stability([np.full((100, 100), 128, dtype=np.uint8)])
+        assert result.passed is True
+        assert result.user_message == ""
+
+    def test_two_identical_frames_pass(self):
+        from app.cv.quality_gates import check_camera_stability
+
+        frame = np.full((100, 100), 100, dtype=np.uint8)
+        result = check_camera_stability([frame, frame])
+        assert result.passed is True
+        assert result.metric_value < 3.0
