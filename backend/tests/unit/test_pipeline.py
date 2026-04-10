@@ -605,3 +605,243 @@ def test_quality_gate_rejection_is_exception():
     exc = QualityGateRejection("test message")
     assert isinstance(exc, Exception)
     assert str(exc) == "test message"
+
+
+# ---------------------------------------------------------------------------
+# Test: GPT-4o fallback wiring (FR-XDET-04)
+# ---------------------------------------------------------------------------
+
+
+from app.cv.exercise_detection import DetectionResult
+
+
+def _make_low_conf_detection() -> DetectionResult:
+    """Heuristic detection with confidence below 0.7 threshold."""
+    return DetectionResult(
+        detected_type="squat",
+        detected_variant="high_bar",
+        confidence=0.45,
+        method="heuristic",
+        details={"scores": {"squat": 0.45, "bench": 0.3, "deadlift": 0.25}, "frames_analyzed": 20},
+    )
+
+
+def _make_high_conf_detection() -> DetectionResult:
+    """Heuristic detection with confidence above 0.7 threshold."""
+    return DetectionResult(
+        detected_type="squat",
+        detected_variant="high_bar",
+        confidence=0.85,
+        method="heuristic",
+        details={"scores": {"squat": 0.85, "bench": 0.1, "deadlift": 0.05}, "frames_analyzed": 20},
+    )
+
+
+@pytest.mark.asyncio
+async def test_gpt4o_fallback_triggered_when_heuristic_low_confidence():
+    """When heuristic confidence < 0.7 and openai_client provided, GPT-4o fallback runs."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+    openai_client = MagicMock()
+
+    from app.services.keyframe_analysis import ExerciseClassification
+
+    mock_classification = ExerciseClassification(
+        exercise_type="deadlift",
+        exercise_variant="conventional",
+        confidence=0.92,
+        reasoning="Hip hinge pattern with bar starting on floor",
+    )
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_low_conf_detection()),
+        patch(f"{_PKG}._extract_sample_frames_b64", return_value=["frame1_b64", "frame2_b64", "frame3_b64"]),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch("os.path.isfile", return_value=False),
+        patch("app.services.keyframe_analysis.KeyframeAnalysisService.classify_exercise", new_callable=AsyncMock, return_value=mock_classification) as mock_classify,
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+            openai_client=openai_client,
+        )
+
+    # Fallback was called
+    mock_classify.assert_called_once()
+
+    # Detection result should reflect GPT-4o fallback
+    assert result.detection_result.method == "vision_fallback"
+    assert result.detection_result.detected_type == "deadlift"
+    assert result.detection_result.confidence == 0.92
+    assert result.detection_result.details["heuristic_confidence"] == 0.45
+    assert result.detection_result.details["heuristic_type"] == "squat"
+
+    # Stored on analysis JSONB
+    assert analysis.detection_result["method"] == "vision_fallback"
+    assert analysis.detection_result["detected_type"] == "deadlift"
+
+
+@pytest.mark.asyncio
+async def test_gpt4o_fallback_not_triggered_when_high_confidence():
+    """When heuristic confidence >= 0.7, GPT-4o fallback is NOT called."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+    openai_client = MagicMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
+        patch(f"{_PKG}._extract_sample_frames_b64") as mock_frames,
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch("os.path.isfile", return_value=False),
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+            openai_client=openai_client,
+        )
+
+    # Frame extraction never called — heuristic was confident
+    mock_frames.assert_not_called()
+
+    # Detection stays as heuristic
+    assert result.detection_result.method == "heuristic"
+    assert result.detection_result.confidence == 0.85
+
+
+@pytest.mark.asyncio
+async def test_gpt4o_fallback_not_triggered_when_no_openai_client():
+    """When openai_client is None, GPT-4o fallback is skipped even if confidence is low."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_low_conf_detection()),
+        patch(f"{_PKG}._extract_sample_frames_b64") as mock_frames,
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch("os.path.isfile", return_value=False),
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+            # openai_client=None (default)
+        )
+
+    # Frame extraction never called
+    mock_frames.assert_not_called()
+
+    # Heuristic result used despite low confidence
+    assert result.detection_result.method == "heuristic"
+    assert result.detection_result.confidence == 0.45
+
+
+@pytest.mark.asyncio
+async def test_gpt4o_fallback_error_falls_back_to_heuristic():
+    """When GPT-4o classify_exercise raises, heuristic result is kept."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+    openai_client = MagicMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_low_conf_detection()),
+        patch(f"{_PKG}._extract_sample_frames_b64", return_value=["frame1", "frame2", "frame3"]),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch("os.path.isfile", return_value=False),
+        patch("app.services.keyframe_analysis.KeyframeAnalysisService.classify_exercise", new_callable=AsyncMock, side_effect=RuntimeError("OpenAI timeout")),
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+            openai_client=openai_client,
+        )
+
+    # Falls back to heuristic
+    assert result.detection_result.method == "heuristic"
+    assert result.detection_result.confidence == 0.45

@@ -182,6 +182,45 @@ def _aggregate_rep_metrics(
 
 
 # ---------------------------------------------------------------------------
+# Frame sampling for GPT-4o fallback (FR-XDET-04)
+# ---------------------------------------------------------------------------
+
+_FALLBACK_CONFIDENCE_THRESHOLD = 0.7
+
+
+def _extract_sample_frames_b64(
+    video_path: str,
+    count: int = 3,
+) -> list[str]:
+    """Extract ``count`` evenly-spaced frames from the video as base64 JPEG.
+
+    Used to feed GPT-4o ``classify_exercise`` when the heuristic confidence
+    falls below the threshold.  Runs in an executor (CPU-bound).
+    """
+    import base64
+
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total <= 0:
+        cap.release()
+        return []
+
+    indices = [int(i * (total - 1) / max(count - 1, 1)) for i in range(count)]
+    result: list[str] = []
+    for idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        result.append(base64.b64encode(buf.tobytes()).decode())
+    cap.release()
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -193,6 +232,7 @@ async def run_cv_pipeline(
     storage_client: Any,
     redis: Any,
     write_heartbeat: Any,
+    openai_client: Any = None,
 ) -> PipelineResult:
     """Execute the full CV pipeline for an analysis.
 
@@ -266,18 +306,54 @@ async def run_cv_pipeline(
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
-    # Step 2b: Exercise auto-detection (FR-XDET-03)
+    # Step 2b: Exercise auto-detection (FR-XDET-03, FR-XDET-04)
     # ------------------------------------------------------------------ #
-    from app.cv.exercise_detection import detect_exercise_heuristic
+    from app.cv.exercise_detection import DetectionResult, detect_exercise_heuristic
 
     detection = await loop.run_in_executor(
         None, detect_exercise_heuristic, landmarks_per_frame,
     )
-    result.detection_result = detection
     logger.info(
-        "Exercise detection: %s (conf=%.2f, method=%s) for analysis %s",
-        detection.detected_type, detection.confidence, detection.method, analysis_id,
+        "Heuristic detection: %s (conf=%.2f) for analysis %s",
+        detection.detected_type, detection.confidence, analysis_id,
     )
+
+    # GPT-4o vision fallback when heuristic confidence is low (FR-XDET-04)
+    if detection.confidence < _FALLBACK_CONFIDENCE_THRESHOLD and openai_client is not None:
+        try:
+            from app.services.keyframe_analysis import KeyframeAnalysisService
+
+            frame_images = await loop.run_in_executor(
+                None, _extract_sample_frames_b64, video_local, 3,
+            )
+            if frame_images:
+                kf_svc = KeyframeAnalysisService(openai_client)
+                classification = await kf_svc.classify_exercise(
+                    frame_images_b64=frame_images,
+                )
+                detection = DetectionResult(
+                    detected_type=classification.exercise_type,  # type: ignore[arg-type]
+                    detected_variant=classification.exercise_variant,
+                    confidence=classification.confidence,
+                    method="vision_fallback",
+                    details={
+                        "reasoning": classification.reasoning,
+                        "heuristic_confidence": detection.confidence,
+                        "heuristic_type": detection.detected_type,
+                    },
+                )
+                logger.info(
+                    "GPT-4o fallback: %s (conf=%.2f) for analysis %s",
+                    detection.detected_type, detection.confidence, analysis_id,
+                )
+        except Exception:
+            logger.warning(
+                "GPT-4o exercise classification failed for %s — using heuristic result",
+                analysis_id,
+                exc_info=True,
+            )
+
+    result.detection_result = detection
 
     # Store detection result as JSONB on the analysis for FR-XDET-07
     analysis.detection_result = {

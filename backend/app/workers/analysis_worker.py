@@ -82,6 +82,15 @@ async def _run_pipeline(
     rep_metric_repo = RepMetricRepository(repo.db)
     thresholds = ThresholdConfig()
 
+    # OpenAI client for GPT-4o fallback (exercise detection + keyframe analysis)
+    openai_client = None
+    try:
+        import openai as openai_mod
+
+        openai_client = openai_mod.AsyncOpenAI()
+    except Exception:
+        logger.warning("OpenAI client unavailable — GPT-4o fallback disabled")
+
     try:
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
@@ -93,6 +102,7 @@ async def _run_pipeline(
             storage_client=storage_client,
             redis=redis,
             write_heartbeat=_write_heartbeat,
+            openai_client=openai_client,
         )
 
         # ------------------------------------------------------------------ #
@@ -116,11 +126,8 @@ async def _run_pipeline(
         keyframe_analysis_text: str | None = None
         if pipeline_result.keyframes:
             try:
-                import openai as openai_mod
-
                 from app.services.keyframe_analysis import KeyframeAnalysisService
 
-                openai_client = openai_mod.AsyncOpenAI()
                 kf_svc = KeyframeAnalysisService(openai_client)
 
                 # Build rep metrics dicts for keyframe analysis
