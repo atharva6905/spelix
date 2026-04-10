@@ -2,7 +2,7 @@
 name: spelix-langgraph-engineer
 description: Use for Phase 3 LangGraph agent orchestration tasks — AgentState definition, tool node implementation, CoVe verification loop, LangSmith tracing, or agent trace UI. Invoke for tasks building the LangGraph graph, composable tools, or the @xyflow/react reasoning sidebar. Do not activate before Phase 3 begins. Carries the full LangGraph, CoVe, and Blackboard pattern context.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 isolation: worktree
 color: violet
 ---

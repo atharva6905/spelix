@@ -2,7 +2,7 @@
 name: spelix-coaching-engineer
 description: Use for tasks in services/coaching.py, SSE streaming endpoints, LLM prompt engineering, instructor structured output schemas, or coaching result rendering. Invoke for Phase 1 coaching integration (FR-COACH-01 through FR-COACH-06), SSE streaming implementation, and any prompt versioning work. This agent carries the full Anthropic SDK, instructor, and SSE architecture context.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 isolation: worktree
 color: purple
 ---

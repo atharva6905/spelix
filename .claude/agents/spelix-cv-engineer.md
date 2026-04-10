@@ -2,7 +2,7 @@
 name: spelix-cv-engineer
 description: Use for any task in backend/app/cv/ — MediaPipe pose estimation, quality gates, rep detection, angle calculation, form scoring, bar path tracking, or annotated video generation. Invoke for Phase 1 scoring dimension implementation (FR-SCOR-01 through FR-SCOR-06), quality gate additions (FR-CVPL-08/09), and any CV pipeline changes. This agent carries the full MediaPipe and scoring architecture context.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 isolation: worktree
 color: blue
 ---

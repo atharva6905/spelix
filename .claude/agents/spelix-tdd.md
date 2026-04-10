@@ -2,7 +2,7 @@
 name: spelix-tdd
 description: Use for any Spelix feature or fix task. Writes a failing test first, implements until the TDD gate passes, then commits. Invoke when a backlog task has a specific TDD gate — both backend (pytest) and frontend (vitest) tasks. Do NOT use for tasks in backend/app/cv/ (use spelix-cv-engineer) or for Alembic migrations (use spelix-migration).
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 isolation: worktree
 color: green
 ---

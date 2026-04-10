@@ -2,7 +2,7 @@
 name: spelix-security-reviewer
 description: Use proactively before any commit touching authentication, user data, user-facing strings, or RLS policies. Checks for JWT validation gaps, RLS policy correctness, SaMD/FTC language violations, secret exposure, and injection risks. Read-only. Invoke automatically before merging worktrees that touch api/deps.py, auth flows, user profiles, or any user-visible text.
 tools: Read, Grep, Glob
-model: claude-sonnet-4-6
+model: sonnet
 color: red
 ---
 

@@ -2,7 +2,7 @@
 name: spelix-rag-engineer
 description: Use for Phase 2 RAG tasks — document ingestion pipeline, Qdrant vector operations, Cohere embedding and reranking, hybrid retrieval implementation, or citation rendering. Invoke for FR-RAGK-01 through FR-RAGK-10. Do not activate before Phase 2 begins. This agent carries the full Qdrant, Cohere, and hybrid retrieval architecture context.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 isolation: worktree
 color: cyan
 ---

@@ -2,7 +2,7 @@
 name: spelix-eval-engineer
 description: Use for Phase 4 eval infrastructure tasks — deepeval RAGAS metrics, Langfuse logging, CI regression tests against the golden dataset, or the admin eval dashboard. Invoke for tasks involving coaching quality measurement, ICC threshold validation, or HITL workflow implementation. Do not activate before Phase 4 begins.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 color: amber
 ---
 

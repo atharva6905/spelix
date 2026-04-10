@@ -2,7 +2,7 @@
 name: spelix-auditor
 description: Use to audit Spelix code against SRS requirements, check for compliance gaps, or produce structured finding reports. Invoke before any phase transition, after a large batch merge, or when verifying a specific requirement ID is correctly implemented. Read-only — never modifies files. Outputs CRITICAL / HIGH / MEDIUM findings with file paths, line numbers, and fix suggestions.
 tools: Read, Grep, Glob
-model: claude-haiku-4-5-20251001
+model: haiku
 color: yellow
 ---
 

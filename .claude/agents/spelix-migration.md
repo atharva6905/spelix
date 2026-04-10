@@ -2,7 +2,7 @@
 name: spelix-migration
 description: Use for any Alembic migration or SQLAlchemy model change. Enforces Spelix schema rules — JSONB columns, VARCHAR(30) CHECK constraint for status, required indexes, no DDL FK to auth.users. Invoke when adding columns, creating new tables, or modifying existing migrations. Never runs alembic upgrade head — generates the migration file and reports it for review.
 tools: Read, Write, Edit, Bash, Glob, Grep
-model: claude-sonnet-4-6
+model: sonnet
 color: orange
 ---
 
