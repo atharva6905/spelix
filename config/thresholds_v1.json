@@ -55,6 +55,12 @@
       "unit": "degrees",
       "provenance_citation": "Swinton et al. 2012",
       "last_modified_by": "expert_reviewer"
+    },
+    "knee_angle_at_depth_min_deg": {
+      "value": 60.0,
+      "unit": "degrees",
+      "provenance_citation": "Schoenfeld 2010 — acute knee angle caution threshold",
+      "last_modified_by": "expert_reviewer"
     }
   },
 
@@ -81,6 +87,24 @@
       "value": 15.0,
       "unit": "degrees",
       "provenance_citation": "Lehman 2005",
+      "last_modified_by": "expert_reviewer"
+    },
+    "elbow_angle_at_bottom_min_deg": {
+      "value": 60.0,
+      "unit": "degrees",
+      "provenance_citation": "Green & Comfort 2007",
+      "last_modified_by": "expert_reviewer"
+    },
+    "elbow_angle_at_bottom_max_deg": {
+      "value": 100.0,
+      "unit": "degrees",
+      "provenance_citation": "Green & Comfort 2007",
+      "last_modified_by": "expert_reviewer"
+    },
+    "shoulder_angle_at_bottom_max_deg": {
+      "value": 90.0,
+      "unit": "degrees",
+      "provenance_citation": "Green & Comfort 2007",
       "last_modified_by": "expert_reviewer"
     }
   },
@@ -114,6 +138,57 @@
       "value": 10.0,
       "unit": "centimeters",
       "provenance_citation": "Nuckols — bar-over-midfoot principle",
+      "last_modified_by": "expert_reviewer"
+    },
+    "torso_lean_caution_deg": {
+      "value": 35.0,
+      "unit": "degrees",
+      "provenance_citation": "Cholewicki et al. 1991 — deadlift torso lean",
+      "last_modified_by": "expert_reviewer"
+    },
+    "torso_lean_high_deg": {
+      "value": 50.0,
+      "unit": "degrees",
+      "provenance_citation": "Cholewicki et al. 1991 — deadlift torso lean",
+      "last_modified_by": "expert_reviewer"
+    },
+    "hip_angle_at_bottom_min_deg": {
+      "value": 50.0,
+      "unit": "degrees",
+      "provenance_citation": "Cholewicki et al. 1991",
+      "last_modified_by": "expert_reviewer"
+    },
+    "hip_angle_at_bottom_max_deg": {
+      "value": 110.0,
+      "unit": "degrees",
+      "provenance_citation": "Cholewicki et al. 1991",
+      "last_modified_by": "expert_reviewer"
+    },
+    "knee_angle_at_lockout_min_deg": {
+      "value": 150.0,
+      "unit": "degrees",
+      "provenance_citation": "IPF rulebook — full lockout standard",
+      "last_modified_by": "expert_reviewer"
+    }
+  },
+
+  "control": {
+    "descent_duration_caution_s": {
+      "value": 1.5,
+      "unit": "seconds",
+      "provenance_citation": "Sheiko — mastery-under-load principle",
+      "last_modified_by": "expert_reviewer"
+    },
+    "descent_duration_high_s": {
+      "value": 1.0,
+      "unit": "seconds",
+      "provenance_citation": "Sheiko — mastery-under-load principle",
+      "last_modified_by": "expert_reviewer"
+    },
+    "rep_duration_std_caution_s": {
+      "value": 0.5,
+      "unit": "seconds",
+      "provenance_citation": "Sheiko — rep-to-rep consistency",
       "last_modified_by": "expert_reviewer"
     }
   },

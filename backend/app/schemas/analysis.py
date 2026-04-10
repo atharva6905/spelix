@@ -149,6 +149,11 @@ class AnalysisDetail(BaseModel):
     exercise_type: str
     exercise_variant: str
     confidence_score: float | None
+    form_score_safety: float | None = None
+    form_score_technique: float | None = None
+    form_score_path_balance: float | None = None
+    form_score_control: float | None = None
+    form_score_overall: float | None = None
     video_path: str | None
     annotated_video_path: str | None
     plot_path: str | None
@@ -172,6 +177,7 @@ class AnalysisSummary(BaseModel):
     exercise_type: str
     exercise_variant: str
     confidence_score: float | None
+    form_score_overall: float | None = None
     tags: list[str] | None
     created_at: datetime
     updated_at: datetime
