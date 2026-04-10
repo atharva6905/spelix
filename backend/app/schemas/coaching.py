@@ -1,11 +1,12 @@
 """Pydantic v2 schemas for AI coaching output.
 
-Requirements: FR-RESL-03, Appendix D (B-023)
+Requirements: FR-RESL-03, FR-AICP-03, FR-AICP-06, Appendix D (B-023)
 
 These schemas are enforced by the instructor library when calling Claude Sonnet
 4.6. The structured_output_json JSONB column in coaching_results stores the
-serialised form of CoachingOutput. Phase 1 will extend CoachingOutput
-additively — no breaking schema changes.
+serialised form of CoachingOutput. Phase 1 extends CoachingOutput additively —
+all new fields are Optional with defaults so Phase 0 JSONB blobs continue to
+deserialise without error.
 """
 
 from __future__ import annotations
@@ -48,12 +49,25 @@ class Issue(BaseModel):
     )
 
 
+class Citation(BaseModel):
+    """Research citation supporting a coaching recommendation (FR-AICP-06)."""
+
+    title: str
+    authors: list[str]
+    year: int
+    doi: str | None = None
+
+
 class CoachingOutput(BaseModel):
-    """Full structured coaching output from the Phase 0 LLM call.
+    """Full structured coaching output from the Phase 0/1 LLM call.
 
     Stored in coaching_results.structured_output_json as JSONB.
     Enforced via instructor + Pydantic v2 schema validation during the
     Anthropic API call.
+
+    Phase 1 additions (FR-AICP-03, FR-AICP-06): recommended_cues, citations,
+    confidence_level, safety_warnings, dimension_addressed. All are Optional
+    with defaults so Phase 0 JSONB blobs continue to deserialise.
 
     Attributes
     ----------
@@ -73,6 +87,16 @@ class CoachingOutput(BaseModel):
         Token count of the input prompt (logged for cost tracking).
     raw_completion_tokens:
         Token count of the completion (logged for cost tracking).
+    recommended_cues:
+        Recommended verbal/tactile cues for the lifter (Phase 1, FR-AICP-03).
+    citations:
+        Research citations supporting recommendations (Phase 1, FR-AICP-06).
+    confidence_level:
+        Overall confidence in the coaching assessment (Phase 1).
+    safety_warnings:
+        Safety-related observations requiring immediate attention (Phase 1).
+    dimension_addressed:
+        Primary scoring dimension this coaching addresses (Phase 1).
     """
 
     summary: str = Field(
@@ -99,3 +123,27 @@ class CoachingOutput(BaseModel):
     )
     raw_prompt_tokens: int = Field(ge=0, description="Input token count for cost tracking.")
     raw_completion_tokens: int = Field(ge=0, description="Output token count for cost tracking.")
+
+    # Phase 1 additions (FR-AICP-03, FR-AICP-06)
+    recommended_cues: list[str] = Field(
+        default_factory=list,
+        description="Recommended verbal/tactile cues for the lifter.",
+    )
+    citations: list[Citation] = Field(
+        default_factory=list,
+        description="Research citations supporting recommendations.",
+    )
+    confidence_level: Literal["High", "Moderate", "Low", "Very Low"] | None = Field(
+        default=None,
+        description="Overall confidence in the coaching assessment.",
+    )
+    safety_warnings: list[str] = Field(
+        default_factory=list,
+        description="Safety-related warnings requiring immediate attention.",
+    )
+    dimension_addressed: Literal[
+        "Movement Quality", "Technique", "Path & Balance", "Control"
+    ] | None = Field(
+        default=None,
+        description="Primary scoring dimension this coaching addresses.",
+    )

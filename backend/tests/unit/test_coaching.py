@@ -1,7 +1,8 @@
 """
 Unit tests for ThresholdConfig, CoachingOutput schema, and CoachingService.
 
-Requirements: B-023 (FR-RESL-03, Appendix D), B-025 (FR-SCOR-00)
+Requirements: B-023 (FR-RESL-03, Appendix D), B-025 (FR-SCOR-00),
+              FR-AICP-03, FR-AICP-04, FR-AICP-05, FR-AICP-06
 
 All LLM calls are mocked — never call real Anthropic API.
 """
@@ -15,7 +16,10 @@ import pytest
 
 from app.config import ThresholdConfig
 from app.schemas.coaching import CoachingOutput, Issue
-from app.services.coaching import CoachingService
+from app.services.coaching import (
+    CoachingService,
+    _build_user_prompt,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -251,6 +255,68 @@ class TestCoachingOutputSchema:
         assert isinstance(output.disclaimer, str)
         assert len(output.disclaimer) > 0
 
+    # ---------------------------------------------------------------------------
+    # Phase 1 schema tests (FR-AICP-03, FR-AICP-06)
+    # ---------------------------------------------------------------------------
+
+    def test_coaching_output_v1_backward_compat(self) -> None:
+        """Phase 0 JSONB blobs (no Phase 1 fields) must still deserialise."""
+        phase0_dict: dict[str, Any] = {
+            "summary": "Good session.",
+            "strengths": ["Solid depth"],
+            "issues": [],
+            "correction_plan": ["Keep knees tracking over toes."],
+            "disclaimer": MANDATORY_DISCLAIMER,
+            "raw_prompt_tokens": 300,
+            "raw_completion_tokens": 180,
+        }
+        output = CoachingOutput.model_validate(phase0_dict)
+
+        assert output.summary == "Good session."
+        assert output.raw_prompt_tokens == 300
+        assert output.recommended_cues == []
+        assert output.citations == []
+        assert output.confidence_level is None
+        assert output.safety_warnings == []
+        assert output.dimension_addressed is None
+
+    def test_citation_schema_valid(self) -> None:
+        """Citation model round-trips through Pydantic validation."""
+        from app.schemas.coaching import Citation
+
+        citation = Citation(
+            title="Knee valgus during the squat: a biomechanical review",
+            authors=["Smith, J.", "Jones, A."],
+            year=2021,
+            doi="10.1016/j.jbiomech.2021.110001",
+        )
+        assert citation.title.startswith("Knee")
+        assert citation.year == 2021
+        assert citation.doi is not None
+
+        no_doi = Citation(
+            title="Barbell deadlift mechanics",
+            authors=["Brown, K."],
+            year=2019,
+        )
+        assert no_doi.doi is None
+
+    def test_coaching_output_dimension_literal_values(self) -> None:
+        """dimension_addressed accepts only the 4 defined values plus None."""
+        valid_values = [
+            "Movement Quality",
+            "Technique",
+            "Path & Balance",
+            "Control",
+            None,
+        ]
+        for val in valid_values:
+            output = _make_coaching_output(dimension_addressed=val)
+            assert output.dimension_addressed == val
+
+        with pytest.raises(Exception):
+            _make_coaching_output(dimension_addressed="Injury Prevention")  # type: ignore[arg-type]
+
 
 # ---------------------------------------------------------------------------
 # CoachingService tests (B-023)
@@ -447,7 +513,6 @@ class TestCoachingService:
         B-043: the old private _confidence_label() used 0.90/0.70/0.50, which produced
         wrong labels (e.g. score=0.66 → "Low" instead of "Moderate").
         """
-        from app.services.coaching import _build_user_prompt
 
         prompt = _build_user_prompt(
             exercise_type="squat",
@@ -597,8 +662,6 @@ class TestCoachingService:
     @pytest.mark.asyncio
     async def test_mock_client_none_raises_value_error(self) -> None:
         """Passing None as client when no mock mode raises ValueError."""
-        # CoachingService with None client should raise immediately on generate_coaching
-        # unless a mock response factory is provided
         service = CoachingService(anthropic_client=None)
         with pytest.raises((ValueError, RuntimeError, Exception)):
             await service.generate_coaching(
@@ -608,3 +671,119 @@ class TestCoachingService:
                 confidence_score=0.5,
                 thresholds=ThresholdConfig(),
             )
+
+    # ---------------------------------------------------------------------------
+    # Phase 1 prompt tests (FR-AICP-04, FR-AICP-05)
+    # ---------------------------------------------------------------------------
+
+    def test_body_stats_in_prompt(self) -> None:
+        """When body_stats is provided, prompt must contain 'Athlete Profile' section."""
+        body_stats = {"height_cm": 180, "weight_kg": 85, "femur_tibia_ratio": 1.1}
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats=body_stats,
+        )
+        assert "Athlete Profile" in prompt
+        assert "180" in prompt
+
+    def test_body_stats_fallback(self) -> None:
+        """When body_stats is None, prompt must apply general population standards."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats=None,
+        )
+        assert "general population" in prompt
+        assert "Athlete Profile" not in prompt
+
+    def test_keyframe_analysis_in_prompt(self) -> None:
+        """When keyframe_analysis_text is provided, it must appear in the prompt."""
+        keyframe_text = "Lifter shows forward lean exceeding 45 degrees at bottom position."
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            keyframe_analysis_text=keyframe_text,
+        )
+        assert "Visual Analysis" in prompt
+        assert keyframe_text in prompt
+
+    def test_keyframe_analysis_absent_when_none(self) -> None:
+        """When keyframe_analysis_text is None, 'Visual Analysis' must not appear."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            keyframe_analysis_text=None,
+        )
+        assert "Visual Analysis" not in prompt
+
+    def test_system_prompt_priority_order(self) -> None:
+        """System prompt must enforce Movement Quality → Technique → Path → Control order."""
+        from app.services.coaching import _build_system_prompt
+
+        prompt = _build_system_prompt()
+        mq_pos = prompt.index("Movement Quality")
+        tech_pos = prompt.index("Technique")
+        path_pos = prompt.index("Path")
+        ctrl_pos = prompt.index("Control")
+        assert mq_pos < tech_pos < path_pos < ctrl_pos
+
+    def test_system_prompt_no_injury_risk(self) -> None:
+        """System prompt must never contain banned language."""
+        from app.services.coaching import _build_system_prompt
+
+        prompt = _build_system_prompt()
+        banned = ["injury risk", "injury prevention"]
+        for phrase in banned:
+            assert phrase not in prompt.lower()
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_passes_new_params(self) -> None:
+        """generate_coaching must pass body_stats and keyframe_analysis_text to prompt."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+
+        captured_messages: list[Any] = []
+
+        async def capture_create(**kwargs: Any) -> CoachingOutput:
+            captured_messages.extend(kwargs.get("messages", []))
+            return expected
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = capture_create
+
+        body_stats = {"height_cm": 175, "weight_kg": 80}
+        keyframe_text = "Bar path drifts forward during ascent."
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching(
+                exercise_type="deadlift",
+                exercise_variant="conventional",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.82,
+                thresholds=ThresholdConfig(),
+                body_stats=body_stats,
+                keyframe_analysis_text=keyframe_text,
+            )
+
+        assert isinstance(result, CoachingOutput)
+        assert len(captured_messages) == 1
+        user_content: str = captured_messages[0]["content"]
+        assert "Athlete Profile" in user_content
+        assert "Visual Analysis" in user_content
+        assert keyframe_text in user_content
