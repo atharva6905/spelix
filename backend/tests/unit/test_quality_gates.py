@@ -167,9 +167,10 @@ class TestBodyVisibility:
     def test_correct_reject_user_message(self):
         frames = _make_n_frames(visibility=-2.0)
         result = check_body_visibility(frames)
-        assert "not clearly visible" in result.user_message.lower() or \
-               "good lighting" in result.user_message.lower() or \
-               "body is not" in result.user_message.lower()
+        msg = result.user_message.lower()
+        assert "visible" in msg, (
+            f"Expected rejection message to mention visibility. Got: {result.user_message!r}"
+        )
 
     def test_metric_value_is_mean_sigmoid_visibility(self):
         # All frames identical visibility=0.8; sigmoid(0.8) ≈ 0.6899
@@ -254,18 +255,22 @@ class TestFraming:
             x_min=0.45, y_min=0.45, x_max=0.55, y_max=0.55, visibility=0.9
         )
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
-        assert "closer" in result.user_message.lower() or \
-               "move closer" in result.user_message.lower() or \
-               "too far" in result.user_message.lower()
+        msg = result.user_message.lower()
+        assert "closer" in msg or "far" in msg, (
+            f"Expected too-small framing message to mention moving closer or being too far. "
+            f"Got: {result.user_message!r}"
+        )
 
     def test_too_large_user_message_mentions_step_back(self):
         frames = _make_framing_frames(
             x_min=0.0, y_min=0.0, x_max=1.0, y_max=1.0, visibility=0.9
         )
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
-        assert "step back" in result.user_message.lower() or \
-               "too close" in result.user_message.lower() or \
-               "back" in result.user_message.lower()
+        msg = result.user_message.lower()
+        assert "back" in msg or "close" in msg, (
+            f"Expected too-large framing message to mention stepping back or being too close. "
+            f"Got: {result.user_message!r}"
+        )
 
     def test_uses_only_first_five_frames(self):
         # First 5 frames: proper framing. Next 10: tiny box. Should pass.
