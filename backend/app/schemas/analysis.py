@@ -19,6 +19,17 @@ SquatVariant = Literal["high_bar", "low_bar"]
 BenchVariant = Literal["flat", "incline", "decline"]
 DeadliftVariant = Literal["conventional", "sumo", "romanian"]
 
+ExerciseVariant = Literal[
+    "high_bar",
+    "low_bar",
+    "flat",
+    "incline",
+    "decline",
+    "conventional",
+    "sumo",
+    "romanian",
+]
+
 MAX_FILE_SIZE_BYTES = 52_428_800  # 50 MB
 
 
@@ -34,10 +45,18 @@ class AnalysisCreate(BaseModel):
     File size must be > 0 and <= 50 MB (FR-UPLD-16).
     """
 
-    exercise_type: str = Field(..., description="Exercise type: squat | bench | deadlift")
-    exercise_variant: str = Field(..., description="Exercise variant (depends on type)")
+    exercise_type: ExerciseType = Field(
+        ..., description="Exercise type: squat | bench | deadlift"
+    )
+    exercise_variant: ExerciseVariant = Field(
+        ..., description="Exercise variant (depends on type)"
+    )
     filename: str = Field(..., min_length=1, description="Original filename of the video")
     file_size_bytes: int = Field(..., description="File size in bytes (1 to 50 MB)")
+    weight_kg: float | None = Field(
+        None,
+        description="Weight used in the set in kilograms (FR-REPM-06). Optional.",
+    )
 
 
 # ---------------------------------------------------------------------------

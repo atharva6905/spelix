@@ -122,18 +122,11 @@ class TestPostAnalyses:
         assert body["status"] == "queued"
         assert "expires_at" in body
 
-    def test_invalid_exercise_type_returns_400(self):
+    def test_invalid_exercise_type_returns_422(self):
+        # Pydantic Literal enforcement rejects invalid types at schema
+        # validation time (before the service is called), so FastAPI
+        # returns 422 Unprocessable Entity rather than 400.
         mock_service = AsyncMock()
-        mock_service.create_analysis.side_effect = HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "code": "INVALID_EXERCISE",
-                    "message": "Invalid exercise type.",
-                    "detail": None,
-                }
-            },
-        )
 
         client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
         resp = client.post(
@@ -146,7 +139,8 @@ class TestPostAnalyses:
             },
         )
 
-        assert resp.status_code == 400
+        assert resp.status_code == 422
+        mock_service.create_analysis.assert_not_called()
 
     def test_file_over_50mb_returns_413(self):
         mock_service = AsyncMock()
