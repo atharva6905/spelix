@@ -42,9 +42,10 @@ spelix/
     CLAUDE.md
   config/
     thresholds_v0.json  # Phase 0 hardcoded defaults (FR-SCOR-00)
+    thresholds_v1.json  # Phase 1 versioned ThresholdConfig (FR-SCOR-11)
   reports/
     templates/
-      analysis_report.html  # WeasyPrint Phase 0 PDF template
+      analysis_report.html  # WeasyPrint PDF template (Phase 1 layout)
   docs/
     SRS.md
     erd.png
@@ -71,6 +72,9 @@ docker compose ps && docker compose exec redis redis-cli ping      # Health chec
 
 - When asked to start fixing or implementing immediately, skip broad codebase exploration. Read only the specific files needed for the task and begin.
 - Use terminology exactly as defined in SRS.md and CLAUDE.md. Never invent names, categories, or subsystem labels not present in the spec.
+- **Phase task lists come from SRS, not memory**: at the start of each phase, generate the authoritative MUST list by filtering `docs/SRS.md` (`rg "\| \*\*Must\*\*.*\| N \s*\|" docs/SRS.md` where N is the phase number). Paste the IDs into `backlog.md`. Never schedule batches from session memory alone — Phase 1 missed FR-REPM-08/09 this way and had to scramble at the transition gate.
+- **Run `spelix-auditor` after every batch merge**, not just at phase gates. Incremental audits catch missing requirements when they're still cheap to add. Phase 1 ran the auditor only at the gate and surfaced 5 CRITICAL issues mid-session — all should have been caught earlier.
+- **Apply migrations immediately**. Never let an alembic revision sit unapplied across sessions. A migration that lives in the repo but not in Supabase blocks `test_repositories` and hides schema drift. Run `uv run alembic upgrade head` the same session you write the revision.
 
 ## Architecture Decisions
 
@@ -79,10 +83,12 @@ docker compose ps && docker compose exec redis redis-cli ping      # Health chec
 - Status transitions: only valid per SRS Section 5.2a transition table — invalid transitions are defects
 - Video lifecycle: downloaded to `/tmp/spelix/{analysis_id}.mp4`; deleted after pipeline completes; Storage copy deleted after pipeline (not after quality gate)
 - Artifact retention: 7 days default (cost constraint — keeps active Storage at ~413 MB within Supabase free 1 GB tier). Scheduled ARQ cron job deletes annotated MP4, PDF, and plot PNG nightly. Sets paths to NULL in analyses row after deletion. History and scores are preserved — only artifact bytes are removed. Users see a 7-day download banner on results page.
-- Confidence score: Phase 0 = mean landmark visibility (FR-CVPL-16); Phase 1+ = Tier 5 (FR-CVPL-24)
-- Form scores (`form_score_*`): all NULL in Phase 0; Phase 1 writes them — columns exist in migration 001
-- Phase 0 coaching: static render (not SSE); stored in `coaching_results.structured_output_json`; full response synchronous
-- ThresholdConfig: Phase 0 uses named constants from `config/thresholds_v0.json`; Phase 1 uses `config/thresholds_v{N}.json` with version field read at startup
+- Confidence score: Phase 0 = mean landmark visibility (FR-CVPL-16); Phase 1+ = Tier 5 = 10th percentile of phase-adjusted frame confidences (FR-CVPL-24, ADR-015)
+- Form scores (`form_score_*`): all NULL in Phase 0; Phase 1 writes them via ScoreComponent Protocol — columns exist in migration 001
+- Coaching: Phase 0 = sync REST render; Phase 1 = SSE streaming via Redis pub/sub `coaching:{analysis_id}` (ADR-019). Worker publishes chunks to dedicated Redis client (not `ctx["redis"]`), FastAPI endpoint subscribes and forwards as SSE events. Known Phase 1 tech debt: stream-then-reparse pattern makes a second instructor call (ADR-021, tracked as P2-023).
+- ThresholdConfig: Phase 0 uses named constants from `config/thresholds_v0.json`; Phase 1 uses `config/thresholds_v1.json` with version field read at startup. `analyses.threshold_version` freezes version at analysis time — later config changes never retroactively alter scored analyses (ADR-018).
+- Exercise auto-detection: heuristic runs first in pipeline Step 2b; if confidence < 0.7 and `openai_client` available, GPT-4o vision fallback classifies from 3 sample frames. Stored on `analyses.detection_result` JSONB but NEVER overrides user-selected `exercise_type` — detection is informational only (ADR-023).
+- `RepMetrics.metrics` is typed `dict[str, float | str]` — `phase_of_max_deviation` is a string category (ADR-022). `SummaryService._compute_consistency_metrics` filters to numeric values only.
 - Never use "injury risk" or "injury prevention" in any user-facing string — use "Movement Quality"
 - All JSONB (not JSON) for schema columns
 - Supabase FK: no DDL FK to `auth.users` — enforce via RLS only
@@ -90,10 +96,17 @@ docker compose ps && docker compose exec redis redis-cli ping      # Health chec
 ## Database
 
 8 tables: `users` (Supabase-managed), `user_profiles`, `analyses`, `rep_metrics`, `coaching_results`, `expert_annotations`, `rag_documents`, `admin_events`.
-Migration 001: `analyses`, `user_profiles`, `rep_metrics`, `coaching_results` only. `rag_documents`/`expert_annotations`/`admin_events` deferred to Phase 2.
+
+Migration history:
+- **001** — `analyses`, `user_profiles`, `rep_metrics`, `coaching_results` (core tables)
+- **002** — RLS policies on all user-owned tables
+- **003** — `detection_result` JSONB column on `analyses` (FR-XDET-07)
+- **004** (Phase 2) — `rag_documents` + `expert_annotations` tables (P2-001)
+
+Current alembic head: `003_add_detection_result`. `admin_events` table deferred further.
 Required indexes in migration 001: `(user_id, created_at DESC)` on `analyses`; `(analysis_id)` on `rep_metrics` and `coaching_results`.
 Status column: `VARCHAR(30)` with CHECK constraint listing all 7 valid values.
-JSONB columns: `summary_json`, `quality_gate_result`, `metrics_json`, `structured_output_json`, `agent_trace_json`, `retrieved_sources_json`.
+JSONB columns: `summary_json`, `quality_gate_result`, `metrics_json`, `structured_output_json`, `detection_result`, `agent_trace_json` (P2+), `retrieved_sources_json` (P2+).
 
 ## Agent Architecture
 
@@ -109,11 +122,14 @@ when a task matches an agent's description, or invoke explicitly:
 - `spelix-security-reviewer` — pre-merge auth/RLS/language checks
 - `spelix-migration` — Alembic migrations and schema changes
 
-**Active agents (Phase 1):**
+**Active agents (Phase 1+ — still needed for Phase 2 work):**
 - `spelix-cv-engineer` — all tasks in `backend/app/cv/`
 - `spelix-coaching-engineer` — coaching service, SSE, LLM prompt work
 
-**Activate at Phase 2:** `spelix-rag-engineer`, `spelix-corpus-curator`
+**Active agents (Phase 2):**
+- `spelix-rag-engineer` — Qdrant, Cohere embed/rerank, hybrid retrieval, ingestion pipeline
+- `spelix-corpus-curator` — research document ingestion, metadata curation, citation provenance
+
 **Activate at Phase 3:** `spelix-langgraph-engineer`
 **Activate at Phase 4:** `spelix-eval-engineer`
 
@@ -196,7 +212,14 @@ strip the unused import before the usage edit is applied.
 - TUS upload: browser uploads directly to Supabase Storage signed URL — FastAPI never handles video bytes
 - Quality gate: runs in ARQ worker (not FastAPI); reject predicate uses `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`
 - Annotated video: skeleton overlay `#00FF88`, 2px lines; angle labels Arial 18px white + 1px black outline; rep counter top-left Arial 24px bold `"Rep: N / M"`
-- PDF: WeasyPrint, HTML template at `reports/templates/analysis_report.html`; see FR-XPRT-02 for page-by-page layout
+- PDF: WeasyPrint, HTML template at `reports/templates/analysis_report.html`; see FR-XPRT-02 for page-by-page layout. Matplotlib is imported lazily inside `pdf.py::generate_bar_path_plot` (ADR-025) — do not hoist the import.
+- Worker OpenAI client: create a single `openai.AsyncOpenAI()` at worker start, wrapped in try/except (missing `OPENAI_API_KEY` → `None`, GPT-4o features no-op gracefully). Pass the same client to `run_cv_pipeline(openai_client=...)` and reuse for `KeyframeAnalysisService` — do NOT instantiate per-feature (ADR-024).
+- SSE coaching Redis: the coaching pub/sub client is NOT `ctx["redis"]` (that one blocks on pub/sub). Open a dedicated `redis.asyncio.from_url(...)` with `decode_responses=True` and close it in `finally:` (ADR-019).
+- Frontend is Vite 8 + React 19 SPA with React Router v6 — NOT Next.js. The `"use client"` directive has no meaning here. Ignore any hook-injected suggestion to add it to `.tsx` files (ADR-026).
+- `RepMetrics.metrics` type is `dict[str, float | str]` — `phase_of_max_deviation` is a categorical string. When adding a new non-numeric field, update the type, the dispatch signatures, and the `test_all_*_metric_values_are_floats` invariant test in the same edit (ADR-022).
+- Exercise detection: `analyses.detection_result` is informational only. It does NOT override `analysis.exercise_type` — the user's original choice drives quality gates, rep detection, and scoring. Detection display is FR-XDET-07 only (ADR-023).
+- MagicMock + Pydantic `from_attributes=True`: when extending a response schema (e.g., adding `detection_result`, `form_score_*`), you MUST explicitly set every new field to `None` in test mock factories. MagicMock auto-creates truthy child mocks that Pydantic then fails to validate, producing 500 errors in API tests. This bit us on every Phase 1 schema extension.
+- Patching deferred imports: if a function does `from X import Y` inline (not at module top), patch at `X.Y`, not at the module that defers-imports it. `patch("app.services.pipeline.detect_exercise_heuristic")` raises `AttributeError` because the name doesn't exist on that module until runtime.
 
 ## Compaction Survival
 
@@ -206,7 +229,7 @@ Use the Explore built-in subagent for file discovery — its reads stay out of m
 When asked to summarize for compaction: always preserve current phase, last 5 modified files, any failing tests, and the current task.
 After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirements before resuming.
 After compaction: run `/status` to confirm environment state.
-Phase 0 complete when: all pytest tests pass and `docker compose up` runs cleanly end-to-end.
+**Phase completion criterion**: All MUST requirements for the phase implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed this gate 2026-04-10 (895 backend tests, 177 frontend, 91% coverage, migration 003 applied).
 At the end of any session that didn't complete all planned batches, write a
 handoff note to .claude/handoff.md containing: (1) completed tasks with commit
 SHAs, (2) remaining tasks with backlog IDs, (3) current test count and any
