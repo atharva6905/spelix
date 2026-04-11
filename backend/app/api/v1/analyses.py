@@ -17,6 +17,7 @@ Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17, FR-RESL-13, FR-UPLD-10, FR-UPL
 
 import logging
 import os
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
@@ -47,45 +48,63 @@ router = APIRouter(tags=["analyses"])
 # Dependency factories
 # ---------------------------------------------------------------------------
 
+# Module-level cache for the async Supabase client. ``acreate_client``
+# performs a (synchronous-looking but async-defined) HTTPS handshake; we want
+# to do that exactly once per process, not on every request. The two-state
+# cache (initialised flag + value) lets us cache ``None`` so that a startup
+# misconfiguration doesn't make us retry the failing constructor on every
+# request.
+_async_supabase_client_cache: Any | None = None
+_async_supabase_client_cache_initialized: bool = False
 
-def _make_storage_service() -> StorageService:
-    """Build a StorageService backed by a real Supabase client.
+
+async def _make_storage_service() -> StorageService:
+    """Build a StorageService backed by a real *async* Supabase client.
 
     Reads ``SUPABASE_URL`` and ``SUPABASE_SERVICE_ROLE_KEY`` from the
-    environment and constructs the client synchronously via
-    ``supabase.create_client``. If either variable is missing or the
-    client constructor raises, returns a service with ``supabase_client=None``
-    so dependency injection still resolves; ``generate_signed_upload_url``
-    will then raise ``RuntimeError`` at call time with an actionable message.
+    environment and constructs the client via ``supabase.acreate_client``
+    (the async variant — the sync ``create_client`` returns a
+    ``supabase._sync.client.Client`` whose storage methods are NOT
+    awaitable, which is the bug that took down POST /analyses for the
+    entire existence of Phase 0 + Phase 1).
 
-    In tests this function is replaced via ``dependency_overrides`` or the
-    module-level ``_get_service`` is patched directly. The unit tests in
-    ``tests/unit/test_storage_service.py::TestMakeStorageServiceFactory``
-    cover the real factory path so the dormant Phase 0 bug (POST /analyses
-    raising ``RuntimeError`` because the client was never created) cannot
-    return.
+    The constructed client is cached at module level so that subsequent
+    requests reuse the same HTTPS connection pool. If env vars are missing
+    or ``acreate_client`` raises, the cache stores ``None`` and the returned
+    ``StorageService`` will raise ``RuntimeError`` at call time with an
+    actionable message.
+
+    Regression coverage:
+    ``tests/unit/test_storage_service.py::TestMakeStorageServiceFactory``.
     """
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    global _async_supabase_client_cache, _async_supabase_client_cache_initialized
 
-    if not supabase_url or not supabase_key:
-        return StorageService()
+    if not _async_supabase_client_cache_initialized:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-    try:
-        from supabase import create_client
+        if not supabase_url or not supabase_key:
+            _async_supabase_client_cache = None
+        else:
+            try:
+                from supabase import acreate_client
 
-        client = create_client(supabase_url, supabase_key)
-    except Exception as e:
-        logger.warning("Failed to create Supabase client: %s", e)
-        return StorageService()
+                _async_supabase_client_cache = await acreate_client(
+                    supabase_url, supabase_key
+                )
+            except Exception as e:
+                logger.warning("Failed to create async Supabase client: %s", e)
+                _async_supabase_client_cache = None
 
-    return StorageService(supabase_client=client)
+        _async_supabase_client_cache_initialized = True
+
+    return StorageService(supabase_client=_async_supabase_client_cache)
 
 
-def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
+async def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
     """Build AnalysisService with an AnalysisRepository and StorageService."""
     repo = AnalysisRepository(db)
-    storage = _make_storage_service()
+    storage = await _make_storage_service()
     return AnalysisService(repo=repo, storage=storage)
 
 

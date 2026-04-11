@@ -477,12 +477,16 @@ async def test_heartbeat_ttl_is_90_seconds():
 # ---------------------------------------------------------------------------
 
 
-def test_build_supabase_client_returns_client_when_env_set():
-    """_build_supabase_client returns a Supabase client when URL and key are set."""
+@pytest.mark.asyncio
+async def test_build_supabase_client_returns_async_client_when_env_set():
+    """_build_supabase_client returns an *async* Supabase client when URL+key set.
+
+    Must use ``acreate_client`` (async) — the sync ``create_client`` returns a
+    ``Client`` whose storage methods are not awaitable, which crashes the
+    pipeline at the first ``await storage_client.storage.from_(...).download(...)``.
+    """
     mock_client = MagicMock()
 
-    # create_client is imported locally inside the function body via
-    # `from supabase import create_client`, so patch it at the source.
     with patch.dict(
         "os.environ",
         {
@@ -490,12 +494,12 @@ def test_build_supabase_client_returns_client_when_env_set():
             "SUPABASE_SERVICE_ROLE_KEY": "service-role-key-value",
         },
     ), patch(
-        "supabase.create_client",
-        return_value=mock_client,
+        "supabase.acreate_client",
+        new=AsyncMock(return_value=mock_client),
     ) as mock_create:
         from app.workers.analysis_worker import _build_supabase_client
 
-        result = _build_supabase_client()
+        result = await _build_supabase_client()
 
     assert result is mock_client
     mock_create.assert_called_once_with(
@@ -503,19 +507,21 @@ def test_build_supabase_client_returns_client_when_env_set():
     )
 
 
-def test_build_supabase_client_returns_none_when_url_missing():
+@pytest.mark.asyncio
+async def test_build_supabase_client_returns_none_when_url_missing():
     """_build_supabase_client returns None when SUPABASE_URL is absent."""
     env_without_url = {k: v for k, v in __import__("os").environ.items()
                        if k not in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")}
     with patch.dict("os.environ", env_without_url, clear=True):
         from app.workers.analysis_worker import _build_supabase_client
 
-        result = _build_supabase_client()
+        result = await _build_supabase_client()
 
     assert result is None
 
 
-def test_build_supabase_client_returns_none_when_key_missing():
+@pytest.mark.asyncio
+async def test_build_supabase_client_returns_none_when_key_missing():
     """_build_supabase_client returns None when SUPABASE_SERVICE_ROLE_KEY is absent."""
     env_without_key = {k: v for k, v in __import__("os").environ.items()
                        if k not in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")}
@@ -523,7 +529,7 @@ def test_build_supabase_client_returns_none_when_key_missing():
     with patch.dict("os.environ", env_without_key, clear=True):
         from app.workers.analysis_worker import _build_supabase_client
 
-        result = _build_supabase_client()
+        result = await _build_supabase_client()
 
     assert result is None
 

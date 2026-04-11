@@ -1,8 +1,32 @@
 ---
 name: status
-description: Show system health
+description: >
+  Load live environment state at session start, or any time the user asks
+  for current project status, environment check, or "where are we".
+  Run automatically when starting a new session.
+disable-model-invocation: false
 ---
-1. `docker compose -f docker-compose.dev.yml ps` — show service states
-2. `redis-cli -h localhost info keyspace` — show ARQ queue depth
-3. `cd backend && uv run python -c "from app.db import engine; from sqlalchemy import text; print(engine.connect().execute(text('SELECT 1')).scalar())"` — DB connectivity
-4. Summarize health in a table.
+
+## Spelix — Live Environment State
+
+Git:
+- Branch: !`git branch --show-current`
+- Last commit: !`git log --oneline -1`
+- Dirty files: !`git status --short | head -10`
+
+Database:
+- Alembic head: !`cd backend && uv run alembic current 2>/dev/null | tail -1`
+- Pending migrations: !`cd backend && uv run alembic heads 2>/dev/null`
+
+Workers:
+- Redis: !`docker compose exec redis redis-cli ping 2>/dev/null || echo "OFFLINE"`
+- ARQ queue depth: !`docker compose exec redis redis-cli llen arq:queue 2>/dev/null`
+- ARQ dead queue: !`docker compose exec redis redis-cli llen arq:queue.dead 2>/dev/null`
+
+Tests (last run):
+- !`cd backend && cat .pytest_cache/v/cache/lastfailed 2>/dev/null || echo "No failures cached"`
+- Count: !`cd backend && uv run pytest tests/ --co -q 2>/dev/null | tail -1`
+
+Session context:
+- Handoff note: !`cat .claude/handoff.md 2>/dev/null | head -20 || echo "No handoff note"`
+- Current backlog: !`grep -E "^\- \[ \]" backlog.md 2>/dev/null | head -10 || echo "Check backlog.md"`

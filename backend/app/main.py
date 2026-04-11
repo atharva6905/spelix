@@ -70,9 +70,16 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     stays invisible — exactly the failure mode that hid the dormant
     ``StorageService`` bug for the entire existence of Phase 0 + Phase 1.
 
-    Returns a JSON envelope matching the Spelix error contract and
-    explicitly attaches CORS headers if the request origin is in the
-    allow-list, so failures are debuggable from the browser.
+    Returns a JSON envelope matching the Spelix error contract with the
+    exception type and message in ``detail`` so production bugs are
+    diagnosable from the browser without server-log access. Tracebacks are
+    NOT leaked — those go to ``logger.exception`` (server logs) only.
+    Spelix is a small private app; the security cost of exposing
+    ``RuntimeError: ...`` is much smaller than the operational cost of
+    chasing bugs that show up as a generic ``"An unexpected error occurred"``.
+
+    Explicitly attaches CORS headers when the request origin is in the
+    allow-list so the response actually reaches the browser.
     """
     logger.exception(
         "Unhandled exception in route %s %s", request.method, request.url.path
@@ -91,7 +98,10 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
                 "message": "An unexpected error occurred. Please try again.",
-                "detail": None,
+                "detail": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
             }
         },
         headers=headers,
