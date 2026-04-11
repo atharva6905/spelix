@@ -16,9 +16,18 @@ COPY . .
 # Stage 2: runtime — lean image with only what's needed to run
 FROM python:3.12-slim AS runtime
 
-# System deps for MediaPipe, OpenCV (headless), WeasyPrint
+# System deps for MediaPipe, OpenCV (headless), WeasyPrint.
+# libgles2 + libegl1 are required by the MediaPipe Tasks API
+# (mediapipe/tasks/c/libmediapipe.so links against libGLESv2.so.2 and
+# libEGL.so.1 — verified via `ldd`). The legacy ``mediapipe.solutions``
+# API didn't need these because it ran a different code path, but the
+# Tasks API loads a C++ shared library that uses OpenGL ES for GPU
+# delegate dispatch. Without these, ``PoseLandmarker.create_from_options``
+# raises ``OSError: libGLESv2.so.2: cannot open shared object file``.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
+    libgles2 \
+    libegl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
