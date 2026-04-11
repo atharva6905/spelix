@@ -231,3 +231,13 @@ next_action: "[specific next step — exact command or task]"
 session_count: [increment by 1]
 last_session: [today's date]
 ```
+
+## decisions.md & backlog.md Update Protocol
+
+`decisions.md` and `backlog.md` live at the **repo root** (not `.claude/`). They are project-owned across sessions and survive every Claude Code session — treat with the same discipline as `memory.md`. **Do NOT batch updates at end-of-session**; run inline with the code changes that triggered them. Session 13 batched and lost track of half the decisions; the cost was ~30 min of reconstruction from git log. You do NOT need user permission to invoke `/adr` or `/backlog` — they are part of normal session hygiene.
+
+**Run `/adr`** when: a library choice is made; a design pattern adopted across >1 file; a constraint is added (file path, env var, runtime dep); a bugfix reveals a systemic design choice; a migration between approaches happens; a test pattern is adopted to prevent a bug class. If you'd write a `backend/CLAUDE.md` gotcha for it, you also need an ADR — gotchas explain symptoms, ADRs explain choices.
+
+**Run `/backlog`** when: a task is completed (mark `done` + add squash-merge SHA); a new task is discovered mid-session; a task's scope changes (split/merge/blocked/deferred); a batch of work finishes (add `## Completed —` header); a new phase begins (seed from SRS Must filter).
+
+**File ownership**: `decisions.md` is **append-only across phases** — old ADRs are NEVER edited; if a decision is reversed, write a new ADR that supersedes the old one by ID. `backlog.md` rows ARE edited in place (status, commits, scope). Both files commit alongside normal code changes — atomic with the PR that introduces the decision/closes the task, never as a follow-up cleanup PR.

@@ -18,64 +18,72 @@ Run /adr for:
 - Constraint decisions (max_jobs=1, no DDL FK to auth.users, 7-day artifact retention)
 - Phase-transition decisions (what changes between Phase N and N+1)
 - Decisions made to fix a bug that reveal a systemic design choice
+- A pattern adopted to prevent a class of bug from recurring
 
 Do NOT run /adr for:
 - Implementation details that follow directly from an existing ADR
 - Single-file style decisions
 - Things already documented in CLAUDE.md
+- Bug fixes that don't change architecture or constraints
 
 ---
 
 ## ADR Format
 
-Read `decisions.md` to find the next ADR number (current highest + 1).
+**File location**: `decisions.md` at the **repo root**, not `docs/decisions.md`.
 
-Append to `decisions.md` using this format exactly:
+Read `decisions.md` to find the next ADR number (current highest + 1). ADRs in this
+project use a deliberately compact format — match it exactly so the file stays
+greppable. Append using this template:
 
 ```markdown
 ## ADR-[NNN]: [decision title]
-**Date**: [today's date]
-**Phase**: [current phase number]
-**Status**: Accepted
-
-**Context**
-[1-3 sentences: what situation forced this decision. Be specific — reference
-the SRS section, the test failure, or the constraint that triggered this.]
-
-**Decision**
-[1-2 sentences: what was decided. Be concrete — name the exact library, pattern,
-config value, or rule that was adopted.]
-
-**Options considered**
-- Option A ([chosen]): [brief description + key benefit]
-- Option B: [brief description + why rejected]
-- Option C (if applicable): [brief description + why rejected]
-
-**Consequences**
-[2-4 bullet points: what this decision means for future work. Include:
- - what becomes easier
- - what becomes harder or constrained
- - any follow-on decisions this creates]
-
-**SRS references**
-[FR-IDs or NFR-IDs that relate to this decision, or "None"]
+**Context**: [1-3 sentences explaining what situation forced this decision. Be specific —
+reference the SRS section, the test failure, the bug, or the constraint that triggered it.]
+**Decision**: [1-2 sentences naming the exact library, pattern, config value, or rule
+that was adopted. Include the file paths or symbol names so future grep can find them.]
+**Consequences**: [2-4 sentences explaining what becomes easier, what becomes constrained,
+and any follow-on decisions or gotchas this creates for future work.]
 ```
 
-After appending:
-1. Run: `git add docs/decisions.md`
-2. Run: `git commit -m "docs: ADR-[NNN] [title]"`
+**Title style**: specific and searchable. "Database decision" is bad. "No DDL FK constraint
+to auth.users — enforce via RLS only" is good.
 
-ADRs are committed immediately — they are the project's institutional memory.
+**Tone**: factual, technical, and self-contained. A reader 6 months from now should be
+able to understand the decision without re-reading the SRS or the original PR.
+
+**Length**: 4–10 lines per ADR. Compact > comprehensive. If you need more than 10 lines,
+the decision is too broad — split it.
+
+---
+
+## After appending the ADR
+
+ADRs are committed immediately as a small standalone docs commit:
+
+```bash
+git add decisions.md
+git commit -m "docs(decisions): ADR-[NNN] [title]"
+```
+
+If the ADR is part of a larger code change in the same PR, you can either:
+1. Bundle it into the PR commit (preferred for tightly-coupled code+ADR pairs)
+2. Commit the ADR separately first (for standalone architectural decisions)
+
+Either way, every ADR-worthy decision MUST land in `decisions.md` in the same PR
+that introduces the decision — never in a follow-up cleanup PR. The whole point
+is to make institutional memory atomic with the code.
 
 ---
 
 ## ADR Quality Check
 
 Before committing, verify:
-- [ ] The context explains *why* this was a decision, not just what was decided
-- [ ] At least 2 options are listed (including the chosen one)
-- [ ] Consequences include at least one constraint on future work
-- [ ] The decision title is specific enough to be searchable
+- [ ] The Context explains *why* this was a decision, not just what was decided
+- [ ] The Decision names a specific symbol, file, or constant — not a vague pattern
+- [ ] The Consequences include at least one constraint or gotcha for future work
+- [ ] The title would be searchable 6 months from now without re-reading the body
+- [ ] The format matches the existing 30+ ADRs in `decisions.md` exactly
 
 A poor ADR title: "Database decision"
 A good ADR title: "No DDL FK constraint to auth.users — enforce via RLS only"

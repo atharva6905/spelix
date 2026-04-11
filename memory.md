@@ -1,13 +1,13 @@
 # memory.md — Agent Persistent State
 
 phase: 2
-task: phase-2-rag-planning-unblocked
+task: phase-2-planning-kickoff
 status: ready
-last_modified: [backend/Dockerfile, backend/app/cv/pose_extraction.py, backend/app/services/analysis.py, backend/app/services/pipeline.py, backend/app/workers/analysis_worker.py]
+last_modified: [.claude/commands/adr.md, .claude/commands/backlog.md, CLAUDE.md, .claude/handoff.md, decisions.md]
 failing_tests: []
 blockers: [test_fixture_quality_below_gate_thresholds]
 srs_deviations: []
-next_action: "Replace e2e/fixtures/squat-high-bar.mp4 with a real 720p+ side-view squat video where body fills ≥30% of frame, then re-run E2E to verify the success path (processing → coaching → completed → results page → PDF). After that, start Phase 2 RAG planning."
+next_action: "Start Phase 2 planning in a new session: re-read SRS Phase 2 Must filter (rg pattern in CLAUDE.md general rules), seed backlog.md Phase 2 section, activate spelix-rag-engineer + spelix-corpus-curator agents, run /phase transition gate, then /plan P2-001 (Migration 004 — rag_documents + expert_annotations). See .claude/handoff.md for full kickoff sequence."
 session_count: 13
 last_session: 2026-04-11
 
