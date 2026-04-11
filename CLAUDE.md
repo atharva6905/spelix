@@ -46,6 +46,11 @@ uv run alembic revision --autogenerate -m "desc" && uv run alembic upgrade head 
 docker compose exec redis redis-cli llen arq:queue  # ARQ queue depth
 ```
 
+## Session Start — Environment Verification
+
+At the start of every session, run `/status` to load live environment state.
+
+
 ## CLAUDE.md Organization Rules
 
 **Keep root CLAUDE.md under 200 lines.** It is loaded on every session start and competes for context budget with the actual work. Root is for cross-cutting concerns only.
