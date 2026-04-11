@@ -50,6 +50,21 @@ class TestValidTransitions:
     def test_failed_to_queued_when_retry_count_two(self):
         assert transition("failed", "queued", retry_count=2) == "queued"
 
+    # Operational failures (missing config, OOM, ARQ crash) can fire at any
+    # phase of the worker pipeline, including before the worker has had a
+    # chance to transition the row out of quality_gate_pending. The
+    # error handler in analysis_worker.process_analysis MUST be able to
+    # mark the row as 'failed' from any non-terminal state. Regression
+    # for the production bug where ThresholdConfig() raised
+    # FileNotFoundError on the very first job, the error handler tried
+    # to transition quality_gate_pending → failed, the guard rejected it,
+    # and the row was orphaned at quality_gate_pending forever.
+    def test_queued_to_failed(self):
+        assert transition("queued", "failed") == "failed"
+
+    def test_quality_gate_pending_to_failed(self):
+        assert transition("quality_gate_pending", "failed") == "failed"
+
 
 # ---------------------------------------------------------------------------
 # 2. Every invalid transition raises InvalidTransition
@@ -65,9 +80,9 @@ class TestInvalidTransitions:
         with pytest.raises(InvalidTransition):
             transition("queued", "completed")
 
-    def test_queued_cannot_go_to_failed(self):
-        with pytest.raises(InvalidTransition):
-            transition("queued", "failed")
+    # Note: queued → failed and quality_gate_pending → failed ARE allowed
+    # (operational failures can fire before processing starts). See the
+    # corresponding tests in TestValidTransitions.
 
     def test_quality_gate_pending_cannot_go_to_completed(self):
         with pytest.raises(InvalidTransition):

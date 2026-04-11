@@ -26,10 +26,23 @@ VALID_STATUSES: frozenset[str] = frozenset(
 # Transition table per SRS Section 5.2a.
 # Key: current status (None = new row / no prior status).
 # Value: set of valid target statuses (empty = terminal state).
+#
+# Note on "→ failed" edges: operational failures (missing config, OOM,
+# ARQ crash, Anthropic 401, MediaPipe model download failure) can fire
+# at ANY phase of the worker pipeline, including BEFORE the worker has
+# transitioned the row out of ``queued`` or ``quality_gate_pending``.
+# The error handler in ``analysis_worker.process_analysis`` MUST be able
+# to mark the row as ``failed`` regardless of where in the pipeline the
+# crash happened — otherwise an early-pipeline crash leaves the row
+# orphaned at its starting status forever (regression: thresholds_v1.json
+# missing in container caused exactly this in Phase 1 prod). The
+# distinction with ``quality_gate_rejected`` is preserved: that state is
+# reserved for analyses where the actual quality-gate predicate refused
+# the user's video content, NOT for infrastructure failures.
 _TRANSITIONS: dict[str | None, frozenset[str]] = {
     None: frozenset({"queued"}),
-    "queued": frozenset({"quality_gate_pending"}),
-    "quality_gate_pending": frozenset({"quality_gate_rejected", "processing"}),
+    "queued": frozenset({"quality_gate_pending", "failed"}),
+    "quality_gate_pending": frozenset({"quality_gate_rejected", "processing", "failed"}),
     "processing": frozenset({"coaching", "failed"}),
     "coaching": frozenset({"completed", "failed"}),
     # failed → queued allowed only when retry_count < 3 (checked at runtime)
