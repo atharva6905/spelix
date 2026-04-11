@@ -365,7 +365,8 @@ def generate_bar_path_plot(bar_path: dict, output_path: str) -> str:
     fig, ax = plt.subplots(figsize=(3, 5))
     # Plot path with gradient coloring (start=blue, end=red)
     n = len(xs)
-    colors = plt.cm.coolwarm([i / max(n - 1, 1) for i in range(n)])
+    cmap = plt.get_cmap("coolwarm")
+    colors = cmap([i / max(n - 1, 1) for i in range(n)])
     ax.scatter(xs, ys, c=colors, s=4, zorder=3)
     ax.plot(xs, ys, color="#cccccc", linewidth=0.8, alpha=0.6, zorder=2)
 

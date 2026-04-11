@@ -56,7 +56,7 @@ async def _stream_from_pubsub(
     await pubsub.subscribe(channel)
     try:
         # Check if coaching completed while we were subscribing
-        existing = await coaching_repo.get_by_analysis_id(analysis_id)
+        existing = await coaching_repo.get_by_analysis(analysis_id)
         if existing and existing.stream_complete:
             payload = json.dumps(existing.structured_output_json)
             yield f"event: complete\ndata: {payload}\n\n"
@@ -72,7 +72,7 @@ async def _stream_from_pubsub(
 
             if msg_type == "done":
                 # Fetch final validated output from DB
-                final = await coaching_repo.get_by_analysis_id(analysis_id)
+                final = await coaching_repo.get_by_analysis(analysis_id)
                 if final and final.structured_output_json:
                     payload = json.dumps(final.structured_output_json)
                     yield f"event: complete\ndata: {payload}\n\n"
@@ -117,7 +117,7 @@ async def stream_coaching(
         )
 
     coaching_repo = CoachingResultRepository(db)
-    existing = await coaching_repo.get_by_analysis_id(analysis_id)
+    existing = await coaching_repo.get_by_analysis(analysis_id)
 
     # If coaching already complete, return stored output immediately
     if existing and existing.stream_complete:

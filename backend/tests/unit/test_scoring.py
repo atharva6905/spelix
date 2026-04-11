@@ -13,14 +13,15 @@ from pathlib import Path
 
 import pytest
 
-# Point ThresholdConfig at the v1 file for all scoring tests
+# Point ThresholdConfig at the v1 file for all scoring tests.
+# MUST be set before any `app.*` import so the ThresholdConfig loader picks it up.
 _V1_PATH = (
     Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 )
 os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
-from app.config import ThresholdConfig
-from app.cv.scoring import (
+from app.config import ThresholdConfig  # noqa: E402
+from app.cv.scoring import (  # noqa: E402
     ControlScore,
     OverallFormScore,
     PathBalanceScore,
@@ -29,7 +30,7 @@ from app.cv.scoring import (
     TechniqueScore,
     score_descriptor,
 )
-from app.cv.types import BadgeResult, ScoreResult
+from app.cv.types import BadgeResult, ScoreResult  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +294,6 @@ def test_protocol_extensibility(cfg: ThresholdConfig) -> None:
         ControlScore(),
         TempoScore(),
     ]
-    # Adjust weights so they sum to 1.0
-    total = sum(c.weight for c in components)
     # OverallFormScore accepts any list — it doesn't enforce weight sum
     result = OverallFormScore(components=components).compute(
         {"confidence_score": 0.9}, None, cfg, "squat"

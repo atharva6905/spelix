@@ -17,9 +17,15 @@ are in [0, 1]. Phase 1 Tier 1 multiplies stored values directly (no second sigmo
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from app.cv.quality_gates import sigmoid
+
+if TYPE_CHECKING:
+    from app.config import ThresholdConfig
+    from app.cv.types import ConfidenceResult
 
 # ---------------------------------------------------------------------------
 # Exercise-specific landmark sets

@@ -679,10 +679,12 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
 
   it("renders safety_warnings when present", () => {
     const analysis = makeAnalysis();
-    (analysis.coaching_result!.structured_output_json! as Record<
-      string,
-      unknown
-    >).safety_warnings = ["Significant knee cave detected on rep 3"];
+    (
+      analysis.coaching_result!.structured_output_json! as unknown as Record<
+        string,
+        unknown
+      >
+    ).safety_warnings = ["Significant knee cave detected on rep 3"];
 
     mockUseAnalysisDetail.mockReturnValue({
       analysis,
@@ -699,10 +701,12 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
 
   it("renders recommended_cues when present", () => {
     const analysis = makeAnalysis();
-    (analysis.coaching_result!.structured_output_json! as Record<
-      string,
-      unknown
-    >).recommended_cues = ["Push knees out", "Drive through heels"];
+    (
+      analysis.coaching_result!.structured_output_json! as unknown as Record<
+        string,
+        unknown
+      >
+    ).recommended_cues = ["Push knees out", "Drive through heels"];
 
     mockUseAnalysisDetail.mockReturnValue({
       analysis,
@@ -717,10 +721,12 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
 
   it("renders citations with authors, year, title, and DOI", () => {
     const analysis = makeAnalysis();
-    (analysis.coaching_result!.structured_output_json! as Record<
-      string,
-      unknown
-    >).citations = [
+    (
+      analysis.coaching_result!.structured_output_json! as unknown as Record<
+        string,
+        unknown
+      >
+    ).citations = [
       {
         title: "Squat biomechanics review",
         authors: ["Schoenfeld, B.", "Grgic, J."],

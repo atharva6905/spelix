@@ -12,11 +12,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 
+from app.cv.exercise_detection import DetectionResult
 from app.cv.metric_extraction import RepMetrics
 from app.cv.quality_gates import GateCheckResult, QualityGateResult
 from app.cv.rep_detection import DetectedRep
 from app.models.analysis import Analysis
-from app.services.pipeline import PipelineResult, QualityGateRejection, run_cv_pipeline
+from app.services.pipeline import (
+    PipelineResult,
+    QualityGateRejection,
+    run_cv_pipeline,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -610,9 +615,6 @@ def test_quality_gate_rejection_is_exception():
 # ---------------------------------------------------------------------------
 # Test: GPT-4o fallback wiring (FR-XDET-04)
 # ---------------------------------------------------------------------------
-
-
-from app.cv.exercise_detection import DetectionResult
 
 
 def _make_low_conf_detection() -> DetectionResult:

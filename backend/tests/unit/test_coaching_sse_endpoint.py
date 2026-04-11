@@ -96,7 +96,7 @@ def _build_app(
     mock_analysis_repo.get_by_id = AsyncMock(return_value=analysis)
 
     mock_coaching_repo = AsyncMock()
-    mock_coaching_repo.get_by_analysis_id = AsyncMock(return_value=coaching_result)
+    mock_coaching_repo.get_by_analysis = AsyncMock(return_value=coaching_result)
 
     app._test_patches = [
         patch("app.api.v1.coaching_sse.AnalysisRepository", return_value=mock_analysis_repo),
@@ -237,7 +237,7 @@ class TestCoachingSSEEndpoint:
 
         # Re-patch coaching repo for the pubsub path's second DB check
         mock_coaching_repo = AsyncMock()
-        mock_coaching_repo.get_by_analysis_id = AsyncMock(
+        mock_coaching_repo.get_by_analysis = AsyncMock(
             side_effect=[
                 coaching_incomplete,  # Initial endpoint check
                 None,  # Race check inside _stream_from_pubsub

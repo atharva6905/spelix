@@ -92,7 +92,7 @@ class TestStreamFromPubsub:
 
         # Mock coaching repo — no existing result on first check, then has result on done
         mock_coaching_repo = AsyncMock()
-        mock_coaching_repo.get_by_analysis_id = AsyncMock(
+        mock_coaching_repo.get_by_analysis = AsyncMock(
             side_effect=[None, _make_coaching_result()]
         )
 
@@ -124,7 +124,7 @@ class TestStreamFromPubsub:
 
         # Coaching already complete when we check
         mock_coaching_repo = AsyncMock()
-        mock_coaching_repo.get_by_analysis_id = AsyncMock(
+        mock_coaching_repo.get_by_analysis = AsyncMock(
             return_value=_make_coaching_result(stream_complete=True)
         )
 

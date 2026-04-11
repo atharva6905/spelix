@@ -174,8 +174,10 @@ async def test_worker_full_pipeline_flow():
 
     mock_repo.update.side_effect = track_update
 
-    # Mock CV pipeline
-    async def mock_cv_pipeline(**kwargs: Any) -> None:
+    # Mock CV pipeline — returns a PipelineResult so the worker can access
+    # .keyframes, .bar_path, etc. (Phase 1 worker reads these post-pipeline).
+    async def mock_cv_pipeline(**kwargs: Any) -> Any:
+        from app.services.pipeline import PipelineResult
         from app.services.status import transition
 
         a = kwargs["analysis"]
@@ -186,6 +188,11 @@ async def test_worker_full_pipeline_flow():
         a.status = transition(a.status, "processing")
         a.confidence_score = 0.85
         await repo.update(a)
+
+        result = PipelineResult()
+        result.keyframes = []
+        result.bar_path = None
+        return result
 
     # Mock coaching
     coaching_output = _mock_coaching_output()
@@ -243,7 +250,9 @@ async def test_worker_full_pipeline_flow():
         mock_sf.return_value = mock_session
 
         mock_svc = AsyncMock()
-        mock_svc.generate_coaching.return_value = coaching_output
+        # Phase 1 uses SSE streaming coaching (FR-AICP-07); Phase 0
+        # generate_coaching is deprecated.
+        mock_svc.generate_coaching_streaming.return_value = coaching_output
         MockCS.return_value = mock_svc
 
         from app.workers.analysis_worker import process_analysis
@@ -258,8 +267,8 @@ async def test_worker_full_pipeline_flow():
     assert statuses[-1] == "completed"
 
     # Verify coaching was called
-    mock_svc.generate_coaching.assert_called_once()
-    call_kwargs = mock_svc.generate_coaching.call_args[1]
+    mock_svc.generate_coaching_streaming.assert_called_once()
+    call_kwargs = mock_svc.generate_coaching_streaming.call_args[1]
     assert call_kwargs["exercise_type"] == "squat"
     assert call_kwargs["exercise_variant"] == "high_bar"
 

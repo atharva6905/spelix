@@ -16,7 +16,13 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from app.config import ThresholdConfig
-from app.cv.types import BadgeResult, ScoreDimension, ScoreDescriptor, ScoreResult
+from app.cv.types import (
+    BadgeResult,
+    DimensionName,
+    ScoreDescriptor,
+    ScoreDimension,
+    ScoreResult,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +39,7 @@ class ScoreComponent(Protocol):
     """
 
     weight: float
-    display_name: str
+    display_name: DimensionName
     internal_name: str
 
     def compute(
@@ -79,7 +85,7 @@ class SafetyScore:
     """
 
     weight: float = 0.40
-    display_name: str = "Movement Quality"
+    display_name: DimensionName = "Movement Quality"
     internal_name: str = "safety"
 
     def compute(
@@ -279,7 +285,7 @@ class TechniqueScore:
     """
 
     weight: float = 0.30
-    display_name: str = "Technique"
+    display_name: DimensionName = "Technique"
     internal_name: str = "technique"
 
     def compute(
@@ -458,7 +464,7 @@ class PathBalanceScore:
     """
 
     weight: float = 0.20
-    display_name: str = "Path & Balance"
+    display_name: DimensionName = "Path & Balance"
     internal_name: str = "path_balance"
 
     def compute(
@@ -495,7 +501,6 @@ class PathBalanceScore:
         consistency_penalty = (1.0 - path_consistency) * 11.0
         score -= consistency_penalty
         if consistency_penalty > 1.0:
-            severity: BadgeResult
             sev = "High" if consistency_penalty >= 4.0 else "Medium"
             badges.append(
                 BadgeResult(
@@ -540,7 +545,7 @@ class ControlScore:
     """
 
     weight: float = 0.10
-    display_name: str = "Control"
+    display_name: DimensionName = "Control"
     internal_name: str = "control"
 
     def compute(

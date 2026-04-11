@@ -25,6 +25,7 @@ from typing import Any
 
 import instructor
 import openai
+from pydantic import BaseModel, Field
 
 from app.cv.keyframe_extraction import RepKeyframes
 
@@ -49,8 +50,6 @@ _BACKOFF_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0)
 # ---------------------------------------------------------------------------
 # Pydantic schemas for structured output
 # ---------------------------------------------------------------------------
-
-from pydantic import BaseModel, Field
 
 
 class ExerciseClassification(BaseModel):

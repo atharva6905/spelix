@@ -425,7 +425,9 @@ class CoachingService:
 
             try:
                 # FR-AICP-21: cache-control on system prompt
-                async with self._raw_client.messages.stream(
+                # Anthropic SDK MessageStreamManager is async-context-manager compatible
+                # at runtime; the type stub is missing __aenter__/__aexit__.
+                async with self._raw_client.messages.stream(  # type: ignore[attr-defined]
                     model=self._model,
                     max_tokens=MAX_TOKENS,
                     temperature=TEMPERATURE,
