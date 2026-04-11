@@ -10,4 +10,4 @@ Write a handoff file to .claude/handoff.md with these exact sections:
 5. **Blockers** — anything discovered that blocks the next session
 6. **Next session start** — the exact first command to run
 
-Overwrite any existing handoff.md. Do not commit it.
+Overwrite any existing handoff.md. Commit it as a standalone docs commit (`docs(handoff): session [N] → session [N+1] — [short reason]`) so the handoff is part of git history and survives across machines, fresh clones, and Claude Code session resets. The handoff is institutional memory — treat it like decisions.md and backlog.md, not like a scratch file.
