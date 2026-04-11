@@ -442,9 +442,17 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
 
         # ---------------------------------------------------------------- #
         # Run pipeline with error handling (NFR-RELI-02 through NFR-RELI-04)
+        #
+        # Session lifecycle: SQLAlchemy AsyncSession's autocommit=False
+        # default rolls back the implicit transaction when the session
+        # closes. We MUST commit explicitly on success AND on the error
+        # path (after writing the failed-state row), otherwise every
+        # status transition the worker performs is silently discarded.
+        # Same root cause as the get_db() bug fixed in db.py.
         # ---------------------------------------------------------------- #
         try:
             await _run_pipeline(analysis_id, repo, redis)
+            await session.commit()
 
         except Exception as exc:
             logger.exception(
@@ -452,7 +460,10 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
                 analysis_id,
                 exc,
             )
-            # Re-fetch to get the latest state (in case transitions occurred)
+            # Discard any partial in-flight writes from the failed pipeline,
+            # then re-fetch and write the failed-state row in a clean txn.
+            await session.rollback()
+
             analysis = await repo.get_by_id(analysis_id)
             if analysis is None:
                 logger.error(
@@ -469,6 +480,7 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
                 analysis.status = transition(analysis.status, "failed")
 
             await repo.update(analysis)
+            await session.commit()
 
         finally:
             # Always clean up temp files
