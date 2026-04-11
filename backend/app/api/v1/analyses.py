@@ -15,6 +15,7 @@ Rate limiting (10/user/day) is added in B-010.
 Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17, FR-RESL-13, FR-UPLD-10, FR-UPLD-11, FR-HIST-01
 """
 
+import logging
 import os
 from uuid import UUID
 
@@ -37,6 +38,8 @@ from app.schemas.analysis import (
 from app.services.analysis import AnalysisService
 from app.services.storage import StorageService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["analyses"])
 
 
@@ -46,24 +49,37 @@ router = APIRouter(tags=["analyses"])
 
 
 def _make_storage_service() -> StorageService:
-    """Build a StorageService from environment variables.
+    """Build a StorageService backed by a real Supabase client.
 
-    In tests this function is replaced via dependency_overrides or
-    the module-level ``_get_service`` is patched directly.
+    Reads ``SUPABASE_URL`` and ``SUPABASE_SERVICE_ROLE_KEY`` from the
+    environment and constructs the client synchronously via
+    ``supabase.create_client``. If either variable is missing or the
+    client constructor raises, returns a service with ``supabase_client=None``
+    so dependency injection still resolves; ``generate_signed_upload_url``
+    will then raise ``RuntimeError`` at call time with an actionable message.
+
+    In tests this function is replaced via ``dependency_overrides`` or the
+    module-level ``_get_service`` is patched directly. The unit tests in
+    ``tests/unit/test_storage_service.py::TestMakeStorageServiceFactory``
+    cover the real factory path so the dormant Phase 0 bug (POST /analyses
+    raising ``RuntimeError`` because the client was never created) cannot
+    return.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
-    if supabase_url and supabase_key:
+    if not supabase_url or not supabase_key:
+        return StorageService()
 
-        # We can't await here so we return a StorageService with no client;
-        # the client is lazily created by the lifespan. For now, tests mock
-        # the whole service, and production injects a ready client via a
-        # module-level singleton created at startup.
-        # For Phase 0 this is fine — the endpoint is tested with mocks.
-        pass
+    try:
+        from supabase import create_client
 
-    return StorageService()
+        client = create_client(supabase_url, supabase_key)
+    except Exception as e:
+        logger.warning("Failed to create Supabase client: %s", e)
+        return StorageService()
+
+    return StorageService(supabase_client=client)
 
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:

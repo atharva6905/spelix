@@ -1,13 +1,17 @@
+import logging
 import os
-import sentry_sdk
 
-from fastapi import FastAPI
+import sentry_sdk
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.api.v1 import api_v1_router
 from app.rate_limit import limiter
+
+logger = logging.getLogger(__name__)
 
 if os.getenv("SENTRY_DSN"):
     sentry_sdk.init(
@@ -53,6 +57,46 @@ app.add_middleware(
         "Upload-Length",
     ],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch any non-``HTTPException`` raised inside a route.
+
+    Without this, an unhandled exception escapes ``ExceptionMiddleware`` and
+    is caught by Starlette's outer ``ServerErrorMiddleware``, which emits a
+    plain-text ``Internal Server Error`` response that bypasses CORS. The
+    browser then sees a misleading "CORS policy" error and the real bug
+    stays invisible — exactly the failure mode that hid the dormant
+    ``StorageService`` bug for the entire existence of Phase 0 + Phase 1.
+
+    Returns a JSON envelope matching the Spelix error contract and
+    explicitly attaches CORS headers if the request origin is in the
+    allow-list, so failures are debuggable from the browser.
+    """
+    logger.exception(
+        "Unhandled exception in route %s %s", request.method, request.url.path
+    )
+
+    headers: dict[str, str] = {}
+    origin = request.headers.get("origin")
+    if origin and origin in _allowed_origins:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Vary"] = "Origin"
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "detail": None,
+            }
+        },
+        headers=headers,
+    )
+
 
 app.include_router(api_v1_router)
 
