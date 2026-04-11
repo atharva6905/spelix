@@ -372,6 +372,81 @@ async def test_error_handler_uses_transition_not_direct_assignment():
     assert analysis.status == "failed"
 
 
+@pytest.mark.asyncio
+async def test_error_handler_skips_transition_when_already_failed():
+    """Regression: when the worker re-runs a row that is already at
+    ``failed`` (e.g. via the failed→queued retry path or a manual
+    re-enqueue) and the pipeline crashes again, the error handler must
+    NOT call ``transition('failed', 'failed')`` — that's a self-transition
+    and the status guard correctly rejects it. The handler must still
+    update ``error_message`` and bump ``retry_count`` so the new failure
+    context is captured.
+
+    Production trace this test reproduces:
+
+        InvalidTransition: Transition from 'failed' to 'failed' is not
+        permitted (allowed targets: ['queued'])
+    """
+    analysis_id = uuid.uuid4()
+    # First fetch (idempotency check): "failed" is non-terminal because
+    # _is_terminal only returns True for {completed, quality_gate_rejected}
+    # and for failed-with-retry-count>=3. With retry_count=0 the worker
+    # re-runs the job.
+    analysis_failed = make_analysis(
+        status="failed", retry_count=0, analysis_id=analysis_id
+    )
+    redis = AsyncMock()
+    ctx = make_ctx(redis)
+
+    mock_repo = AsyncMock()
+    # Both the idempotency check AND the error-handler refetch return
+    # the same already-failed row.
+    mock_repo.get_by_id.side_effect = [analysis_failed, analysis_failed]
+    mock_repo.update.return_value = analysis_failed
+
+    transition_calls: list[tuple[str, str]] = []
+
+    def recording_transition(current: str, target: str, retry_count: int = 0) -> str:
+        transition_calls.append((current, target))
+        from app.services.status import transition as _real_transition
+
+        return _real_transition(current, target, retry_count)
+
+    with patch(
+        "app.workers.analysis_worker.AnalysisRepository",
+        return_value=mock_repo,
+    ), patch(
+        "app.workers.analysis_worker.async_session",
+    ) as mock_session_factory, patch(
+        "app.workers.analysis_worker._run_pipeline",
+        side_effect=RuntimeError("pipeline exploded again"),
+    ), patch(
+        "app.workers.analysis_worker.transition",
+        side_effect=recording_transition,
+    ):
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory.return_value = mock_session
+
+        from app.workers.analysis_worker import process_analysis
+
+        # Must NOT raise — the handler must complete cleanly even though
+        # the row is already at 'failed' and the pipeline crashed.
+        await process_analysis(ctx, analysis_id)
+
+    # transition() must NOT have been called to move 'failed' → 'failed'
+    assert ("failed", "failed") not in transition_calls, (
+        f"transition() was called with ('failed', 'failed') — that would "
+        f"raise InvalidTransition. Calls: {transition_calls}"
+    )
+    # The error_message and retry_count must still be updated.
+    assert "pipeline exploded again" in (analysis_failed.error_message or "")
+    assert analysis_failed.retry_count == 1
+    # Status stays at 'failed' because we skipped the transition.
+    assert analysis_failed.status == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Heartbeat
 # ---------------------------------------------------------------------------

@@ -94,6 +94,70 @@ class TestCreateAnalysis:
         repo.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_video_path_contains_real_uuid_not_string_none(self):
+        """Regression: AnalysisService.create_analysis must populate
+        video_path with the actual analysis UUID, not the literal string
+        ``"None"``.
+
+        Production bug: SQLAlchemy ``default=gen_uuid`` runs at INSERT
+        time (flush), not at object construction. The original code did
+        ``analysis.video_path = get_storage_path(analysis.id, filename)``
+        BEFORE the flush, when ``analysis.id`` was still None — so the
+        f-string formatted ``f"videos/{None}/{filename}"`` and stored
+        ``"videos/None/squat-high-bar.mp4"``. The signed upload URL
+        handed back to the browser used the post-flush UUID (correct),
+        but the database row stored the literal "None" path. Worker
+        download then 404'd because the actual file in Storage is at
+        ``videos/<real-uuid>/...``, not ``videos/None/...``.
+        """
+        from uuid import UUID
+
+        # Capture whatever Analysis instance the repo.create call receives,
+        # so we can inspect its video_path attribute AFTER the service
+        # has built it. We use side_effect to capture + return.
+        captured: dict = {}
+
+        async def fake_create(analysis):
+            captured["analysis"] = analysis
+            return analysis
+
+        user_id = uuid.uuid4()
+        repo = _make_mock_repo()
+        repo.create.side_effect = fake_create
+
+        mock_storage = AsyncMock()
+        mock_storage.generate_signed_upload_url.return_value = {
+            "url": "https://storage.example.com/upload/signed?token=abc",
+            "expires_at": datetime.now(timezone.utc),
+        }
+
+        service = AnalysisService(repo=repo, storage=mock_storage)
+        await service.create_analysis(
+            user_id=user_id,
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            filename="squat-high-bar.mp4",
+            file_size_bytes=10_000_000,
+        )
+
+        a = captured["analysis"]
+        # The crucial assertion — video_path MUST contain a parseable
+        # UUID where the analysis ID belongs, NOT the literal "None".
+        assert a.video_path is not None
+        assert "None" not in a.video_path, (
+            f"video_path contains literal 'None' (Bug C): {a.video_path!r}"
+        )
+        # The path should be of the form "videos/{uuid}/{filename}".
+        # Parse the UUID component and verify it's a real UUID.
+        parts = a.video_path.split("/")
+        assert len(parts) == 3, f"unexpected video_path shape: {a.video_path!r}"
+        assert parts[0] == "videos"
+        assert parts[2] == "squat-high-bar.mp4"
+        # This must NOT raise — the middle component must be a valid UUID
+        UUID(parts[1])
+        assert UUID(parts[1]) == a.id
+
+    @pytest.mark.asyncio
     async def test_valid_bench_flat(self):
         user_id = uuid.uuid4()
         repo = _make_mock_repo()
