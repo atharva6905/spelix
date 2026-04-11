@@ -270,11 +270,14 @@ async def run_cv_pipeline(
     exercise_type = analysis.exercise_type
     exercise_variant = analysis.exercise_variant
 
-    # ------------------------------------------------------------------ #
-    # Transition: queued → quality_gate_pending
-    # ------------------------------------------------------------------ #
-    analysis.status = transition(analysis.status, "quality_gate_pending")
-    await repo.update(analysis)
+    # The row is already at ``quality_gate_pending`` when the worker picks
+    # up the job — ``AnalysisService.start_analysis`` performs that
+    # transition before enqueueing. Earlier versions of this pipeline did
+    # ``transition(analysis.status, "quality_gate_pending")`` here, which
+    # was a no-op self-transition that the status guard correctly rejected
+    # the moment uploads actually started reaching the worker. The pipeline
+    # now picks up where ``start_analysis`` left off and writes the
+    # initial heartbeat to indicate progress.
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
