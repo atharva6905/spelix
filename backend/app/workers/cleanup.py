@@ -62,7 +62,7 @@ async def cleanup_expired_artifacts(ctx: dict) -> int:  # noqa: ARG001
     cutoff = datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)
 
     storage = StorageService(
-        supabase_client=_build_supabase_client(),
+        supabase_client=await _build_supabase_client(),
         bucket=os.environ.get("SUPABASE_STORAGE_BUCKET", "videos"),
     )
 
@@ -150,12 +150,16 @@ async def _clean_analysis(analysis: Analysis, storage: StorageService) -> bool:
     return modified
 
 
-def _build_supabase_client() -> object | None:
-    """Construct a Supabase async client from environment variables.
+async def _build_supabase_client() -> object | None:
+    """Construct an *async* Supabase client from environment variables.
+
+    Must use ``acreate_client`` (async) — ``StorageService.delete_file``
+    awaits ``self._client.storage.from_(...).remove(...)``, which only
+    works on the async client. Using sync ``create_client`` here was the
+    same dormant Phase 0 bug that took down POST /analyses.
 
     Returns None in test/local environments where env vars are not set,
     causing StorageService to raise RuntimeError if actually called.
-    This matches the existing StorageService contract.
     """
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -168,9 +172,12 @@ def _build_supabase_client() -> object | None:
         return None
 
     try:
-        from supabase import create_client  # type: ignore[import]
+        from supabase import acreate_client  # type: ignore[import]
 
-        return create_client(supabase_url, supabase_service_key)
+        return await acreate_client(supabase_url, supabase_service_key)
     except ImportError:
         logger.warning("cleanup_expired_artifacts: supabase package not installed")
+        return None
+    except Exception as e:
+        logger.warning("cleanup_expired_artifacts: failed to create async Supabase client: %s", e)
         return None

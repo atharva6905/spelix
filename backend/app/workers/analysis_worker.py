@@ -47,18 +47,26 @@ _HEARTBEAT_TTL = 90  # seconds
 # ---------------------------------------------------------------------------
 
 
-def _build_supabase_client() -> Any | None:
-    """Build a Supabase client from env vars, or None if unconfigured."""
+async def _build_supabase_client() -> Any | None:
+    """Build an *async* Supabase client from env vars, or None if unconfigured.
+
+    The CV pipeline awaits storage methods (``await storage_client.storage
+    .from_(bucket).download(path)`` etc), so the client must be the async
+    variant returned by ``acreate_client``. The sync ``create_client`` returns
+    a ``Client`` whose storage methods return plain ``dict``s — awaiting those
+    raises ``TypeError: object dict can't be used in 'await' expression``,
+    which is the same dormant Phase 0 bug that took down the upload endpoint.
+    """
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
         return None
     try:
-        from supabase import create_client
+        from supabase import acreate_client
 
-        return create_client(url, key)
+        return await acreate_client(url, key)
     except Exception as e:
-        logger.warning("Failed to create Supabase client: %s", e)
+        logger.warning("Failed to create async Supabase client: %s", e)
         return None
 
 
@@ -78,7 +86,7 @@ async def _run_pipeline(
         raise ValueError(f"Analysis {analysis_id} not found in DB")
 
     # Build dependencies
-    storage_client = _build_supabase_client()
+    storage_client = await _build_supabase_client()
     rep_metric_repo = RepMetricRepository(repo.db)
     thresholds = ThresholdConfig()
 
