@@ -6,7 +6,17 @@
 
 import { useState, useRef, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
-import * as tus from "tus-js-client";
+// NOTE: this file deliberately does NOT use tus-js-client. The backend
+// generates a Supabase Storage REST signed upload URL
+// (`/storage/v1/object/upload/sign/{bucket}/{path}?token=...`), which is a
+// completely different protocol from Supabase's TUS resumable upload
+// endpoint (`/storage/v1/upload/resumable`). Sending TUS protocol requests
+// to the REST signed URL produces `400 headers must have required property
+// 'authorization'` because Supabase's TUS endpoint requires an
+// `Authorization` header that the REST signed URL endpoint does not. We
+// use plain XHR PUT against the REST signed URL because XHR is the only
+// browser API that exposes upload progress events (fetch does not). See
+// the regression tests in __tests__/UploadPage.test.tsx for the contract.
 import {
   createAnalysis,
   startAnalysis,
@@ -106,10 +116,13 @@ export default function UploadPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // TUS upload state
+  // Upload state — XHR PUT to Supabase REST signed upload URL.
+  // Pause/resume is intentionally not supported (REST upload cannot resume
+  // mid-byte; the button is "Cancel upload" while uploading). For
+  // resumability we'd need to switch to Supabase's TUS endpoint with the
+  // user's bearer JWT and storage RLS policies — deferred to a follow-up.
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [uploadPaused, setUploadPaused] = useState(false);
-  const tusUploadRef = useRef<tus.Upload | null>(null);
+  const xhrRef = useRef<XMLHttpRequest | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -158,17 +171,14 @@ export default function UploadPage() {
     setSelectedFile(file);
   }
 
-  async function handlePauseResume() {
-    const upload = tusUploadRef.current;
-    if (!upload) return;
-
-    if (uploadPaused) {
-      upload.start();
-      setUploadPaused(false);
-    } else {
-      await upload.abort();
-      setUploadPaused(true);
-    }
+  function handleCancelUpload() {
+    const xhr = xhrRef.current;
+    if (!xhr) return;
+    xhr.abort();
+    xhrRef.current = null;
+    setSubmitError("Upload cancelled.");
+    setSubmitting(false);
+    setUploadProgress(null);
   }
 
   async function handleSubmit() {
@@ -179,7 +189,6 @@ export default function UploadPage() {
     setSubmitting(true);
     setSubmitError(null);
     setUploadProgress(0);
-    setUploadPaused(false);
 
     try {
       // Phase A: create analysis record, get upload_url
@@ -190,33 +199,49 @@ export default function UploadPage() {
         file_size_bytes: selectedFile.size,
       });
 
-      // Phase B: TUS upload directly to Supabase Storage
+      // Phase B: REST PUT to Supabase Storage signed upload URL.
+      // The signed URL is `/storage/v1/object/upload/sign/{bucket}/{path}?token=...`
+      // — a one-shot HTTP PUT, not a TUS resumable upload. Auth lives in the
+      // query-string `token`, NOT in an Authorization header. We use XHR
+      // (not fetch) for the upload progress events.
       await new Promise<void>((resolve, reject) => {
-        const upload = new tus.Upload(selectedFile, {
-          endpoint: result.upload_url,
-          chunkSize: 5 * 1024 * 1024, // 5 MB
-          retryDelays: [0, 3000, 5000, 10000, 20000],
-          metadata: {
-            filename: selectedFile.name,
-            filetype: selectedFile.type,
-          },
-          onProgress(bytesUploaded, bytesTotal) {
-            const pct = Math.round((bytesUploaded / bytesTotal) * 100);
+        const xhr = new XMLHttpRequest();
+        xhrRef.current = xhr;
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const pct = Math.round((event.loaded / event.total) * 100);
             setUploadProgress(pct);
-          },
-          onError(error) {
-            reject(error);
-          },
-          onSuccess() {
-            resolve();
-          },
+          }
         });
 
-        tusUploadRef.current = upload;
-        upload.start();
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            setUploadProgress(100);
+            resolve();
+          } else {
+            reject(
+              new Error(
+                `Upload failed (${xhr.status}). Please try again.`,
+              ),
+            );
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error("Network error during upload. Please try again."));
+        };
+
+        xhr.open("PUT", result.upload_url);
+        xhr.setRequestHeader(
+          "Content-Type",
+          selectedFile.type || "application/octet-stream",
+        );
+        xhr.send(selectedFile);
       });
 
       // Phase C: trigger backend pipeline, then navigate
+      xhrRef.current = null;
       await startAnalysis(result.id);
       navigate(`/analysis/${result.id}`);
     } catch (err: unknown) {
@@ -226,8 +251,7 @@ export default function UploadPage() {
       setSubmitError(message);
       setSubmitting(false);
       setUploadProgress(null);
-      setUploadPaused(false);
-      tusUploadRef.current = null;
+      xhrRef.current = null;
     }
   }
 
@@ -356,7 +380,7 @@ export default function UploadPage() {
       {isUploading && (
         <div className="mb-4">
           <div className="mb-1 flex items-center justify-between text-xs text-gray-600">
-            <span>{uploadPaused ? "Upload paused — tap to resume" : `Uploading… ${uploadProgress ?? 0}%`}</span>
+            <span>{`Uploading… ${uploadProgress ?? 0}%`}</span>
             <span>{uploadProgress ?? 0}%</span>
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
@@ -365,13 +389,13 @@ export default function UploadPage() {
               style={{ width: `${uploadProgress ?? 0}%` }}
             />
           </div>
-          {/* Pause/Resume button — FR-UPLD-12 */}
+          {/* Cancel button — REST upload doesn't support resume mid-byte. */}
           <button
             type="button"
-            onClick={handlePauseResume}
+            onClick={handleCancelUpload}
             className="mt-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 focus:outline-none focus:underline"
           >
-            {uploadPaused ? "Resume Upload" : "Pause Upload"}
+            Cancel Upload
           </button>
         </div>
       )}
@@ -384,11 +408,7 @@ export default function UploadPage() {
         disabled={!isReadyToUpload || submitting}
         className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-indigo-300"
       >
-        {submitting
-          ? uploadPaused
-            ? "Upload paused — tap to resume"
-            : "Uploading…"
-          : "Upload Video"}
+        {submitting ? "Uploading…" : "Upload Video"}
       </button>
     </div>
   );

@@ -36,35 +36,81 @@ vi.mock("react-router", async (importOriginal) => {
 });
 
 // ---------------------------------------------------------------------------
-// tus-js-client mock — captures callbacks for manual triggering in tests
+// XMLHttpRequest mock — captures the in-flight upload so tests can drive
+// progress / load / error events. The frontend uses XHR (not tus-js-client
+// or fetch) for the REST PUT to Supabase's signed upload URL because XHR
+// is the only browser API that exposes upload progress events.
 // ---------------------------------------------------------------------------
 
-type TusCallbacks = {
-  onProgress?: (bytesUploaded: number, bytesTotal: number) => void;
-  onError?: (error: Error) => void;
-  onSuccess?: () => void;
+type MockXhrInstance = {
+  open: ReturnType<typeof vi.fn>;
+  setRequestHeader: ReturnType<typeof vi.fn>;
+  send: ReturnType<typeof vi.fn>;
+  abort: ReturnType<typeof vi.fn>;
+  upload: { addEventListener: ReturnType<typeof vi.fn> };
+  onload: (() => void) | null;
+  onerror: (() => void) | null;
+  status: number;
+  statusText: string;
+  // Test helpers
+  _openCalls: unknown[][];
+  _sendCalls: unknown[][];
+  _triggerProgress: (loaded: number, total: number) => void;
+  _triggerLoad: (status?: number) => void;
+  _triggerError: () => void;
 };
 
-let capturedTusCallbacks: TusCallbacks = {};
-let capturedTusEndpoint: string | null | undefined = null;
-const mockTusStart = vi.fn();
-const mockTusAbort = vi.fn().mockResolvedValue(undefined);
+let lastMockXhr: MockXhrInstance | null = null;
 
-vi.mock("tus-js-client", () => ({
-  // Must use a regular function (not arrow) so `new Upload(...)` works
-  Upload: vi.fn(function (_file: unknown, options: TusCallbacks & { endpoint?: string | null }) {
-    capturedTusCallbacks = {
-      onProgress: options.onProgress ?? undefined,
-      onError: options.onError ?? undefined,
-      onSuccess: options.onSuccess ?? undefined,
-    };
-    capturedTusEndpoint = options.endpoint;
-    return {
-      start: mockTusStart,
-      abort: mockTusAbort,
-    };
+function makeMockXhr(): MockXhrInstance {
+  const uploadListeners: Record<string, ((e: ProgressEvent) => void)[]> = {};
+  const openCalls: unknown[][] = [];
+  const sendCalls: unknown[][] = [];
+
+  const xhr: MockXhrInstance = {
+    open: vi.fn((...args: unknown[]) => {
+      openCalls.push(args);
+    }),
+    setRequestHeader: vi.fn(),
+    send: vi.fn((...args: unknown[]) => {
+      sendCalls.push(args);
+    }),
+    abort: vi.fn(),
+    upload: {
+      addEventListener: vi.fn((event: string, cb: (e: ProgressEvent) => void) => {
+        uploadListeners[event] = uploadListeners[event] ?? [];
+        uploadListeners[event].push(cb);
+      }),
+    },
+    onload: null,
+    onerror: null,
+    status: 0,
+    statusText: "",
+    _openCalls: openCalls,
+    _sendCalls: sendCalls,
+    _triggerProgress(loaded: number, total: number) {
+      const ev = { lengthComputable: true, loaded, total } as unknown as ProgressEvent;
+      uploadListeners["progress"]?.forEach((cb) => cb(ev));
+    },
+    _triggerLoad(status = 200) {
+      xhr.status = status;
+      xhr.statusText = status >= 200 && status < 300 ? "OK" : "Error";
+      xhr.onload?.();
+    },
+    _triggerError() {
+      xhr.onerror?.();
+    },
+  };
+  return xhr;
+}
+
+vi.stubGlobal(
+  "XMLHttpRequest",
+  vi.fn(function () {
+    lastMockXhr = makeMockXhr();
+    return lastMockXhr;
   }),
-}));
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,8 +241,7 @@ let activeCreateElementSpy: ReturnType<typeof vi.spyOn> | null = null;
 describe("UploadPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    capturedTusCallbacks = {};
-    capturedTusEndpoint = null;
+    lastMockXhr = null;
   });
 
   afterEach(() => {
@@ -457,9 +502,14 @@ describe("UploadPage", () => {
     });
   }
 
-  // B-044: TUS upload flow
-  it("creates a TUS Upload with the returned upload_url after createAnalysis", async () => {
-    const uploadUrl = "https://storage.example.com/tus/upload";
+  // B-044, FR-UPLD-12: REST PUT upload to Supabase signed upload URL.
+  // Regression test for the production outage where the frontend used
+  // tus-js-client (TUS protocol) against a REST signed upload URL —
+  // Supabase rejected with 400 "headers must have required property
+  // 'authorization'" because TUS and REST signed upload are completely
+  // different protocols.
+  it("PUTs the file to the upload_url returned by createAnalysis", async () => {
+    const uploadUrl = "https://storage.example.com/object/upload/sign/videos/x?token=abc";
     mockCreateAnalysis.mockResolvedValue({
       id: "analysis-123",
       upload_url: uploadUrl,
@@ -472,22 +522,33 @@ describe("UploadPage", () => {
     renderUploadPage();
     await setupFormWithFile(listeners, makeVideoFile("test.mp4"));
 
-    // Submit — starts the TUS upload
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
 
     await waitFor(() => expect(mockCreateAnalysis).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(lastMockXhr).not.toBeNull());
 
-    // TUS Upload should have been constructed with the upload_url as endpoint
-    expect(capturedTusEndpoint).toBe(uploadUrl);
-    expect(mockTusStart).toHaveBeenCalledTimes(1);
+    // The XHR must PUT to the signed upload URL with the file as the body.
+    const xhr = lastMockXhr!;
+    expect(xhr._openCalls.length).toBe(1);
+    expect(xhr._openCalls[0][0]).toBe("PUT");
+    expect(xhr._openCalls[0][1]).toBe(uploadUrl);
+    expect(xhr.send).toHaveBeenCalledTimes(1);
+    // The body must be the File itself (not a FormData or arraybuffer wrapper).
+    const sentBody = xhr._sendCalls[0][0];
+    expect(sentBody).toBeInstanceOf(File);
+    // Content-Type header set to the file's MIME type so Supabase stores it correctly.
+    expect(xhr.setRequestHeader).toHaveBeenCalledWith(
+      "Content-Type",
+      "video/mp4",
+    );
   });
 
-  it("updates uploadProgress state on TUS onProgress callback", async () => {
+  it("updates uploadProgress state on XHR upload progress events", async () => {
     mockCreateAnalysis.mockResolvedValue({
       id: "analysis-abc",
-      upload_url: "https://storage.example.com/tus/upload",
+      upload_url: "https://storage.example.com/object/upload/sign/videos/x?token=abc",
       status: "queued",
       expires_at: "2026-01-01T00:00:00Z",
     });
@@ -501,11 +562,11 @@ describe("UploadPage", () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
 
-    await waitFor(() => expect(mockTusStart).toHaveBeenCalled());
+    await waitFor(() => expect(lastMockXhr).not.toBeNull());
 
-    // Simulate 50% progress
+    // Simulate 50% progress via the XHR upload.progress event
     await act(async () => {
-      capturedTusCallbacks.onProgress?.(500, 1000);
+      lastMockXhr!._triggerProgress(500, 1000);
     });
 
     // Progress bar should appear with 50% (appears in both label and counter spans)
@@ -515,7 +576,7 @@ describe("UploadPage", () => {
   it("navigates to analysis page only after startAnalysis succeeds", async () => {
     mockCreateAnalysis.mockResolvedValue({
       id: "analysis-xyz",
-      upload_url: "https://storage.example.com/tus/upload",
+      upload_url: "https://storage.example.com/object/upload/sign/videos/x?token=abc",
       status: "queued",
       expires_at: "2026-01-01T00:00:00Z",
     });
@@ -529,17 +590,48 @@ describe("UploadPage", () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
 
-    await waitFor(() => expect(mockTusStart).toHaveBeenCalled());
+    await waitFor(() => expect(lastMockXhr).not.toBeNull());
 
-    // Navigation should NOT have happened yet (TUS not complete)
+    // Navigation should NOT have happened yet (XHR has not completed)
     expect(mockNavigate).not.toHaveBeenCalled();
 
-    // Trigger TUS onSuccess
+    // Trigger XHR onload with status 200 (Supabase REST upload success)
     await act(async () => {
-      capturedTusCallbacks.onSuccess?.();
+      lastMockXhr!._triggerLoad(200);
     });
 
     await waitFor(() => expect(mockStartAnalysis).toHaveBeenCalledWith("analysis-xyz"));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/analysis/analysis-xyz"));
+  });
+
+  it("surfaces an error when XHR upload fails with non-2xx status", async () => {
+    mockCreateAnalysis.mockResolvedValue({
+      id: "analysis-fail",
+      upload_url: "https://storage.example.com/object/upload/sign/videos/x?token=abc",
+      status: "queued",
+      expires_at: "2026-01-01T00:00:00Z",
+    });
+
+    const { listeners } = setupVideoElementMock(10);
+    renderUploadPage();
+    await setupFormWithFile(listeners, makeVideoFile("test.mp4"));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() => expect(lastMockXhr).not.toBeNull());
+
+    // Simulate Supabase Storage rejecting the upload (400, 403, etc.)
+    await act(async () => {
+      lastMockXhr!._triggerLoad(403);
+    });
+
+    // Error alert should show; startAnalysis must NOT be called.
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(mockStartAnalysis).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
