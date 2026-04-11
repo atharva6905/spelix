@@ -57,6 +57,52 @@ router = APIRouter(tags=["analyses"])
 _async_supabase_client_cache: Any | None = None
 _async_supabase_client_cache_initialized: bool = False
 
+# Module-level cache for the ARQ Redis pool used to enqueue worker jobs.
+# Same caching shape as the supabase client above — exactly one pool per
+# process, two-state cache so failed init doesn't retry forever.
+_arq_pool_cache: Any | None = None
+_arq_pool_cache_initialized: bool = False
+
+
+async def _get_arq_pool() -> Any | None:
+    """Build and cache the ARQ Redis pool for enqueueing worker jobs.
+
+    Reads ``REDIS_URL`` from the environment and constructs an
+    ``arq.ArqRedis`` pool via ``arq.create_pool`` with the same
+    ``default_queue_name`` (``"arq:queue"``) the worker subscribes to in
+    ``app/workers/settings.py``. Cached at module level so subsequent
+    requests reuse the same Redis connection pool.
+
+    Regression coverage: this exists at all because PR #4–#7 fixed
+    everything else but every ``POST /analyses/{id}/start`` was still
+    silently no-op'ing the worker enqueue — ``AnalysisService`` was
+    constructed with ``arq_pool=None`` and the enqueue branch is gated
+    on ``if self._arq_pool is not None``. The fix is to wire it up here
+    and pass it to ``AnalysisService`` in ``_get_service``.
+    """
+    global _arq_pool_cache, _arq_pool_cache_initialized
+
+    if _arq_pool_cache_initialized:
+        return _arq_pool_cache
+
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        _arq_pool_cache = None
+        _arq_pool_cache_initialized = True
+        return None
+
+    try:
+        import arq
+        from arq.connections import RedisSettings
+
+        _arq_pool_cache = await arq.create_pool(RedisSettings.from_dsn(redis_url))
+    except Exception as e:
+        logger.warning("Failed to create ARQ pool: %s", e)
+        _arq_pool_cache = None
+
+    _arq_pool_cache_initialized = True
+    return _arq_pool_cache
+
 
 async def _make_storage_service() -> StorageService:
     """Build a StorageService backed by a real *async* Supabase client.
@@ -102,10 +148,17 @@ async def _make_storage_service() -> StorageService:
 
 
 async def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
-    """Build AnalysisService with an AnalysisRepository and StorageService."""
+    """Build AnalysisService with an AnalysisRepository, StorageService, and ARQ pool.
+
+    The ``arq_pool`` is REQUIRED for ``start_analysis`` to actually enqueue
+    the worker job — passing ``None`` makes the enqueue silently skip and
+    the worker never runs. See ``_get_arq_pool`` and the regression test
+    in ``tests/unit/test_arq_pool_factory.py``.
+    """
     repo = AnalysisRepository(db)
     storage = await _make_storage_service()
-    return AnalysisService(repo=repo, storage=storage)
+    arq_pool = await _get_arq_pool()
+    return AnalysisService(repo=repo, storage=storage, arq_pool=arq_pool)
 
 
 # ---------------------------------------------------------------------------
