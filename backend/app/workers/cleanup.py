@@ -59,7 +59,12 @@ async def cleanup_expired_artifacts(ctx: dict) -> int:  # noqa: ARG001
     int
         Number of analyses whose artifacts were fully cleaned up.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)
+    # ``analyses.created_at`` is ``TIMESTAMP WITHOUT TIME ZONE``, so the
+    # cutoff must be tz-naive — asyncpg refuses tz-aware comparisons against
+    # naive columns. Same dormant bug as ``InsightsService.global_insights``.
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=_RETENTION_DAYS)).replace(
+        tzinfo=None
+    )
 
     storage = StorageService(
         supabase_client=await _build_supabase_client(),
