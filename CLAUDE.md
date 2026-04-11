@@ -126,6 +126,37 @@ Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, 
 - **When to commit**: after each TDD gate passes (test green = commit point).
 - **Commit scope**: one logical change per commit. Don't bundle unrelated changes.
 
+## Checkpoint Workflow (branch + PR + merge — NEVER direct push to main)
+
+`main` auto-deploys to spelix.app. A broken push breaks production. For every meaningful checkpoint, work on a branch, open a PR, let CI run, then merge via `gh pr merge --squash --delete-branch`. The main agent merges its own PR once CI is green.
+
+**Meaningful checkpoints** (PR required): phase batch completion, FR-ID implementations with user-facing changes, schema migrations, bug fixes touching auth/coaching/upload/pipeline, dependency upgrades, infra changes, CI fixes.
+
+**Not meaningful** (direct commit on current branch is fine): handoff notes, typo-only doc fixes, scratch commits during active development before the checkpoint.
+
+**Workflow**: `git checkout -b <type>/<name>` → implement → local checks (`ruff`/`pyright`/`tsc`/`vitest`) → `git push -u origin <branch>` → `gh pr create` → wait for CI → `gh pr merge --squash --delete-branch` → `git checkout main && git pull` → if user-facing, run E2E verification (next section).
+
+**Never force-push to main. Never bypass CI. Never merge a PR with red CI.**
+
+## E2E Verification via Playwright MCP
+
+After any meaningful production feature lands on `main` and auto-deploys to **spelix.app**, verify the live flow end-to-end with the Playwright MCP browser tools BEFORE moving on. "Unit tests pass" ≠ "works in production" — prod has different env vars, different Supabase project, different everything.
+
+**Verify on prod after merging any PR that**: touches upload/pipeline/results/coaching/PDF/auth flows, changes API response shapes, adds or modifies a Phase MUST requirement, or fixes a production bug. Also periodically at phase gates.
+
+**Skip verification for**: docs-only changes, CI fixes that don't change runtime behavior, agent prompt edits, commits not touching `backend/app/`, `frontend/src/`, or migrations.
+
+**Procedure**:
+1. Wait ~1–2 min after merge for Vercel deploy to settle
+2. `mcp__playwright__browser_navigate` → `https://spelix.app`
+3. `mcp__playwright__browser_snapshot` to capture accessibility tree
+4. Walk the affected flow: click/fill/type/wait through login → upload → status → results → download
+5. At the end: `browser_console_messages` (level=error) + `browser_network_requests` (filter for 4xx/5xx)
+6. **If broken**: write findings to `.claude/handoff.md` under a new "E2E Findings" section and STOP — do not continue until fixed
+7. **If green**: record verification as a bullet in the handoff and move on
+
+Authenticated flows use persistent cookies from the browse daemon. Never verify on localhost when prod is the question.
+
 ## Compaction Survival
 
 Context budget: keep below 60% capacity. Watch the statusline.
