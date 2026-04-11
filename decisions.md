@@ -132,3 +132,76 @@
 **Context**: Editor hooks repeatedly suggest `"use client"` directives on React components in `frontend/src/pages/*.tsx` based on pattern matching against Next.js App Router conventions. These suggestions are false positives.
 **Decision**: The Spelix frontend is a Vite 8 + React 19 SPA with React Router v6. There is no Next.js, no App Router, no Server Components. The `"use client"` directive is a Next.js-specific concept that has no meaning in Vite. Ignore all hook-injected suggestions recommending `"use client"`.
 **Consequences**: Reviewers and AI agents must understand this distinction. Adding `"use client"` to Vite components is harmless (it's just a string literal at the top of the file) but creates confusion. Documented in CLAUDE.md and this ADR so future sessions don't "fix" these phantom warnings.
+
+## ADR-027: AsyncSession `commit-on-success` in `get_db()` Dependency (Session 13)
+**Context**: SQLAlchemy `AsyncSession` defaults to `autocommit=False`. The Phase 0 `get_db()` dependency yielded a session inside `async with` and never called `session.commit()` — so every flushed write was rolled back when the session closed at request end. The bug went undetected until session 13 because every test mocked the repository layer entirely. Production data loss in disguise: `POST /analyses` returned 201 with a UUID built from the in-memory ORM object, the row never persisted, then `POST /analyses/{id}/start` returned 404 because request 2 couldn't find what request 1 "created".
+**Decision**: `get_db()` MUST wrap the `yield` in `try/except` and call `await session.commit()` on success, `await session.rollback()` on any exception (including `HTTPException`, so partial writes from a failed handler don't leak). The same pattern applies to ARQ worker session blocks (`analysis_worker.process_analysis`, `cleanup.cleanup_expired_artifacts`) — both opened sessions via `async_session()` directly and need explicit commits at every persistence boundary.
+**Consequences**: Backend dev gotcha — anyone writing a new dependency or worker entry point that holds an `AsyncSession` MUST commit explicitly. Regression test in `tests/unit/test_db_session.py::TestGetDbCommit` exercises the dependency lifecycle directly via `gen.__anext__()` / `gen.athrow()` and would catch any reintroduction. Worker error paths must commit twice — once for the in-flight write that crashed (rolled back), then a fresh write for the failure-state row + commit. Backend CLAUDE.md gotcha added.
+
+## ADR-028: Pre-Generate UUIDs at Construction Time, Not Via SQLAlchemy `default=` (Session 13)
+**Context**: `Analysis.id` was declared as `mapped_column(UUID, primary_key=True, default=gen_uuid)`. SQLAlchemy `default=` runs at INSERT/flush time, NOT at `__init__`. `AnalysisService.create_analysis` set `analysis.video_path = get_storage_path(analysis.id, filename)` BEFORE calling `repo.create()`, so `analysis.id` was `None` and the f-string in `get_storage_path` formatted the literal string `"None"` into the path: `"videos/None/squat-high-bar.mp4"`. The signed upload URL handed back to the browser used the post-flush real UUID (correct), but the database column had the wrong path. The worker download then 404'd because the actual file in Storage was at `videos/<real-uuid>/...`, not `videos/None/...`.
+**Decision**: For any code path that needs to read `analysis.id` BEFORE the first flush, pass `id=gen_uuid()` explicitly at construction:
+```python
+analysis = Analysis(
+    id=gen_uuid(),
+    user_id=user_id,
+    ...
+)
+analysis.video_path = get_storage_path(analysis.id, filename)  # safe — id is set
+analysis = await self._repo.create(analysis)
+```
+The model's `default=gen_uuid` is kept for any other call site that doesn't override it.
+**Consequences**: Pattern applies to any future model where downstream logic derives a path, URL, key, or hash from the row's primary key before it's persisted. Regression test `test_video_path_contains_real_uuid_not_string_none` captures the real `Analysis` instance passed to `repo.create()` and asserts `video_path` parses as a UUID equal to `analysis.id`. Backend CLAUDE.md gotcha added.
+
+## ADR-029: MediaPipe Tasks API, Not Legacy `solutions` (Session 13)
+**Context**: Phase 0 `pose_extraction.py` used `mediapipe.solutions.pose.Pose(...)`. This worked locally on Mac/Windows because those wheels still ship `solutions`, but Linux x86_64 wheels for `mediapipe==0.10.x` have NEVER shipped the legacy `solutions` submodule (verified by inspecting wheel contents from PyPI for versions 0.10.9, 0.10.11, 0.10.14, 0.10.18, 0.10.21, 0.10.33 — every Linux wheel contains zero `solutions/` files). CI tests passed because they fully mocked `mediapipe`. Production worker on the DigitalOcean droplet (Debian) crashed with `AttributeError: module 'mediapipe' has no attribute 'solutions'` on the very first real video.
+**Decision**: All MediaPipe pose-extraction code MUST use the modern Tasks API (`mediapipe.tasks.python.vision.PoseLandmarker`). The BlazePose Heavy `.task` model file (`pose_landmarker_heavy.task`, ~30 MB) is downloaded into the Docker image at build time via `RUN curl ... -o /app/models/pose_landmarker_heavy.task`. Path resolution prefers the env var `POSE_LANDMARKER_MODEL_PATH`, then `/app/models/pose_landmarker_heavy.task`, then falls back to a local-dev candidate via `Path(__file__).parent.parent.parent.parent`. Config mapping from the legacy API: `model_complexity=2` → BlazePose Heavy `.task` file; `static_image_mode=True` → `running_mode=RunningMode.IMAGE`; `min_detection_confidence=0.5` → `min_pose_detection_confidence=0.5`; `min_tracking_confidence=0.5` → `min_tracking_confidence=0.5`; new `min_pose_presence_confidence=0.5` matched to detection confidence; new `num_poses=1` (Spelix is single-person). The Tasks API `libmediapipe.so` also requires `libgles2` and `libegl1` system packages (verified via `ldd`) — both added to the Dockerfile apt install list.
+**Consequences**: All pose-extraction code is now cross-platform consistent — Linux, Mac, and Windows all run the same Tasks API path. The legacy `solutions` API is forbidden. Adding new MediaPipe features (e.g. `HandLandmarker`, `FaceLandmarker`) MUST use the corresponding Tasks API and bake the relevant `.task` file into the image. The Docker image grew by ~30 MB (model file) and ~250 MB (ffmpeg + libgles2 + libegl1) but those costs are unavoidable for a working pipeline. Tests now mock the Tasks API symbols (`PoseLandmarker`, `PoseLandmarkerOptions`, `BaseOptions`, `RunningMode`, `mp.Image`, `mp.ImageFormat`) instead of the legacy `solutions` tree.
+
+## ADR-030: Frontend Upload — REST PUT, Not TUS Resumable (Session 13)
+**Context**: Phase 0 frontend used `tus-js-client` to upload videos to the Supabase signed upload URL returned by `POST /api/v1/analyses`. But Supabase's signed upload URL endpoint (`/storage/v1/object/upload/sign/{bucket}/{path}?token=...`) is a REST endpoint that accepts a one-shot HTTP `PUT`, NOT a TUS resumable upload session. The TUS protocol requires an `Authorization: Bearer <user_jwt>` header on a different endpoint (`/storage/v1/upload/resumable`). Sending TUS protocol semantics to the REST signed URL produced `400: headers must have required property 'authorization'` on every upload attempt. The mismatch was a Phase 0 design bug that never fired in production until upstream layers (storage factory, async client, etc.) were fixed.
+**Decision**: Frontend uses plain `XMLHttpRequest` (NOT `fetch` — XHR is the only browser API that exposes upload progress events for FR-UPLD-12) to PUT the file body to the signed URL with `Content-Type: <file mime>`. No `Authorization` header (the signed URL's query-string token is the auth). Drop pause/resume — REST upload cannot resume mid-byte. The cancel button calls `xhr.abort()` and resets state. For the 50 MB file size cap, REST PUT is fine — typical upload is <30s on broadband; TUS resumability is overkill at this size.
+**Consequences**: `tus-js-client` is no longer used (kept in `package.json` for potential future TUS migration if larger files become a requirement). Future TUS migration path: backend stops returning a signed REST URL, instead returns `{id, status, expires_at}`; frontend uploads via Supabase's `/storage/v1/upload/resumable` with `tus-js-client` AND the user's bearer JWT in the `Authorization` header. That migration also requires Supabase RLS policies allowing authenticated users to INSERT into the `videos` bucket where the path matches their `user_id`. Deferred until actually needed.
+
+## ADR-031: Status Table — Operational `→ failed` Edges (Session 13)
+**Context**: The Phase 0 status transition table (`backend/app/services/status.py`) only allowed `→ failed` from `processing` or `coaching`. But operational failures (missing config, OOM, ARQ crash, Anthropic 401, MediaPipe model download failure, Supabase auth) can fire at ANY phase of the worker pipeline — including before the worker has had a chance to transition the row out of `queued` or `quality_gate_pending`. The worker error handler in `analysis_worker.process_analysis` does `transition(analysis.status, "failed")` for any non-terminal status, so an early-pipeline crash hit a guard wall and the error handler ITSELF crashed with `InvalidTransition`, leaving the row orphaned at `quality_gate_pending` forever and masking the original error.
+**Decision**: Add `queued → failed` and `quality_gate_pending → failed` to the transition table. Operational failures can fire at any phase. The semantic distinction with `quality_gate_rejected` is preserved: that state remains reserved for analyses where the actual quality-gate predicate refused the user's video content (resolution, framing, body visibility, single-person). `failed` is reserved for infrastructure/operational failures. The worker error handler is also updated to skip the transition entirely when the row is already at `failed` (a different row state from a previous attempt re-running) to avoid the `failed → failed` self-transition wall.
+**Consequences**: Any new operational error path can land the row in `failed` from anywhere. The two terminal-soft-fail states (`failed` with `retry_count >= 3`, `quality_gate_rejected`, `completed`) remain unchanged. The retry path `failed → queued` (allowed when `retry_count < 3`) is also unchanged. Regression tests for both new edges + the worker self-transition skip live in `test_status_transitions.py` and `test_analysis_worker.py::test_error_handler_skips_transition_when_already_failed`.
+
+## ADR-032: Tests Must Exercise Real Factories with Source-Patched Third-Party Modules (Session 13)
+**Context**: Session 13 uncovered TWELVE distinct dormant Phase 0 bugs in production code that had been live for months behind perfectly green CI:
+1. `_make_storage_service` factory `pass`-branch returning `client=None`
+2. Sync `create_client` vs awaited storage methods
+3. tz-aware datetime against `TIMESTAMP WITHOUT TIME ZONE` column
+4. `get_db()` never committed
+5. `_get_service` never wired the ARQ pool
+6. `ThresholdConfig()` path resolution wrong inside Docker
+7. Status guard rejected `quality_gate_pending → failed`
+8. Duplicate `→ quality_gate_pending` transition
+9. `video_path` set to literal `"None"` because of `gen_uuid` timing
+10. Worker error handler `failed → failed` self-transition
+11. MediaPipe `solutions` API doesn't exist on Linux
+12. Worker error handler caught `InvalidTransition` instead of original error
+
+**Common root cause across all 12**: every test that touched these subsystems mocked the third-party module entirely (`mock_mp = MagicMock()`, `mock_supabase = AsyncMock()`, `mock_repo = AsyncMock(spec=AnalysisRepository)`) so the real factory and singleton paths were never exercised. CI was green because the mocks always behaved correctly; production was broken because the real code paths had bugs the mocks couldn't catch.
+
+**Decision**: Any factory or singleton that constructs a third-party client OR derives behavior from runtime configuration (env vars, file paths, model files) MUST have at least ONE regression test that exercises the REAL factory function with the third-party module patched at its SOURCE, not at the consumer. Pattern:
+```python
+# WRONG (masks bugs):
+def test_my_endpoint():
+    mock_service = AsyncMock(spec=MyService)
+    app.dependency_overrides[get_my_service] = lambda: mock_service
+    ...
+
+# RIGHT (exercises real factory):
+def test_my_factory_wires_real_client():
+    monkeypatch.setenv("MY_API_KEY", "test-key")
+    fake_client = MagicMock()
+    with patch("third_party.create_client", return_value=fake_client) as create:
+        svc = my_factory()
+    assert svc._client is fake_client
+    create.assert_called_once_with("test-key")
+```
+The regression tests added in session 13 (`TestMakeStorageServiceFactory`, `TestGetDbCommit`, `TestMakeArqPoolFactory`, `TestGetServicePassesArqPool`, `TestThresholdConfigPathResolution`, `TestModelPathResolution`, `test_video_path_contains_real_uuid_not_string_none`, `test_error_handler_skips_transition_when_already_failed`) all follow this pattern. Each one would have caught its corresponding production bug at PR review time.
+
+**Consequences**: Phase 2+ code review checklist must include "is there a real-factory test for any new singleton/factory/cached-client introduced by this PR?". Mocks at the consumer level remain fine for endpoint tests and business logic tests — but at least one test per factory must patch at the source. Backend CLAUDE.md gotcha added documenting all eight regression test patterns from session 13 as canonical examples.

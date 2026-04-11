@@ -3,9 +3,13 @@
 Phase 0 core build complete (B-001 through B-042). Audit on 2026-04-09 found 67 issues.
 Full audit: `docs/phase0-audit.md`. Detailed reports: `docs/audit-{backend,frontend,tests,infra}.md`.
 
-**Phase 1 complete (2026-04-10)** — all MUST requirements implemented.
-Backend: 895 tests passing, 91% coverage. Frontend: 177 tests passing.
-Migration 003 applied to Supabase. Transition gate passed. Ready for Phase 2 (RAG).
+**Phase 1 code-complete 2026-04-10** — all MUST requirements implemented; tests green; transition gate passed.
+**Phase 1 production-functional 2026-04-11** — twelve dormant Phase 0 bugs surfaced and fixed across PRs #3–#14 in session 13.
+The full upload → worker pipeline → quality gates path now runs end-to-end on `spelix.app`. See B-138–B-149 below
+and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
+
+Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
+Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
 ## Completed (Phase 0 Core Build)
 
@@ -130,6 +134,39 @@ Frontend 177 tests. Migration 003 applied. 21 commits across Sessions 5–10.
 
 ---
 
+## Completed — Production Hardening (Session 13, 2026-04-11)
+
+Phase 1 was code-complete on 2026-04-10 but **production-broken** due to twelve layers of dormant Phase 0 bugs
+that no test had ever caught (every test mocked the third-party module entirely — see ADR-032). Session 13
+debugged the full upload → worker pipeline → quality gates path live against `spelix.app`, peeling one layer
+at a time. Each PR was diagnosed via Playwright MCP browser automation + direct droplet SSH + the enriched
+global exception envelope from PR #4. End-to-end pipeline verified: orphan analysis row `214bf593-bd41-45a4-81a1-98064a1fd199`
+ran `quality_gate_pending → processing → quality_gate_rejected` in 100.48 s with all 5 quality gates producing
+real metrics from real MediaPipe pose extraction.
+
+| ID | Title | Layer | Status | PR | Commit | Files |
+|----|-------|-------|--------|----|--------|-------|
+| B-138 | `_make_storage_service` returned `client=None` (Phase 0 dormant `pass` branch) + initial global exception handler | 1 | done | #3 | `94dd0fa` | `api/v1/analyses.py`, `app/main.py`, `tests/unit/test_storage_service.py`, `tests/unit/test_global_exception_handler.py` |
+| B-139 | Sync `create_client` vs awaited storage methods → switch to `acreate_client`, module-level cache, enrich exception envelope with `detail.type` + `detail.message` | 2 | done | #4 | `754393c` | `api/v1/analyses.py`, `workers/analysis_worker.py`, `app/main.py`, related tests |
+| B-140 | `/insights/global` + cleanup cron tz-aware datetime against naive `created_at` column → strip `tzinfo` at boundary | 3 | done | #5 | `02fcc88` | `services/insights.py`, `workers/cleanup.py`, `tests/unit/test_insights.py` |
+| B-141 | Droplet env: `SUPABASE_SERVICE_ROLE_KEY` decoded as JWT belonged to a different Supabase project than `SUPABASE_URL` (verified via JWT `ref` claim decode) — fixed by editing `/home/deploy/spelix/.env.prod` and `--force-recreate` | 4 | done | n/a (env) | n/a | `.env.prod` (droplet only) |
+| B-142 | Supabase Dashboard: created `videos` storage bucket in canonical project (was missing entirely after the project migration that left B-141 stale) | 5 | done | n/a (dashboard) | n/a | Supabase Storage |
+| B-143 | Frontend `tus-js-client` against Supabase REST signed upload URL — wrong protocol entirely. Switched to `XMLHttpRequest` PUT, dropped pause/resume (REST can't resume mid-byte), 22 frontend tests rewritten | 6 | done | #6 | `12cd90b` | `frontend/src/pages/UploadPage.tsx`, `frontend/src/pages/__tests__/UploadPage.test.tsx` |
+| B-144 | `get_db()` never committed — SQLAlchemy `autocommit=False` rolled back EVERY write since Phase 0 B-005. Same bug in `process_analysis` and `cleanup_expired_artifacts`. The history page showing "No analyses yet" was direct evidence of months of data loss. | 7 | done | #7 | `4415ad0` | `app/db.py`, `workers/analysis_worker.py`, `workers/cleanup.py`, `tests/unit/test_db_session.py` |
+| B-145 | `_get_service` constructed `AnalysisService(arq_pool=None)` — `start_analysis` silently no-op'd the worker enqueue while still flipping the row to `quality_gate_pending`. Worker had never run a real job. Added cached `_get_arq_pool()` factory mirroring the storage cache pattern. | 8 | done | #8 | `eb1a8c9` | `api/v1/analyses.py`, `tests/unit/test_arq_pool_factory.py` |
+| B-146a | `ThresholdConfig()` path resolution computed `/config/thresholds_v1.json` (filesystem root) inside Docker via `Path(__file__).parent.parent.parent` walking to `/`. Plus the Dockerfile didn't copy `config/` into the image at all. Robust `_resolve_threshold_path` priority list + bind-mount `./config:/app/config:ro` in compose. | 9a | done | #9 | `b427f17` | `app/config.py`, `docker-compose.prod.yml`, `tests/unit/test_config_path_resolution.py` |
+| B-146b | Status guard rejected `queued → failed` and `quality_gate_pending → failed` — early-pipeline crashes orphaned rows forever because the error handler itself crashed trying to mark them failed. Added the operational `→ failed` edges. | 9b | done | #9 | `b427f17` | `app/services/status.py`, `tests/unit/test_status_transitions.py` |
+| B-147 | `start_analysis` AND `run_cv_pipeline` both did `queued → quality_gate_pending` — whichever ran second hit a self-transition the guard correctly rejected. Removed the duplicate from the pipeline (`start_analysis` is the canonical owner). | 10 | done | #10 | `92ecc85` | `app/services/pipeline.py`, `tests/unit/test_pipeline.py` |
+| B-148a | `analysis.video_path` was set BEFORE flush, so `analysis.id` was None — DB stored literal string `'videos/None/squat-high-bar.mp4'` while signed upload URL used the post-flush real UUID. Fix: pre-generate UUID via `id=gen_uuid()` at construction. | 11a | done | #11 | `7076c4b` | `app/services/analysis.py`, `tests/unit/test_analysis_service.py` |
+| B-148b | Worker error handler crashed with `failed → failed` self-transition when re-running an already-failed row. Skip the transition when status is already `failed`. | 11b | done | #11 | `7076c4b` | `app/workers/analysis_worker.py`, `tests/unit/test_analysis_worker.py` |
+| B-149a | Linux `mediapipe` wheels (verified 0.10.9–0.10.33) have NEVER shipped the legacy `solutions` API. Migrated `pose_extraction.py` to `mediapipe.tasks.python.vision.PoseLandmarker`. Bake `pose_landmarker_heavy.task` into the Docker image at build via `curl`. 14 pose tests rewritten + 2 new for `_resolve_model_path`. | 12 | done | #12 | `fb1b12d` | `app/cv/pose_extraction.py`, `backend/Dockerfile`, `tests/unit/test_pose_extraction.py` |
+| B-149b | MediaPipe Tasks API `libmediapipe.so` links against `libGLESv2.so.2` and `libEGL.so.1` (verified via `ldd`). Dockerfile only had `libgl1`. Added `libgles2` + `libegl1`. | 12-cont | done | #13 | `491da90` | `backend/Dockerfile` |
+| B-149c | `quality_gates.video_file_check` shells out to `ffprobe`, catches `FileNotFoundError`, returns "Video file appears corrupt". Dockerfile didn't install `ffmpeg`. Added it. | 12-cont | done | #14 | `7bf8361` | `backend/Dockerfile` |
+
+**Architectural decisions documented**: ADR-027 (AsyncSession commit-on-success), ADR-028 (pre-generate UUIDs at construction), ADR-029 (MediaPipe Tasks API + model bake), ADR-030 (frontend REST PUT not TUS), ADR-031 (operational `→ failed` status edges), ADR-032 (tests must exercise real factories with source-patched third-party modules).
+
+---
+
 ## Phase 1 — Known Deferred Items (non-blocking)
 
 These are tracked as Phase 2 tech-debt items, not blockers.
@@ -206,4 +243,16 @@ Generated directly from SRS Phase 2 MUST filter. Activate `spelix-rag-engineer` 
 | P2-023 | Replace stream-then-reparse with instructor native streaming | M | — |
 | P2-024 | Remove dead compute_rep_confidence function | S | — |
 | P2-025 | Write ADR for Phase 1 coaching pattern deviation | S | — |
+
+### Phase 2 Cleanup (from Session 13 production hardening)
+
+| ID | Title | Size | Deps | Notes |
+|----|-------|------|------|-------|
+| P2-026 | Drop the doubled `videos/videos/` storage path prefix | S | — | `get_storage_path` returns `f"videos/{id}/{filename}"` and the bucket is also called `videos`, so signed URLs end up at `.../object/upload/sign/videos/videos/{id}/...`. Internally consistent (read + write use the same path), so NOT a functional bug — just an ugly leftover from before the bucket name was decided. Fix is one line in `storage.py` + a one-shot DB UPDATE / Storage MOVE to migrate any existing rows. Defer until prod has data we'd lose if migrated wrong. |
+| P2-027 | Replace `e2e/fixtures/squat-high-bar.mp4` with a real 720p side-view clip | S | — | Current fixture is 360p with body filling 8% of frame. The quality gate correctly rejects on `resolution` (need 720p) and `framing` (need ≥30%). Need a real 720p+ side-view squat clip where body fills ≥30% of frame so the **success path** (`processing → coaching → completed → results page → PDF`) can be verified end-to-end. Phone-recorded 10s clip is fine. |
+| P2-028 | Backend gotcha doc: "tests-mock-everything" anti-pattern with concrete examples | S | — | Add a dedicated section to `backend/CLAUDE.md` documenting the eight regression test patterns added in session 13 (`TestMakeStorageServiceFactory`, `TestGetDbCommit`, `TestMakeArqPoolFactory`, `TestGetServicePassesArqPool`, `TestThresholdConfigPathResolution`, `TestModelPathResolution`, `test_video_path_contains_real_uuid_not_string_none`, `test_error_handler_skips_transition_when_already_failed`) as canonical examples of "exercise the real factory with the third-party patched at its source". Reference ADR-032. |
+| P2-029 | CI factory-coverage smoke test | M | P2-028 | Add a CI step (or pytest marker) that asserts every factory function in `app/api/v1/*.py`, `app/services/*.py`, `app/workers/*.py` has at least ONE test that exercises the real factory path (not just the consumer). Linter or grep-based heuristic; doesn't need to be exhaustive. The goal is to make it impossible to add a new singleton/factory/cached-client without a regression test. |
+| P2-030 | Verify untested production subsystems via E2E once happy-path lands | S | P2-027 | After P2-027 lands a fixture that passes the quality gate, run the full E2E and surface any further dormant config bugs in: Anthropic coaching call (`ANTHROPIC_API_KEY`), OpenAI keyframe analysis (`OPENAI_API_KEY`, best-effort), WeasyPrint PDF generation (system fonts), Realtime status subscriptions, artifact upload to Storage. Each will surface as `error_message` on the row OR via the global exception handler from PR #4 if it fails. Probably zero changes needed but never been verified live. |
+| P2-031 | Add post-deploy smoke check to CI deploy workflow | S | — | Bake into the `Deploy to Production` job in `.github/workflows/ci.yml`: after `docker compose up -d --build` and the health check, run a one-shot Python script inside the backend container that constructs the storage factory, the arq pool, and the threshold config — exercising the real production env vars. Fail the deploy if any of them fail. Would have caught B-138/139/141/142/146a at deploy time instead of letting the user discover them via Playwright E2E. |
+| P2-032 | Tighten `AnalysisService.__init__` arq_pool typing | S | P2-031 | Currently `arq_pool: Any \| None = None` — defaulting to None was the dead-code parameter that hid Phase 0 B-145 for months. Tighten to `arq_pool: ArqRedis` (no default) once we're confident every call site passes a real pool. Existing test fixtures will need to construct a fake pool, but that's a one-time update and prevents the silent no-op forever. |
 
