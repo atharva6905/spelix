@@ -157,6 +157,8 @@ After any meaningful production feature lands on `main` and auto-deploys to **sp
 
 Authenticated flows use persistent cookies from the browse daemon. Never verify on localhost when prod is the question.
 
+**Test artifacts live in `e2e/`** — `e2e/fixtures/` holds video inputs (e.g. `squat-high-bar.mp4`) attached via `browser_file_upload` with an absolute path; `e2e/screenshots/` holds PNG captures from runs. The noisy auto-generated `.playwright-mcp/` folder (accessibility snapshots, console logs, network dumps) is gitignored — reference those files from handoff notes only. See `e2e/README.md`.
+
 ## Compaction Survival
 
 Context budget: keep below 60% capacity. Watch the statusline.
