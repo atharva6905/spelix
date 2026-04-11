@@ -49,7 +49,17 @@ def _make_landmarks(n: int = _NUM_FRAMES, visibility: float = 0.9) -> list[np.nd
     return [_make_landmark_frame(visibility) for _ in range(n)]
 
 
-def _make_analysis(status: str = "queued") -> Analysis:
+def _make_analysis(status: str = "quality_gate_pending") -> Analysis:
+    """Build a mock Analysis fixture for run_cv_pipeline tests.
+
+    Default status is ``quality_gate_pending`` because that's the status
+    the worker pipeline expects to find when it picks up a job —
+    ``AnalysisService.start_analysis`` performs the
+    ``queued → quality_gate_pending`` transition before enqueueing,
+    so the row is already at ``quality_gate_pending`` by the time
+    ``run_cv_pipeline`` runs. The pipeline's first transition is
+    ``quality_gate_pending → processing``.
+    """
     a = Analysis()
     a.id = _ANALYSIS_ID
     a.status = status
