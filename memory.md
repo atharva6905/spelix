@@ -1,28 +1,28 @@
 # memory.md — Agent Persistent State
 
 phase: 2
-task: post-storage-fix-config-block
-status: blocked
-last_modified: [backend/app/services/insights.py, backend/app/workers/cleanup.py, backend/tests/unit/test_insights.py, .claude/handoff.md, backend/app/api/v1/analyses.py]
+task: phase-2-rag-planning-unblocked
+status: ready
+last_modified: [backend/Dockerfile, backend/app/cv/pose_extraction.py, backend/app/services/analysis.py, backend/app/services/pipeline.py, backend/app/workers/analysis_worker.py]
 failing_tests: []
-blockers: [supabase_service_role_key_invalid_on_droplet]
+blockers: [test_fixture_quality_below_gate_thresholds]
 srs_deviations: []
-next_action: "USER ACTION: rotate SUPABASE_SERVICE_ROLE_KEY on DigitalOcean droplet (see .claude/handoff.md). Then re-run Playwright MCP E2E end-to-end on spelix.app — first time the worker pipeline will run on real Supabase Storage."
-session_count: 12
+next_action: "Replace e2e/fixtures/squat-high-bar.mp4 with a real 720p+ side-view squat video where body fills ≥30% of frame, then re-run E2E to verify the success path (processing → coaching → completed → results page → PDF). After that, start Phase 2 RAG planning."
+session_count: 13
 last_session: 2026-04-11
 
 ## decisions_since_plan
-- PR #3 (94dd0fa): wired StorageService factory + initial global exception handler
-- PR #4 (754393c): switched _make_storage_service + worker _build_supabase_client to acreate_client (async). Module-level cache. Enriched exception envelope to include detail.type + detail.message.
-- PR #5 (02fcc88): stripped tzinfo on InsightsService.global_insights cutoff and cleanup cron cutoff (asyncpg can't compare tz-aware to TIMESTAMP WITHOUT TIME ZONE column)
+- Direct SSH droplet debugging via spelix-droplet alias (~/.ssh/config + ~/.ssh/claude_spelix). Codified in CLAUDE.md "Droplet Debugging (SSH)" section.
+- Migrated pose_extraction.py from mediapipe.solutions.pose.Pose (legacy, not on Linux wheels) to mediapipe.tasks.python.vision.PoseLandmarker (modern, cross-platform). BlazePose Heavy .task file baked into Docker image at build via curl.
+- Bind-mount ./config:/app/config:ro in docker-compose.prod.yml — cleanest way to get config/ into the container without restructuring repo (config/ lives at repo root, above the backend/ build context).
+- start_analysis is the canonical owner of queued → quality_gate_pending transition. Pipeline picks up at quality_gate_pending and transitions to processing. (Was duplicated in both — removed from pipeline.)
+- Status table now allows queued → failed and quality_gate_pending → failed for operational failures (distinct from quality_gate_rejected which is reserved for actual user-content quality rejection by the predicate).
+- Pre-generate UUIDs at construction time (id=gen_uuid()) instead of relying on SQLAlchemy default=, because default= runs at INSERT time and any code that reads .id before flush sees None.
+- The doubled "videos/videos/{id}/" storage path is a known cosmetic issue (task #14) — internally consistent so not blocking, defer to a follow-up PR.
 
 ## notes
-- Phase 1 was "complete" but production upload had been broken since Phase 0 — ALL tests mocked the storage factory at the dependency-override level, so no test ever exercised the real factory path
-- Three-layer dormant bug uncovered this session via Playwright MCP E2E:
-  - Layer 1: factory returned client=None (PR #3)
-  - Layer 2: sync vs async supabase client (PR #4)
-  - Layer 3 (separate): tz-aware vs tz-naive datetime in /insights/global (PR #5)
-- 943 backend tests, 177 frontend tests, all green. Was 895 backend at session start.
-- Production POST /analyses now reaches Supabase Storage successfully but gets 403 "signature verification failed" — droplet's SUPABASE_SERVICE_ROLE_KEY is wrong
-- The enriched global exception handler is permanent — production crashes now show actual exception type+message in JSON envelope, no SSH required to debug
-- Next session: confirm droplet env fix, then run end-to-end E2E (will be FIRST true end-to-end run on prod ever — watch for further dormant bugs in worker pipeline: ARQ Redis URL, MediaPipe model download, Anthropic key, OpenAI key, threshold config, WeasyPrint fonts)
+- Session 13: cleared TWELVE layers of dormant Phase 0 bugs across PRs #3-#14. End-to-end worker pipeline now runs in production for the first time ever. Verified by manually re-enqueuing orphan analysis row 214bf593 — pipeline ran 100.48s, transitioned through states cleanly, produced structured quality_gate_result with real metrics from MediaPipe pose extraction.
+- Test fixture e2e/fixtures/squat-high-bar.mp4 fails resolution (360p < 720p) and framing (8% < 30%) gates. This is a fixture quality issue, not a pipeline bug. Need a real 720p+ side-view squat video to test the full success path.
+- Subsystems NOT yet exercised in production (because the orphan row got rejected before reaching them): Anthropic coaching call, OpenAI keyframe analysis, WeasyPrint PDF, Realtime status subscriptions, artifact upload to Storage. Each will surface as error_message on the row OR via the global exception handler if it fails.
+- 960 backend tests, 178 frontend tests, ruff/pyright/tsc clean. CI green on all 12 PRs.
+- Main key learning: mocking entire third-party modules (mediapipe, supabase, the repo layer) masked dormant bugs for months. Future tests should exercise real construction paths with the third-party modules patched at their source.
