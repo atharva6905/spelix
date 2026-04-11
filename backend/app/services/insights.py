@@ -99,7 +99,14 @@ class InsightsService:
             most_common_warning: str | None     — last 30 days
             highest_variance_exercise: str | None
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        # The ``analyses.created_at`` column is ``TIMESTAMP WITHOUT TIME ZONE``,
+        # so the cutoff must be tz-naive — asyncpg refuses to compare a
+        # tz-aware datetime against a naive column and raises ``DataError:
+        # can't subtract offset-naive and offset-aware datetimes``. We compute
+        # "now in UTC" then strip tzinfo so the wall-clock value is correct
+        # but the type matches the column. Regression test:
+        # ``test_insights.py::test_cutoff_passed_to_repo_is_timezone_naive``.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).replace(tzinfo=None)
         analyses = await self._repo.get_completed_since(user_id=user_id, since=cutoff)
 
         # Most common warning (30 days)

@@ -210,6 +210,39 @@ class TestGlobalInsights:
         assert result["most_common_warning"] is None
         assert result["highest_variance_exercise"] is None
 
+    @pytest.mark.asyncio
+    async def test_cutoff_passed_to_repo_is_timezone_naive(self):
+        """The cutoff datetime passed to ``get_completed_since`` MUST be naive.
+
+        Regression test for the production /insights/global 500: the
+        ``analyses.created_at`` column is ``TIMESTAMP WITHOUT TIME ZONE``,
+        and asyncpg refuses to compare it against a tz-aware datetime
+        (raises ``DataError: can't subtract offset-naive and offset-aware
+        datetimes``). The original code passed
+        ``datetime.now(timezone.utc) - timedelta(days=30)`` which is
+        tz-aware. Confirmed via prod E2E + the enriched global exception
+        envelope after PR #4 merged.
+        """
+        from app.services.insights import InsightsService
+
+        repo = _make_insights_repo(completed_analyses=[])
+        svc = InsightsService(analysis_repo=repo)
+
+        await svc.global_insights(_USER_ID)
+
+        repo.get_completed_since.assert_called_once()
+        _, kwargs = repo.get_completed_since.call_args
+        cutoff = kwargs.get("since") or repo.get_completed_since.call_args.args[1]
+        # The crucial assertion — must be naive so asyncpg accepts it.
+        assert cutoff.tzinfo is None, (
+            f"cutoff must be tz-naive for asyncpg compatibility, got tzinfo={cutoff.tzinfo}"
+        )
+        # Sanity check: the cutoff is still ~30 days ago (in UTC wall-clock).
+        # We compute "now in UTC then strip tzinfo" so the comparison stays naive.
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        delta = now_naive - cutoff
+        assert timedelta(days=29) < delta < timedelta(days=31)
+
 
 # ---------------------------------------------------------------------------
 # API endpoint tests
