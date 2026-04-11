@@ -16,14 +16,23 @@ COPY . .
 # Stage 2: runtime — lean image with only what's needed to run
 FROM python:3.12-slim AS runtime
 
-# System deps for MediaPipe, OpenCV (headless), WeasyPrint.
-# libgles2 + libegl1 are required by the MediaPipe Tasks API
-# (mediapipe/tasks/c/libmediapipe.so links against libGLESv2.so.2 and
-# libEGL.so.1 — verified via `ldd`). The legacy ``mediapipe.solutions``
-# API didn't need these because it ran a different code path, but the
-# Tasks API loads a C++ shared library that uses OpenGL ES for GPU
-# delegate dispatch. Without these, ``PoseLandmarker.create_from_options``
-# raises ``OSError: libGLESv2.so.2: cannot open shared object file``.
+# System deps:
+#   - libgl1: OpenCV headless rendering
+#   - libgles2 + libegl1: MediaPipe Tasks API native deps (libmediapipe.so
+#     links against libGLESv2.so.2 and libEGL.so.1 — verified via `ldd`)
+#   - libglib2.0-0, libsm6, libxext6, libxrender1: OpenCV / fontconfig
+#     transitive deps
+#   - libfontconfig1, libpango-1.0-0, libpangocairo-1.0-0,
+#     libgdk-pixbuf-2.0-0, libcairo2, fonts-liberation: WeasyPrint PDF
+#     rendering
+#   - ffmpeg: provides ``ffprobe``, used by
+#     ``app/cv/quality_gates.py::_check_video_file`` to read video
+#     duration. Without ffprobe the gate raises FileNotFoundError and
+#     returns "Video file appears corrupt or unsupported" — which made
+#     the entire pipeline silently fail at quality_gate_rejected even
+#     for perfectly valid videos.
+#   - curl: used at build time to download the BlazePose model file
+#     and at runtime for the healthcheck.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libgles2 \
@@ -38,6 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdk-pixbuf-2.0-0 \
     libcairo2 \
     fonts-liberation \
+    ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
