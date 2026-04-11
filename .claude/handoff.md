@@ -41,9 +41,35 @@ After PR #4 merged + deployed, the production `POST /api/v1/analyses` response i
 }
 ```
 
-**Translation:** the backend is now successfully calling Supabase Storage, but Supabase itself rejects the JWT with `403 signature verification failed`. The async client fix worked. The remaining failure is a **production environment misconfiguration**:
+**Translation:** the backend is now successfully calling Supabase Storage, but Supabase itself rejects the JWT with `403 signature verification failed`. The async client fix worked. The remaining failure is a **production environment misconfiguration — diagnosed end-of-session**:
 
-**The `SUPABASE_SERVICE_ROLE_KEY` env var on the DigitalOcean droplet is wrong, stale, or doesn't match `SUPABASE_URL`.** Most likely: the service role key was rotated in the Supabase Dashboard and the droplet's env file was never updated. Or `SUPABASE_URL` points at a different Supabase project than the key was issued for.
+**The `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_URL` on the droplet point to two DIFFERENT Supabase projects.** Decoded from the actual running container by user end-of-session:
+
+- `SUPABASE_URL` host: `xvgwjpumswndke**xituxc**.supabase.co` (project Y)
+- `SUPABASE_SERVICE_ROLE_KEY` JWT `ref` claim: `xvgwjpumswndke**ltuxc**` (project X)
+
+The 14-char prefix `xvgwjpumswndke` is shared but everything from position 15 diverges. These are two distinct projects, almost certainly the result of an incomplete migration where some env vars were updated to project Y but `SUPABASE_SERVICE_ROLE_KEY` was forgotten and still references project X.
+
+**Critical evidence chain showing project Y is canonical:**
+- Login on spelix.app works → frontend's `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (Vercel env) point to project Y, otherwise the user couldn't authenticate
+- `get_current_user` in `backend/app/api/deps.py:62` validates the user JWT against JWKS fetched from `{SUPABASE_URL}/auth/v1/.well-known/jwks.json` — login succeeds, so backend `SUPABASE_URL` AND `SUPABASE_JWT_SECRET` are project Y
+- Only `SUPABASE_SERVICE_ROLE_KEY` is mismatched (project X)
+
+**MUST verify before fix: `DATABASE_URL`.** This contains a `postgres.<PROJECT_REF>` username portion that determines which Postgres database the backend reads/writes to. If `DATABASE_URL` points to project X (matches the bad key) instead of project Y (matches the URL), the backend has been silently writing data to the wrong database — there's no FK to `auth.users` so this fails silently. The history page rendering "No analyses yet" is consistent with EITHER project, since both could be empty for this user. Run on droplet:
+
+```bash
+docker compose -f docker-compose.prod.yml exec backend python -c "
+import os, urllib.parse
+url = os.environ['DATABASE_URL']
+parsed = urllib.parse.urlparse(url)
+user = parsed.username or ''
+ref = user.split('.', 1)[1] if '.' in user else '(no ref)'
+print('DATABASE_URL ref:', ref)
+print('SUPABASE_URL:    ', os.environ.get('SUPABASE_URL'))
+"
+```
+
+Expected: `DATABASE_URL ref: xvgwjpumswndkexituxc` (matching SUPABASE_URL). If it shows `xvgwjpumswndkeltuxc` instead, **stop and figure out where real data lives** before any env change.
 
 ### `/api/v1/insights/global` — FIXED on next deploy
 
@@ -55,18 +81,46 @@ PR #5 fixes this. The enriched exception envelope (PR #4) revealed the asyncpg `
 
 ## Blockers
 
-### CRITICAL — User action required: rotate `SUPABASE_SERVICE_ROLE_KEY` on droplet
+### CRITICAL — User action required: reconcile project refs across all 8 Supabase env vars
 
-**This cannot be done from the Claude session — needs droplet shell access.**
+**This cannot be done from the Claude session — needs droplet shell access AND Vercel dashboard access.**
 
-Steps:
-1. Open the Supabase Dashboard → **Project Settings → API**
-2. Confirm the project URL matches what's in the droplet's `SUPABASE_URL` env var
-3. Copy the current `service_role` secret (NOT the anon/publishable key)
-4. SSH to the DO droplet
-5. Update `/etc/spelix/api.env` (or wherever the env file lives) with the new `SUPABASE_SERVICE_ROLE_KEY`
-6. Restart the FastAPI service: `sudo systemctl restart spelix-api` (or whatever the service name is — check Caddy/systemd config)
-7. Verify with curl from a local terminal:
+The droplet uses docker compose with `env_file: - .env.prod` (see `docker-compose.prod.yml`). The CI deploy job in `.github/workflows/ci.yml:154-177` runs `cd /home/deploy/spelix && docker compose -f docker-compose.prod.yml up -d --build` over SSH. Env vars are read at container START time from `/home/deploy/spelix/.env.prod`. The filename is correct — the local `.env` vs droplet `.env.prod` discrepancy is BY DESIGN (local dev runs natively without docker, prod runs via docker compose). Filename was investigated and ruled out as a cause.
+
+**Every one of these 8 env vars must reference the SAME Supabase project ref:**
+
+Backend (`/home/deploy/spelix/.env.prod`):
+1. `SUPABASE_URL` — currently project Y (`xvgwjpumswndkexituxc`)
+2. `SUPABASE_SERVICE_ROLE_KEY` — currently project X (`xvgwjpumswndkeltuxc`) ← **WRONG**
+3. `SUPABASE_JWT_SECRET` — must be project Y's JWT secret (login works, so probably correct)
+4. `SUPABASE_JWT_ISSUER` — optional override; if set, must be `https://<ref>.supabase.co/auth/v1`. Safer left unset (derived from `SUPABASE_URL` in `deps.py:30-39`)
+5. `DATABASE_URL` — username portion `postgres.<ref>` must match. **MUST VERIFY** (see diagnostic command above)
+6. `SUPABASE_STORAGE_BUCKET` — defaults to `videos`; bucket must exist in canonical project's Storage tab
+
+Frontend (Vercel project env, NOT in repo):
+7. `VITE_SUPABASE_URL` — must be project Y (login works, so already correct)
+8. `VITE_SUPABASE_ANON_KEY` — JWT `ref` claim must match (login works, so already correct)
+
+**Fix steps once `DATABASE_URL` is verified to match `SUPABASE_URL` (project Y):**
+1. Open Supabase Dashboard → Project Y → Project Settings → API → copy current `service_role` secret (NOT `anon`)
+2. SSH to droplet, edit `/home/deploy/spelix/.env.prod`, update `SUPABASE_SERVICE_ROLE_KEY=` with the project Y service_role JWT
+3. Watch out for: surrounding `"` quotes (compose env_file does NOT strip them — value becomes literally `"eyJ..."`), trailing CRLF (use `cat -A` to check), line continuations (compose doesn't support them — JWTs must be on a single line)
+4. Bounce containers to force re-read of env file:
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d --force-recreate backend worker
+   ```
+5. Verify the running container has the right key:
+   ```bash
+   docker compose -f docker-compose.prod.yml exec backend python -c "
+   import os,base64,json
+   k=os.environ['SUPABASE_SERVICE_ROLE_KEY']
+   p=k.split('.')[1]; p+='='*(-len(p)%4)
+   d=json.loads(base64.urlsafe_b64decode(p))
+   print('role:',d.get('role'),'ref:',d.get('ref'))
+   "
+   ```
+   Must show `role: service_role` and `ref: xvgwjpumswndkexituxc` (matching `SUPABASE_URL`)
+6. Then re-test with curl:
    ```bash
    JWT=<a real Supabase user JWT — easiest: open spelix.app in a browser, devtools → Application → Local Storage → copy access_token>
    curl -X POST https://api.spelix.app/api/v1/analyses \
