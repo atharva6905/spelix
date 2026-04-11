@@ -6,6 +6,8 @@ React 19, Vite 8, TypeScript strict mode, Tailwind CSS 4, shadcn/ui, Recharts, R
 
 Test counts as of Phase 1 gate: **177 passing, 0 failures.**
 
+**Frontend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. The frontend auto-deploys to spelix.app on merge to main. Any change that touches `ResultsPage`, `UploadPage`, `AnalysisStatusPage`, `useAnalysisStatus`, `useAnalysisDetail`, the coaching renderer, or `api/analyses.ts` is a meaningful checkpoint requiring: (1) feature branch, (2) PR with green CI, (3) `gh pr merge --squash --delete-branch`, (4) Playwright MCP E2E verification against spelix.app. Vitest green is not enough — the component might mount fine with mocked hooks but crash against real backend response shapes (a Phase 1 lesson: MagicMock + Pydantic schema drift caused 500s that unit tests never caught).
+
 ## Stack Details
 
 - **React 19** + Vite 8 SPA. Not Next.js. No App Router. No server components. No `"use client"` directive. (ADR-026)

@@ -6,6 +6,8 @@ Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, ARQ + Redis, MediaPipe Blaz
 
 Test counts as of Phase 1 gate: **895 passing, 2 skipped, 0 failures, 91% coverage.** Current alembic head: `003_add_detection_result`.
 
+**Backend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. Any backend change that touches the analysis pipeline, coaching, upload endpoint, auth, or a schema migration is a meaningful checkpoint that requires: (1) a feature branch, (2) a PR with green CI, (3) `gh pr merge --squash --delete-branch`, (4) Playwright MCP E2E verification against spelix.app after the deploy settles. Unit tests green is not enough — prod has a different Supabase project and different env vars, and production-only bugs (PgBouncer asyncpg, JWT issuer, CORS) have burned us before.
+
 ## Directory Layout
 
 ```
