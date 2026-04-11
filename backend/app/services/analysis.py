@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from app.models.analysis import Analysis
+from app.models.base import gen_uuid
 from app.repositories.analysis import AnalysisRepository
 from app.services.status import InvalidTransition, transition
 from app.services.storage import StorageService, get_storage_path
@@ -163,16 +164,25 @@ class AnalysisService:
         initial_status = transition(None, "queued")
 
         # --- Build the ORM object ---
+        # IMPORTANT: pre-generate the UUID at construction time, NOT via the
+        # ``default=gen_uuid`` model default. SQLAlchemy ``default=`` runs at
+        # INSERT/flush time, NOT at object construction — so if we relied on
+        # the model default, ``analysis.id`` would still be ``None`` here and
+        # ``get_storage_path(analysis.id, filename)`` would format the literal
+        # string "None" into the path. The DB row would store
+        # ``"videos/None/<filename>"`` while the signed upload URL we hand
+        # back to the browser would use the post-flush real UUID, leaving
+        # the worker's later download attempt 404'ing on a path that doesn't
+        # exist. Regression test:
+        # ``test_analysis_service.py::TestCreateAnalysis::test_video_path_contains_real_uuid_not_string_none``.
         analysis = Analysis(
+            id=gen_uuid(),
             user_id=user_id,
             status=initial_status,
             exercise_type=exercise_type,
             exercise_variant=exercise_variant,
         )
 
-        # We need the ID to build the storage path, but the ORM ID is
-        # generated client-side (gen_uuid default). It is available on the
-        # object before the flush because gen_uuid runs at construction time.
         analysis.video_path = get_storage_path(analysis.id, filename)
 
         # --- Persist ---

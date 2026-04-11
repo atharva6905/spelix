@@ -475,8 +475,17 @@ async def process_analysis(ctx: dict[str, Any], analysis_id: uuid.UUID) -> None:
             analysis.error_message = str(exc)
             analysis.retry_count = (analysis.retry_count or 0) + 1
 
-            # Force status → failed for any non-terminal state.
-            if analysis.status not in _TERMINAL_STATES:
+            # Force status → failed unless the row is already in a state
+            # that can't legally transition to ``failed``:
+            #   - ``completed`` / ``quality_gate_rejected``: terminal soft
+            #     success states; idempotency check at the top should have
+            #     caught these, but defend against re-entry
+            #   - ``failed``: already there, calling
+            #     ``transition('failed', 'failed')`` would self-transition
+            #     and the guard would reject it. We still need to update
+            #     error_message + retry_count for the new failure context,
+            #     so don't skip the whole branch — just skip the transition.
+            if analysis.status not in _TERMINAL_STATES and analysis.status != "failed":
                 analysis.status = transition(analysis.status, "failed")
 
             await repo.update(analysis)
