@@ -3,15 +3,21 @@ Unit tests for pose_extraction.py (B-015).
 
 Requirements: FR-CVPL-01, FR-CVPL-02, FR-CVPL-12, FR-CVPL-13.
 
-All tests use synthetic data — no real video file or MediaPipe installation required.
-cv2.VideoCapture and mediapipe are fully mocked via sys.modules.
+All tests use synthetic data — no real video file, no real MediaPipe model
+file. ``cv2.VideoCapture`` and the MediaPipe Tasks API
+(``PoseLandmarker``, ``PoseLandmarkerOptions``, ``BaseOptions``,
+``RunningMode``, ``mp.Image``) are mocked via ``unittest.mock.patch``
+targeting the deferred imports inside ``extract_landmarks``.
+
+Migration note: this test file was rewritten when ``pose_extraction.py``
+moved from the legacy ``mediapipe.solutions.pose.Pose`` API (which
+doesn't exist on Linux x86_64 wheels) to the modern
+``mediapipe.tasks.python.vision.PoseLandmarker`` API.
 """
 
 from __future__ import annotations
 
-import importlib
 import math
-import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -27,7 +33,7 @@ def _sigmoid(x: float) -> float:
 
 
 def _make_landmark(x=0.5, y=0.5, z=0.0, visibility=0.9, presence=0.9):
-    """Create a mock MediaPipe landmark object."""
+    """Create a mock MediaPipe NormalizedLandmark object."""
     lm = MagicMock()
     lm.x = x
     lm.y = y
@@ -37,18 +43,15 @@ def _make_landmark(x=0.5, y=0.5, z=0.0, visibility=0.9, presence=0.9):
     return lm
 
 
-def _make_pose_landmarks(
+def _make_pose_landmarks_list(
     visibility=0.9,
     presence=0.9,
     x=0.5,
     y=0.5,
     z=0.0,
 ):
-    """Create a mock MediaPipe pose_landmarks with 33 landmarks."""
-    landmarks = MagicMock()
-    lm_list = [_make_landmark(x, y, z, visibility, presence) for _ in range(33)]
-    landmarks.landmark = lm_list
-    return landmarks
+    """Create the Tasks API pose_landmarks shape: list of poses, each a list of 33 landmarks."""
+    return [[_make_landmark(x, y, z, visibility, presence) for _ in range(33)]]
 
 
 def _make_mock_cap(num_frames=2, fps=30.0, width=1280.0, height=720.0):
@@ -69,31 +72,94 @@ def _make_mock_cap(num_frames=2, fps=30.0, width=1280.0, height=720.0):
     return cap
 
 
-def _make_mock_pose(pose_landmarks):
-    """Create a mock mediapipe Pose context manager."""
-    pose = MagicMock()
-    result = MagicMock()
-    result.pose_landmarks = pose_landmarks
-    pose.__enter__ = MagicMock(return_value=pose)
-    pose.__exit__ = MagicMock(return_value=False)
-    pose.process.return_value = result
-    return pose
+def _make_mock_landmarker(detect_results: list):
+    """Create a mock PoseLandmarker context manager.
+
+    ``detect_results`` is a list — one entry per call to ``detect()``.
+    Each entry is the value to assign to the returned object's
+    ``pose_landmarks`` attribute (the Tasks API's per-frame result shape:
+    list-of-poses, each pose a list of 33 landmarks; or empty list if
+    no pose detected).
+    """
+    landmarker = MagicMock()
+    landmarker.__enter__ = MagicMock(return_value=landmarker)
+    landmarker.__exit__ = MagicMock(return_value=False)
+
+    detect_call_results = []
+    for r in detect_results:
+        result_obj = MagicMock()
+        result_obj.pose_landmarks = r
+        detect_call_results.append(result_obj)
+
+    landmarker.detect.side_effect = detect_call_results
+    return landmarker
 
 
-def _run_extract(mock_cap, mock_pose_cls, video_path="/fake/video.mp4"):
-    """Import and run extract_landmarks with mocked cv2 and mediapipe."""
-    # Create a mock mediapipe module hierarchy
-    mock_mp = MagicMock()
-    mock_mp.solutions.pose.Pose = mock_pose_cls
+# Capture-and-return helper so tests can assert on the constructor args.
+_constructor_args: dict = {}
 
-    with patch("cv2.VideoCapture", return_value=mock_cap):
-        with patch.dict(sys.modules, {"mediapipe": mock_mp}):
-            # Force reimport to pick up the patched mediapipe
-            if "app.cv.pose_extraction" in sys.modules:
-                mod = importlib.reload(sys.modules["app.cv.pose_extraction"])
-            else:
-                mod = importlib.import_module("app.cv.pose_extraction")
-            return mod.extract_landmarks(video_path)
+
+def _run_extract(
+    mock_cap,
+    detect_results: list,
+    video_path: str = "/fake/video.mp4",
+):
+    """Import and run ``extract_landmarks`` with cv2 + Tasks API mocked.
+
+    Patches the deferred imports inside ``extract_landmarks``:
+        ``mediapipe.tasks.python.BaseOptions``
+        ``mediapipe.tasks.python.vision.PoseLandmarker``
+        ``mediapipe.tasks.python.vision.PoseLandmarkerOptions``
+        ``mediapipe.tasks.python.vision.RunningMode``
+        ``mediapipe.Image`` and ``mediapipe.ImageFormat``
+
+    Also patches ``_resolve_model_path`` so the function doesn't
+    actually need a real .task file on disk.
+    """
+    _constructor_args.clear()
+
+    landmarker = _make_mock_landmarker(detect_results)
+    landmarker_cls = MagicMock(return_value=landmarker)
+    landmarker_cls.create_from_options = MagicMock(return_value=landmarker)
+
+    def options_capture(**kwargs):
+        _constructor_args.update(kwargs)
+        return MagicMock()
+
+    options_cls = MagicMock(side_effect=options_capture)
+
+    base_options_cls = MagicMock()
+    running_mode = MagicMock()
+    running_mode.IMAGE = "IMAGE"
+
+    mp_image_cls = MagicMock()
+    mp_image_format = MagicMock()
+    mp_image_format.SRGB = "SRGB"
+
+    with patch("cv2.VideoCapture", return_value=mock_cap), patch(
+        "app.cv.pose_extraction._resolve_model_path",
+        return_value="/fake/pose_landmarker_heavy.task",
+    ), patch.dict(
+        "sys.modules",
+        {},
+    ):
+        # Patch the deferred Tasks API imports at their module of origin so
+        # ``from mediapipe.tasks.python.vision import PoseLandmarker, ...``
+        # picks up the mocks.
+        with patch("mediapipe.tasks.python.vision.PoseLandmarker", landmarker_cls), patch(
+            "mediapipe.tasks.python.vision.PoseLandmarkerOptions", options_cls
+        ), patch(
+            "mediapipe.tasks.python.vision.RunningMode", running_mode
+        ), patch(
+            "mediapipe.tasks.python.BaseOptions", base_options_cls
+        ), patch(
+            "mediapipe.Image", mp_image_cls
+        ), patch(
+            "mediapipe.ImageFormat", mp_image_format
+        ):
+            from app.cv.pose_extraction import extract_landmarks
+
+            return extract_landmarks(video_path)
 
 
 # ---------------------------------------------------------------------------
@@ -106,30 +172,25 @@ class TestExtractLandmarksShape:
 
     def test_returns_tuple_of_four(self):
         cap = _make_mock_cap(num_frames=2)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        result = _run_extract(cap, mock_cls)
+        result = _run_extract(cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()])
 
         assert isinstance(result, tuple)
         assert len(result) == 4
 
     def test_landmarks_per_frame_is_list(self):
         cap = _make_mock_cap(num_frames=2)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, fps, width, height = _run_extract(cap, mock_cls)
+        landmarks_per_frame, fps, width, height = _run_extract(
+            cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()]
+        )
 
         assert isinstance(landmarks_per_frame, list)
         assert len(landmarks_per_frame) == 2
 
     def test_each_frame_array_shape_33_5(self):
         cap = _make_mock_cap(num_frames=2)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()]
+        )
 
         for arr in landmarks_per_frame:
             assert isinstance(arr, np.ndarray)
@@ -137,10 +198,7 @@ class TestExtractLandmarksShape:
 
     def test_fps_width_height_extracted_correctly(self):
         cap = _make_mock_cap(num_frames=1, fps=30.0, width=1280.0, height=720.0)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        _, fps, width, height = _run_extract(cap, mock_cls)
+        _, fps, width, height = _run_extract(cap, [_make_pose_landmarks_list()])
 
         assert fps == 30.0
         assert width == 1280
@@ -148,10 +206,7 @@ class TestExtractLandmarksShape:
 
     def test_width_height_are_ints(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        _, fps, width, height = _run_extract(cap, mock_cls)
+        _, fps, width, height = _run_extract(cap, [_make_pose_landmarks_list()])
 
         assert isinstance(width, int)
         assert isinstance(height, int)
@@ -162,10 +217,9 @@ class TestSigmoidGuard:
 
     def test_sigmoid_applied_to_visibility_outside_range(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks(visibility=2.0, presence=0.9))
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(visibility=2.0, presence=0.9)]
+        )
 
         frame_arr = landmarks_per_frame[0]
         expected = _sigmoid(2.0)
@@ -174,10 +228,9 @@ class TestSigmoidGuard:
 
     def test_sigmoid_applied_to_presence_outside_range(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks(visibility=0.9, presence=-3.0))
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(visibility=0.9, presence=-3.0)]
+        )
 
         frame_arr = landmarks_per_frame[0]
         expected = _sigmoid(-3.0)
@@ -186,10 +239,9 @@ class TestSigmoidGuard:
 
     def test_sigmoid_not_applied_when_value_in_range(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks(visibility=0.7, presence=0.6))
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(visibility=0.7, presence=0.6)]
+        )
 
         frame_arr = landmarks_per_frame[0]
         for i in range(33):
@@ -198,10 +250,9 @@ class TestSigmoidGuard:
 
     def test_boundary_values_zero_and_one_not_sigmoided(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks(visibility=0.0, presence=1.0))
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(visibility=0.0, presence=1.0)]
+        )
 
         frame_arr = landmarks_per_frame[0]
         for i in range(33):
@@ -210,14 +261,15 @@ class TestSigmoidGuard:
 
 
 class TestNoLandmarksDetected:
-    """Verify zero-filled array when no pose detected."""
+    """Verify zero-filled array when no pose detected.
+
+    The Tasks API returns ``result.pose_landmarks = []`` (empty list) when
+    no pose is detected, NOT ``None`` like the legacy ``solutions`` API.
+    """
 
     def test_zero_array_returned_for_frames_with_no_landmarks(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(None)  # No landmarks
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
+        landmarks_per_frame, _, _, _ = _run_extract(cap, [[]])  # empty pose list
 
         assert len(landmarks_per_frame) == 1
         arr = landmarks_per_frame[0]
@@ -227,18 +279,13 @@ class TestNoLandmarksDetected:
     def test_mixed_frames_detection_and_no_detection(self):
         cap = _make_mock_cap(num_frames=2, fps=25.0, width=640.0, height=480.0)
 
-        # Pose returns landmarks for first call, None for second
-        pose = MagicMock()
-        result_ok = MagicMock()
-        result_ok.pose_landmarks = _make_pose_landmarks(visibility=0.8, presence=0.8)
-        result_none = MagicMock()
-        result_none.pose_landmarks = None
-        pose.__enter__ = MagicMock(return_value=pose)
-        pose.__exit__ = MagicMock(return_value=False)
-        pose.process.side_effect = [result_ok, result_none]
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, fps, width, height = _run_extract(cap, mock_cls)
+        landmarks_per_frame, fps, width, height = _run_extract(
+            cap,
+            [
+                _make_pose_landmarks_list(visibility=0.8, presence=0.8),  # detected
+                [],  # no pose
+            ],
+        )
 
         assert len(landmarks_per_frame) == 2
         assert not np.all(landmarks_per_frame[0] == 0.0)
@@ -246,22 +293,31 @@ class TestNoLandmarksDetected:
 
 
 class TestMediaPipeConfig:
-    """Verify exact MediaPipe configuration is used."""
+    """Verify exact MediaPipe Tasks API configuration is used.
 
-    def test_pose_initialized_with_exact_config(self):
+    The legacy ``solutions.pose.Pose`` ctor took ``model_complexity``,
+    ``static_image_mode``, ``min_detection_confidence``,
+    ``min_tracking_confidence``, ``num_threads``. The Tasks API uses
+    ``base_options`` (with the model file path encoding the BlazePose
+    Heavy choice), ``running_mode=IMAGE`` (equivalent to
+    ``static_image_mode=True``), and three confidence thresholds.
+    """
+
+    def test_pose_initialized_with_correct_tasks_config(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
+        _run_extract(cap, [_make_pose_landmarks_list()])
 
-        _run_extract(cap, mock_cls)
-
-        mock_cls.assert_called_once_with(
-            model_complexity=2,
-            static_image_mode=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-            num_threads=1,
-        )
+        # The PoseLandmarkerOptions constructor should have been called
+        # with the canonical Spelix config.
+        assert _constructor_args["running_mode"] == "IMAGE"
+        assert _constructor_args["num_poses"] == 1
+        assert _constructor_args["min_pose_detection_confidence"] == 0.5
+        assert _constructor_args["min_pose_presence_confidence"] == 0.5
+        assert _constructor_args["min_tracking_confidence"] == 0.5
+        # base_options should have been constructed (we don't introspect
+        # its model_asset_path here because that's covered by the
+        # _resolve_model_path tests below).
+        assert _constructor_args["base_options"] is not None
 
 
 class TestLandmarkColumnOrdering:
@@ -269,12 +325,14 @@ class TestLandmarkColumnOrdering:
 
     def test_landmark_columns_order(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(
-            _make_pose_landmarks(x=0.1, y=0.2, z=0.3, visibility=0.4, presence=0.5)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap,
+            [
+                _make_pose_landmarks_list(
+                    x=0.1, y=0.2, z=0.3, visibility=0.4, presence=0.5
+                )
+            ],
         )
-        mock_cls = MagicMock(return_value=pose)
-
-        landmarks_per_frame, _, _, _ = _run_extract(cap, mock_cls)
 
         arr = landmarks_per_frame[0]
         assert abs(arr[0, 0] - 0.1) < 1e-6  # x
@@ -289,9 +347,46 @@ class TestVideoCapRelease:
 
     def test_cap_released_on_success(self):
         cap = _make_mock_cap(num_frames=1)
-        pose = _make_mock_pose(_make_pose_landmarks())
-        mock_cls = MagicMock(return_value=pose)
-
-        _run_extract(cap, mock_cls)
+        _run_extract(cap, [_make_pose_landmarks_list()])
 
         cap.release.assert_called_once()
+
+
+class TestModelPathResolution:
+    """Verify _resolve_model_path candidate fallback + actionable errors.
+
+    Mirrors the pattern in app/config.py::_resolve_threshold_path which
+    has its own dedicated test file (test_config_path_resolution.py).
+    """
+
+    def test_env_var_override(self, monkeypatch):
+        monkeypatch.setenv("POSE_LANDMARKER_MODEL_PATH", "/custom/model.task")
+        from app.cv.pose_extraction import _resolve_model_path
+
+        assert _resolve_model_path() == "/custom/model.task"
+
+    def test_raises_with_actionable_error_when_no_candidate_exists(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.delenv("POSE_LANDMARKER_MODEL_PATH", raising=False)
+        # chdir to an empty tmp dir so Path.cwd() / "models" / ... misses,
+        # and patch _DEFAULT_MODEL_PATH to a non-existent path.
+        monkeypatch.chdir(tmp_path)
+
+        from app.cv import pose_extraction as mod
+
+        monkeypatch.setattr(
+            mod, "_DEFAULT_MODEL_PATH", str(tmp_path / "nope" / "pose.task")
+        )
+
+        # The local-dev candidate uses Path(__file__).parent.parent.parent.parent
+        # which resolves to the real spelix repo root — that file does NOT
+        # exist locally yet (the model is only baked into the Docker image),
+        # so all three candidates should miss.
+        import pytest
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            mod._resolve_model_path()
+        msg = str(exc_info.value)
+        assert "pose_landmarker_heavy.task" in msg
+        assert "POSE_LANDMARKER_MODEL_PATH" in msg

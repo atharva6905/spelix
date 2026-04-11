@@ -44,6 +44,15 @@ RUN uv sync --frozen --no-dev
 # Copy application source only (no tests, no scripts — excluded via .dockerignore)
 COPY app/ ./app/
 
+# Download MediaPipe BlazePose Heavy task model. The Linux x86_64 wheel
+# for mediapipe 0.10.x does NOT ship the legacy ``solutions`` API, so
+# pose extraction uses the Tasks API which requires this .task file.
+# See app/cv/pose_extraction.py and the related PR for context.
+RUN mkdir -p /app/models && \
+    curl -fsSL \
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task" \
+        -o /app/models/pose_landmarker_heavy.task
+
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix
 
