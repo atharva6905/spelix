@@ -100,13 +100,22 @@ async def cleanup_expired_artifacts(ctx: dict) -> int:  # noqa: ARG001
             try:
                 cleaned = await _clean_analysis(analysis, storage)
                 if cleaned:
-                    await session.flush()
+                    # Commit per-analysis so a later failure cannot roll back
+                    # an already-completed cleanup. Same root cause as the
+                    # get_db() bug — without commit, AsyncSession's
+                    # autocommit=False default rolls back at session close
+                    # and every Storage delete becomes orphaned (file gone
+                    # but path column still set in DB).
+                    await session.commit()
                     cleaned_count += 1
                     logger.info(
                         "cleanup_expired_artifacts: cleaned analysis %s",
                         analysis.id,
                     )
             except Exception:
+                # Roll back the in-flight per-analysis txn so the next
+                # iteration starts clean.
+                await session.rollback()
                 logger.exception(
                     "cleanup_expired_artifacts: failed to clean analysis %s — skipping",
                     analysis.id,
