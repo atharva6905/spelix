@@ -328,3 +328,18 @@ Runs in ARQ worker (not FastAPI). Reject: `mean(visibility[frames=0:5][landmarks
 
 ### TUS upload
 Browser uploads directly to Supabase Storage signed URL. FastAPI never handles video bytes. FFprobe codec check runs in worker.
+
+### MediaPipe fixture: ALL 5 columns required
+Every synthetic landmark fixture must populate all 5 columns [x, y, z, visibility, presence]. The Tier 1 formula is sigmoid(visibility) × sigmoid(presence). If presence (column index 4) is left at zero, sigmoid(0) = 0.5 collapses the result regardless of visibility — producing a silent wrong answer, not an error. The fix: frame[:, 4] = visibility in the _make_landmark_frame helper. Add a comment: # col 4 = presence (required for Tier 1–5 confidence — do not omit).
+
+### Phase task list must come from SRS filter, not from session memory
+This is already in root CLAUDE.md as a General Rule, but worth repeating here because it manifests in backend batches: run rg "\| \*\*Must\*\*.*\| N \s*\|" docs/SRS.md before writing any batch plan. FR-REPM-08 (lockout quality), FR-REPM-09 (phase of max deviation), and FR-REPM-12 (consistency metrics) all slipped through Phase 1 Batches 0–3 because they weren't top-of-mind. Cost: 2 hours of gate-pressure scramble.
+
+### Mock factories must be updated in the same commit as schema extensions
+Already present, but add the complete list of files to check: test_analysis_api.py::_make_detail_analysis, test_analysis_crud.py::_make_mock_analysis, test_analysis_crud.py::_make_status_analysis. When adding Phase 2 fields (retrieved_sources, cove_trace, etc.), set every new field to None explicitly. Consider moving to spec=Analysis or a typed factory to make this automatic.
+
+### "No extra fields" tests are brittle against schema growth
+A test like assert set(body.keys()) == {"id", "status", "updated_at"} must be updated every time the schema grows. Prefer asserting a minimum required set ({"id", "status", "updated_at"}.issubset(body.keys())) for envelope fields, and reserve exact-set assertions only for sealed schemas that will never change.
+
+### Hardcoded attribute loops drift when models grow
+The Phase 1 body-stats injection missed arm_span_cm and femur_length_cm because the worker used for attr in ("height_cm", "weight_kg", "age", "experience_level"). When a model gains fields, the loop doesn't. Prefer profile.model_dump(include=COACHING_FIELDS) with an explicit COACHING_FIELDS: frozenset constant at the top of the file, updated whenever UserProfile grows.
