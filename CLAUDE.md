@@ -164,6 +164,47 @@ Authenticated flows use persistent cookies from the browse daemon. Never verify 
 
 **Test artifacts live in `e2e/`** — `e2e/fixtures/` holds video inputs (e.g. `squat-high-bar.mp4`) attached via `browser_file_upload` with an absolute path; `e2e/screenshots/` holds PNG captures from runs. The noisy auto-generated `.playwright-mcp/` folder (accessibility snapshots, console logs, network dumps) is gitignored — reference those files from handoff notes only. See `e2e/README.md`.
 
+## Droplet Debugging (SSH)
+ 
+**When any droplet debugging is needed: SSH in directly. Never ask the user to run commands on the droplet — do it yourself.**
+ 
+Start every debugging session with `ssh spelix-droplet "docker ps -a"` to confirm connectivity and container state before running anything else. If SSH fails, report the error and stop — do not ask the user to run it instead.
+ 
+Claude Code connects directly to the droplet via SSH using a dedicated key. No DO MCP — not configured, not needed.
+ 
+**SSH alias**: `spelix-droplet` (configured in `~/.ssh/config` with `IdentityFile ~/.ssh/claude_spelix`).
+ 
+**Verify access**:
+```bash
+ssh spelix-droplet "echo ok && whoami"
+```
+ 
+**Common debugging commands**:
+```bash
+# Container status
+ssh spelix-droplet "docker ps -a"
+ 
+# Live backend logs (last 100 lines + follow)
+ssh spelix-droplet "docker logs spelix-backend --tail 100 -f"
+ 
+# Worker logs
+ssh spelix-droplet "docker logs spelix-worker --tail 100 -f"
+ 
+# Caddy access/error logs
+ssh spelix-droplet "docker logs spelix-caddy --tail 50"
+ 
+# ARQ queue depth
+ssh spelix-droplet "docker exec spelix-redis redis-cli llen arq:queue"
+ 
+# Restart a container
+ssh spelix-droplet "docker restart spelix-backend"
+ 
+# Run a one-off command inside the backend container
+ssh spelix-droplet "docker exec spelix-backend <cmd>"
+```
+ 
+**Key management**: The private key is `~/.ssh/claude_spelix` on the local machine. The public key is in `~deploy/.ssh/authorized_keys` on the droplet. 
+
 ## Compaction Survival
 
 Context budget: keep below 60% capacity. Watch the statusline.
