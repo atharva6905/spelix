@@ -7,6 +7,7 @@
 | BUG-001 | #24 | `d768d95` | **Fix status page "Loading…" forever.** `useAnalysisStatus` hook subscribed to Supabase Realtime UPDATE events but never fetched initial state. Added `getAnalysisStatus()` call on mount so the page shows current status immediately. Updated 8 AnalysisStatusPage tests + 1 new initial-fetch test. 213 frontend tests pass. |
 | BUG-002 | #25 | `93620fa` | **Include `quality_gate_result` in status endpoint response.** `AnalysisStatusResponse` schema was missing the field, so the status page couldn't show specific rejection guidance (e.g. "move closer to camera"). Added `quality_gate_result: dict | None` to the Pydantic schema. 9 backend status endpoint tests pass. |
 | BUG-003 | #26 | `a11ff80` | **Fix framing quality gate rejecting well-framed portrait videos.** The `check_framing()` gate measured `bbox_width × bbox_height` as fraction of frame area (threshold 30%). Portrait 9:16 videos naturally produce ~21% area even when the subject fills the frame well. Fix: scale minimum threshold by aspect ratio (`width/height`) for portrait videos. E.g., 9:16 → threshold = 0.30 × 0.5625 = 0.169. Landscape threshold unchanged. 74 quality gate tests pass (+3 new). |
+| DOCS | — | `44b362d` | **ADR-033..035 + backlog D-011..013.** Three ADRs (Realtime initial fetch, aspect-ratio framing, status schema). Backlog entries closed with SHAs. |
 
 ### Infra actions completed
 - Droplet containers rebuilt twice (`docker compose -f docker-compose.prod.yml build --no-cache backend worker`)
