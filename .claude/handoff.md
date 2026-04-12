@@ -1,23 +1,17 @@
-# Session 16 Handoff → Session 17: Batch 4 complete — four-stage RAG pipeline wired
+# Session 17 Handoff → Session 18: Batch 5 complete — citation validation, safety filter, Qdrant fallback, rerank timeout
 
 ## Completed
 
 | Task | Commit / PR | Description |
 |------|-------------|-------------|
-| P2-014 | `6970f53` PR #20 | CoveVerificationService — Haiku for claim extraction/verification, Sonnet for revision, max 2 iterations, never fails pipeline |
-| P2-015 | `6970f53` PR #20 | FaithfulnessGateService — LLM-as-judge faithfulness gate (threshold 0.8), ADR-RAG-04 documents HHEM T5 substitution |
-| P2-016 | `6970f53` PR #20 | Four-stage worker wiring: retrieval → coaching(contexts) → CoVe → faithfulness gate → enriched CoachingResult. SSE phase events. Analysis ORM columns. |
-| ADR-RAG-04 | `6970f53` PR #20 | LLM-as-judge faithfulness instead of HHEM T5 due to 2GB RAM constraint |
+| P2-017 | `b48c5c1` PR #21 | ValidateOutputTool — regex [N] extraction, cross-ref against CitationBlocks, populate Issue.citation_indices, flag invalid references. Wired before CoVe in worker. |
+| P2-018 | `b48c5c1` PR #21 | SafetyFilter — replace prohibited "injury risk"/"injury prevention" phrases, inject medical screening disclaimer. Runs on all coaching outputs. |
+| P2-019 | `b48c5c1` PR #21 | Qdrant unavailable fallback — degraded_mode flag on CoachingOutput, SSE "degraded" phase event, pipeline never fails on retrieval failure. |
+| P2-020 | `b48c5c1` PR #21 | Rerank timeout — 3s asyncio.wait_for on Cohere rerank, fallback to RRF-fused scores. |
+| Schema | `b48c5c1` PR #21 | Issue.citation_indices (list[int]), CoachingOutput.degraded_mode (bool) — backward compatible. |
+| Lint fix | `7939a1e` PR #21 | Pre-existing ruff E402 in test_coaching_worker.py — mid-file import moved to top. |
 
 ## Remaining
-
-### Phase 2 Batch 5 — Citation & Safety (gate: P2-013 ✅)
-| ID | Status | Deps met? | Notes |
-|----|--------|-----------|-------|
-| P2-017 | open | ✅ | Citation cross-reference validation |
-| P2-018 | open | ✅ | Safety language post-filter |
-| P2-019 | open | ✅ | Qdrant unavailable fallback (ungrounded coaching + disclaimer) |
-| P2-020 | open | ✅ | Rerank timeout handling (3s cutoff, skip rerank) |
 
 ### Phase 2 Batch 6 — Frontend (gate: P2-013 ✅)
 | ID | Status | Deps met? | Notes |
@@ -50,23 +44,47 @@
 
 ## Test counts
 
-- **Backend**: 1198 passed / 19 skipped / 0 failures
+- **Backend**: 1229 passed / 19 skipped / 0 failures (+31 new from Batch 5)
 - **Frontend**: 178 passed / 0 failures (unchanged — no frontend changes this session)
 - **Coverage**: ~91% backend
 - **Known failures**: none
-- **Alembic head**: `004_phase2_rag_coach_brain` (applied)
+- **Alembic head**: `004_phase2_rag_coach_brain` (applied, no new migration this batch)
 
 ## E2E verification
 
-**Skipped** — P2-014/015/016 are backend service additions wired into the analysis worker, but the worker on the droplet does not have `QDRANT_URL` or `COHERE_API_KEY` env vars configured yet. The pipeline gracefully degrades (try/except around all retrieval/CoVe/FG blocks) so existing production behavior is unchanged. E2E verification will be meaningful once Qdrant+Cohere env vars are deployed to the droplet.
+**Pending** — PR #21 awaiting CI green + merge. After merge, restart droplet containers to pick up QDRANT_URL/QDRANT_API_KEY/COHERE_API_KEY env vars. Then run an analysis via spelix.app and verify:
+1. Coaching output has `degraded_mode` field in structured_output_json
+2. SSE stream includes `"degraded"` phase event when Qdrant is unreachable
+3. No "injury risk" / "injury prevention" in any coaching text
 
 ## Blockers
 
-- **Qdrant/Cohere env vars not on droplet** — retrieval, CoVe, and faithfulness gate are all no-ops in production until `QDRANT_URL`, `QDRANT_API_KEY`, and `COHERE_API_KEY` are added to the droplet's Docker env. This should happen before Batch 5 merges or alongside it.
+None — Qdrant/Cohere env vars now on droplet. Containers need restart after merge.
+
+## New files this session
+
+- `backend/app/services/validate_output.py` — ValidateOutputTool
+- `backend/app/services/safety_filter.py` — SafetyFilter
+- `backend/tests/unit/test_validate_output.py` — 13 tests
+- `backend/tests/unit/test_safety_filter.py` — 12 tests
+- `backend/tests/unit/test_qdrant_fallback.py` — 3 tests
+
+## Pipeline order (after Batch 5)
+
+```
+retrieval (with 3s rerank timeout P2-020)
+  → coaching generation
+  → degraded_mode stamp (P2-019)
+  → citation validation (P2-017, before CoVe)
+  → CoVe verification
+  → safety filter (P2-018, after CoVe)
+  → faithfulness gate
+  → store
+```
 
 ## Next session start
 
 ```bash
 /status
 ```
-Then continue with **Batch 5 (P2-017 through P2-020)** — Citation & Safety. All deps met. Consider deploying Qdrant/Cohere env vars to the droplet first so E2E verification becomes possible.
+Then continue with **Batch 6 (P2-021, P2-022)** — Frontend citation rendering + follow-up chat UI. All deps met.

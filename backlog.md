@@ -251,10 +251,10 @@ Seed Coach Brain corpus only: `source=seed_manual_validated`. Distillation pipel
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P2-017 | `ValidateOutputTool` — block uncited factual claims. Any claim without matching citation index fails validation, triggers CoVe re-generation. | M | P2-013 | FR-AICP-10 | open |
-| P2-018 | Mandatory safety hedging for MEDICAL_CLEARANCE category issues. Inject standard disclaimer before any coaching text. "injury risk" / "injury prevention" PROHIBITED (Spelix language rule). | S | P2-014 | FR-AICP-14 | open |
-| P2-019 | Error handling — Qdrant unavailable fallback to ungrounded coaching with disclaimer. Never raise 500 on retrieval failure. | S | P2-004 | FR-AICP-09 | open |
-| P2-020 | Rerank timeout handling — if Cohere Rerank 4.0 exceeds 3s, skip rerank and use RRF-merged scores directly. Log to Langfuse. | S | P2-010 | FR-AICP-09 | open |
+| P2-017 | `ValidateOutputTool` — block uncited factual claims. Any claim without matching citation index fails validation, triggers CoVe re-generation. | M | P2-013 | FR-AICP-10 | done | PR #21 `b48c5c1` |
+| P2-018 | Mandatory safety hedging for MEDICAL_CLEARANCE category issues. Inject standard disclaimer before any coaching text. "injury risk" / "injury prevention" PROHIBITED (Spelix language rule). | S | P2-014 | FR-AICP-14 | done | PR #21 `b48c5c1` |
+| P2-019 | Error handling — Qdrant unavailable fallback to ungrounded coaching with disclaimer. Never raise 500 on retrieval failure. | S | P2-004 | FR-AICP-15 | done | PR #21 `b48c5c1` |
+| P2-020 | Rerank timeout handling — if Cohere Rerank 4.0 exceeds 3s, skip rerank and use RRF-merged scores directly. Log to Langfuse. | S | P2-010 | FR-AICP-09 | done | PR #21 `b48c5c1` |
 
 ### Batch 6 — Frontend (gate: P2-013 merged; /parallel)
 
