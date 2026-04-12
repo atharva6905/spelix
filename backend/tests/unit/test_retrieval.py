@@ -1,7 +1,8 @@
 """Tests for RetrievalService — dense vector retrieval from Qdrant (P2-008).
 Also covers hybrid_search + rrf_fuse (P2-010, FR-AICP-09).
+Also covers exercise_filter parameter (P2-011, FR-AICP-12).
 
-Requirements: FR-AICP-09
+Requirements: FR-AICP-09, FR-AICP-12
 
 TDD protocol: tests written before implementation.
 All Cohere and Qdrant calls are mocked (ADR-032).
@@ -722,3 +723,181 @@ async def test_hybrid_search_rerank_top_n_defaults_to_top_k() -> None:
     assert top_n_arg == 7, (
         f"Expected top_n=7 (matching top_k), got {top_n_arg!r}"
     )
+
+
+# ===========================================================================
+# P2-011 tests — exercise_filter (FR-AICP-12)
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Test 19 — dense_search with exercise_filter passes query_filter to query_points
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dense_search_exercise_filter_passes_filter_to_query_points() -> None:
+    """When exercise_filter is provided, query_points must receive a query_filter.
+
+    The filter must restrict results to points where payload.exercise == the
+    supplied value (FR-AICP-12).
+    """
+    from qdrant_client import models as qdrant_models
+
+    from app.services.retrieval import RetrievalService
+
+    cohere_client = _make_cohere_client()
+    qdrant_client = _make_qdrant_client()
+
+    service = RetrievalService(cohere_client=cohere_client, qdrant_client=qdrant_client)
+    await service.dense_search(
+        "squat depth cue",
+        collection="coach_brain",
+        top_k=5,
+        exercise_filter="squat",
+    )
+
+    qdrant_client.query_points.assert_called_once()
+    call_kwargs = qdrant_client.query_points.call_args.kwargs
+
+    query_filter = call_kwargs.get("query_filter")
+    assert query_filter is not None, (
+        "query_filter must be passed to query_points when exercise_filter is set."
+    )
+    assert isinstance(query_filter, qdrant_models.Filter), (
+        f"query_filter must be a qdrant_client.models.Filter, got {type(query_filter)}"
+    )
+    # Inspect the must conditions
+    must_conditions = query_filter.must
+    assert must_conditions and len(must_conditions) == 1, (
+        "Filter must contain exactly one must condition."
+    )
+    condition = must_conditions[0]
+    assert isinstance(condition, qdrant_models.FieldCondition), (
+        f"Condition must be FieldCondition, got {type(condition)}"
+    )
+    assert condition.key == "exercise", (
+        f"FieldCondition key must be 'exercise', got {condition.key!r}"
+    )
+    assert isinstance(condition.match, qdrant_models.MatchValue), (
+        f"Condition match must be MatchValue, got {type(condition.match)}"
+    )
+    assert condition.match.value == "squat", (
+        f"MatchValue must be 'squat', got {condition.match.value!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 20 — dense_search without exercise_filter passes no query_filter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dense_search_no_exercise_filter_omits_query_filter() -> None:
+    """When exercise_filter is None (default), query_filter must NOT be passed to query_points."""
+    from app.services.retrieval import RetrievalService
+
+    cohere_client = _make_cohere_client()
+    qdrant_client = _make_qdrant_client()
+
+    service = RetrievalService(cohere_client=cohere_client, qdrant_client=qdrant_client)
+    await service.dense_search("squat depth cue", collection="coach_brain", top_k=5)
+
+    call_kwargs = qdrant_client.query_points.call_args.kwargs
+    assert "query_filter" not in call_kwargs, (
+        "query_filter must not be passed to query_points when exercise_filter is None."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 21 — hybrid_search with exercise_filter forwards to both dense and sparse
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_exercise_filter_forwarded_to_dense_and_sparse() -> None:
+    """When exercise_filter is set, hybrid_search must pass it to both dense_search
+    and sparse_search so both legs of retrieval are filtered consistently (FR-AICP-12).
+    """
+    from app.services.retrieval import RetrievalService
+    from app.services.sparse_retrieval import SparseRetrievalService
+
+    cohere_client = _make_cohere_client(
+        vectors=[[0.1] * 1024],
+        rerank_results=[(0, 0.9)],
+    )
+    qdrant_client = _make_qdrant_client()
+
+    sparse_service = MagicMock(spec=SparseRetrievalService)
+    sparse_service.sparse_search = AsyncMock(return_value=[])
+
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+        sparse_service=sparse_service,
+    )
+
+    dense_result = [_make_retrieved_context(chunk_id="c1" + "x" * 62, paper_id="p1")]
+
+    mock_dense = AsyncMock(return_value=dense_result)
+    with patch.object(service, "dense_search", mock_dense):
+        await service.hybrid_search(
+            "bench press cue",
+            collection="coach_brain",
+            top_k=5,
+            exercise_filter="bench",
+        )
+
+    # dense_search must have been called with exercise_filter="bench"
+    dense_call_kwargs = mock_dense.call_args.kwargs
+    assert dense_call_kwargs.get("exercise_filter") == "bench", (
+        f"dense_search must receive exercise_filter='bench', got {dense_call_kwargs.get('exercise_filter')!r}"
+    )
+
+    # sparse_search must have been called with exercise_filter="bench"
+    sparse_call_kwargs = sparse_service.sparse_search.call_args.kwargs
+    assert sparse_call_kwargs.get("exercise_filter") == "bench", (
+        f"sparse_search must receive exercise_filter='bench', got {sparse_call_kwargs.get('exercise_filter')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 22 — hybrid_search without exercise_filter passes None to both legs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_no_exercise_filter_passes_none_to_legs() -> None:
+    """When exercise_filter is not specified, both legs must receive exercise_filter=None."""
+    from app.services.retrieval import RetrievalService
+    from app.services.sparse_retrieval import SparseRetrievalService
+
+    cohere_client = _make_cohere_client(
+        vectors=[[0.1] * 1024],
+        rerank_results=[(0, 0.9)],
+    )
+    qdrant_client = _make_qdrant_client()
+
+    sparse_service = MagicMock(spec=SparseRetrievalService)
+    sparse_service.sparse_search = AsyncMock(return_value=[])
+
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+        sparse_service=sparse_service,
+    )
+
+    dense_result = [_make_retrieved_context(chunk_id="c1" + "x" * 62, paper_id="p1")]
+
+    mock_dense = AsyncMock(return_value=dense_result)
+    with patch.object(service, "dense_search", mock_dense):
+        await service.hybrid_search(
+            "deadlift lockout",
+            collection="coach_brain",
+            top_k=5,
+        )
+
+    dense_call_kwargs = mock_dense.call_args.kwargs
+    assert dense_call_kwargs.get("exercise_filter") is None
+
+    sparse_call_kwargs = sparse_service.sparse_search.call_args.kwargs
+    assert sparse_call_kwargs.get("exercise_filter") is None
