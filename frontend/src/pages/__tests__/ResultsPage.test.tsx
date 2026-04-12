@@ -747,4 +747,124 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
     expect(screen.getByText(/Squat biomechanics review/i)).toBeInTheDocument();
     expect(screen.getByText(/10\.1234\/example/i)).toBeInTheDocument();
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Citation tooltips (P2-021, FR-RESL-06)
+  // -------------------------------------------------------------------------
+
+  it("renders inline citation markers in summary text", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        coaching_result: {
+          structured_output_json: {
+            summary: "Good form overall [1].",
+            strengths: ["Strong bracing [1]"],
+            issues: [
+              {
+                rep_number: 1,
+                joint: "Knee",
+                description: "Knee cave on ascent [1]",
+                severity: "High",
+                citation_indices: [1],
+              },
+            ],
+            correction_plan: ["Cue knees out [1]"],
+            disclaimer: "Educational purposes only.",
+            citations: [
+              {
+                title: "Squat Mechanics",
+                authors: ["Smith J"],
+                year: 2022,
+                doi: "10.1234/squat",
+              },
+            ],
+          },
+          created_at: "2026-04-08T10:05:00Z",
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    // Citation markers should appear in multiple sections
+    const markers = screen.getAllByTestId("citation-marker-1");
+    expect(markers.length).toBeGreaterThanOrEqual(1);
+    // Each marker is a button
+    expect(markers[0].tagName).toBe("BUTTON");
+  });
+
+  it("renders citation markers in correction plan", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        coaching_result: {
+          structured_output_json: {
+            summary: "Some summary.",
+            strengths: [],
+            issues: [],
+            correction_plan: ["Focus on ankle mobility [1]"],
+            disclaimer: "Educational purposes only.",
+            citations: [
+              {
+                title: "Ankle Mobility Study",
+                authors: ["Jones A"],
+                year: 2021,
+                doi: null,
+              },
+            ],
+          },
+          created_at: "2026-04-08T10:05:00Z",
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("citation-marker-1")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Degraded mode banner (P2-019, FR-AICP-15)
+  // -------------------------------------------------------------------------
+
+  it("renders degraded mode banner when degraded_mode is true", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        coaching_result: {
+          structured_output_json: {
+            summary: "Form analysis without research context.",
+            strengths: [],
+            issues: [],
+            correction_plan: [],
+            disclaimer: "Educational purposes only.",
+            degraded_mode: true,
+          },
+          created_at: "2026-04-08T10:05:00Z",
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("degraded-mode-banner")).toBeInTheDocument();
+    expect(
+      screen.getByText(/without research backing/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not render degraded mode banner when degraded_mode is false", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis(),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(
+      screen.queryByTestId("degraded-mode-banner"),
+    ).not.toBeInTheDocument();
+  });
 });
