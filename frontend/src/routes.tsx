@@ -4,6 +4,7 @@ import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AdminPage from "@/pages/AdminPage";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
+import ConsentPage from "@/pages/ConsentPage";
 import HistoryPage from "@/pages/HistoryPage";
 import HomePage from "@/pages/HomePage";
 import LoginPage from "@/pages/LoginPage";
@@ -40,6 +41,7 @@ const router = createBrowserRouter([
       { path: "/upload", element: <UploadPage /> },
       { path: "/history", element: <HistoryPage /> },
       { path: "/profile", element: <ProfilePage /> },
+      { path: "/consent", element: <ConsentPage /> },
       { path: "/analysis/:id", element: <AnalysisStatusPage /> },
       { path: "/results/:id", element: <ResultsPage /> },
       { path: "/admin", element: <AdminPage /> },

@@ -240,3 +240,48 @@ def get_cohere_api_key() -> SecretStr:
             "Add it to backend/.env or set it in the deployment environment."
         )
     return SecretStr(raw)
+
+
+def get_langfuse_public_key() -> SecretStr:
+    """Return LANGFUSE_PUBLIC_KEY as a SecretStr.
+
+    Raises RuntimeError if the environment variable is absent. Call sites
+    should invoke this once at service construction time (not per-request).
+
+    The SecretStr wrapper prevents the key from appearing in logs or repr()
+    output — call .get_secret_value() only where the raw string is required
+    (i.e. when constructing the Langfuse client).
+
+    Example::
+
+        key: SecretStr = get_langfuse_public_key()
+        client = Langfuse(public_key=key.get_secret_value(), ...)
+    """
+    raw = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    if not raw:
+        raise RuntimeError(
+            "LANGFUSE_PUBLIC_KEY environment variable is not set. "
+            "Phase 2 observability features require a valid Langfuse public key. "
+            "Add it to backend/.env or set it in the deployment environment."
+        )
+    return SecretStr(raw)
+
+
+def get_langfuse_secret_key() -> SecretStr:
+    """Return LANGFUSE_SECRET_KEY as a SecretStr.
+
+    Raises RuntimeError if the environment variable is absent.
+
+    Example::
+
+        key: SecretStr = get_langfuse_secret_key()
+        client = Langfuse(secret_key=key.get_secret_value(), ...)
+    """
+    raw = os.environ.get("LANGFUSE_SECRET_KEY")
+    if not raw:
+        raise RuntimeError(
+            "LANGFUSE_SECRET_KEY environment variable is not set. "
+            "Phase 2 observability features require a valid Langfuse secret key. "
+            "Add it to backend/.env or set it in the deployment environment."
+        )
+    return SecretStr(raw)

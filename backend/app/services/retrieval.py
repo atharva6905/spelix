@@ -380,8 +380,7 @@ class RetrievalService:
         except asyncio.TimeoutError:
             logger.warning(
                 "hybrid_search: Cohere rerank timed out after %.1fs for collection=%r "
-                "— returning RRF-fused results directly. "
-                "TODO(P2-034): log this event to Langfuse.",
+                "— returning RRF-fused results directly.",
                 _RERANK_TIMEOUT_S,
                 collection,
             )

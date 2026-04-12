@@ -634,7 +634,7 @@ async def test_faithfulness_stores_eval_scores():
         await process_analysis(ctx, aid)
 
     assert analysis.eval_scores is not None
-    assert analysis.eval_scores["faithfulness_score"] == 0.9
+    assert analysis.eval_scores["faithfulness"] == 0.9
     assert analysis.eval_scores["faithfulness_passed"] is True
 
 
@@ -715,3 +715,101 @@ async def test_phase_events_published():
     phases = [e["phase"] for e in phase_events]
     assert "retrieving" in phases
     assert "verifying" in phases
+
+
+# ---------------------------------------------------------------------------
+# P2-033 — eval_scores standardised format (FR-AICP-16)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_eval_scores_includes_cove_fields():
+    """eval_scores dict must include cove_verified and cove_iterations keys."""
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+        faithfulness_score=0.9,
+        cove_verified=True,
+    )
+    with patches:
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, aid)
+
+    assert analysis.eval_scores is not None
+    scores = analysis.eval_scores
+    # All 7 required keys per FR-AICP-16
+    assert "faithfulness" in scores
+    assert "faithfulness_passed" in scores
+    assert "unsupported_claims" in scores
+    assert "evaluator" in scores
+    assert "threshold" in scores
+    assert "cove_verified" in scores
+    assert "cove_iterations" in scores
+    # Values
+    assert scores["faithfulness"] == 0.9
+    assert scores["faithfulness_passed"] is True
+    assert scores["cove_verified"] is True
+    assert scores["evaluator"] == "claude-sonnet-4-6-llm-judge"
+    assert scores["threshold"] == 0.8
+
+
+@pytest.mark.asyncio
+async def test_eval_scores_cove_defaults_when_no_contexts():
+    """When no retrieved_contexts, eval_scores is not populated (gate skipped)."""
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=None,
+    )
+    with patches:
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, aid)
+
+    # Faithfulness gate only runs when there are retrieved_contexts — eval_scores
+    # stays at its initial value (None) when no contexts are present.
+    assert analysis.eval_scores is None
+
+
+@pytest.mark.asyncio
+async def test_eval_scores_cove_verified_false_when_cove_fails():
+    """When CoVe raises, cove_verified defaults to False in eval_scores."""
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+        cove_raise=True,
+        faithfulness_score=0.9,
+    )
+    with patches:
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, aid)
+
+    assert analysis.eval_scores is not None
+    assert analysis.eval_scores["cove_verified"] is False
+    assert analysis.eval_scores["cove_iterations"] == 0
+
+
+@pytest.mark.asyncio
+async def test_eval_scores_langfuse_score_called():
+    """Langfuse score() is called with faithfulness and cove_verified values."""
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+        faithfulness_score=0.85,
+        cove_verified=True,
+    )
+    mock_langfuse = MagicMock(name="langfuse_client")
+
+    with patches, patch(
+        "app.services.langfuse_client._langfuse_client_cache", mock_langfuse
+    ), patch(
+        "app.services.langfuse_client._langfuse_client_cache_initialized", True
+    ):
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, aid)
+
+    # Langfuse.score() should have been called for both metrics
+    score_calls = mock_langfuse.score.call_args_list
+    # At least faithfulness was logged
+    assert any("faithfulness" in str(c) for c in score_calls)

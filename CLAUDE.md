@@ -111,7 +111,17 @@ For any commit touching auth, user data, or user-facing strings: invoke `spelix-
 - No → `/parallel` (subagents, max 7, max 3 on droplet) or `claude --worktree name` (separate terminals, 2–4 at a time).
 - Yes → `/team [scenario]` (Agent Teams with shared task list + mailbox).
 
-`/team` cost rules: Sonnet for all teammates, max 3 teammates, focused spawn prompts (CLAUDE.md loads automatically — don't repeat it), shut down when done.
+**MANDATORY**: When a batch has cross-task coordination needs (shared API contracts, shared client interfaces, backend↔frontend data shapes), use `/team` — NOT background `Agent()` calls. `/team` provides a shared task list + mailbox that background agents lack. Session 23 demonstrated this: P2-029 backend published the consent API contract to the frontend teammate via team messaging, and P2-034 published the Langfuse client interface for P2-033. Background agents cannot coordinate like this.
+
+**When to use `/team` vs `/parallel`**:
+- Backend API + frontend consuming it → `/team` (API contract coordination)
+- Service A produces interface that Service B consumes → `/team`
+- Independent bug fixes, independent test files, docs → `/parallel`
+- If in doubt and batch has 2+ tasks with a Deps arrow → `/team`
+
+**Workflow**: always `/plan` first → create tasks with dependencies → spawn teammates with focused prompts → lead works on independent tasks while team executes → review + merge.
+
+`/team` cost rules: Sonnet for all teammates, max 3 teammates, focused spawn prompts (CLAUDE.md loads automatically — don't repeat it), shut down idle teammates immediately.
 
 **Never parallelise** (any method): `backend/app/models/`, `backend/app/schemas/`, `backend/alembic/`, tasks with Deps arrows.
 

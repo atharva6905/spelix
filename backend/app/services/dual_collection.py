@@ -159,8 +159,7 @@ class DualCollectionOrchestrator:
         except asyncio.TimeoutError:
             logger.warning(
                 "dual_collection: Cohere rerank timed out after %.1fs "
-                "— using RRF-fused results directly. "
-                "TODO(P2-034): log this event to Langfuse.",
+                "— using RRF-fused results directly.",
                 _RERANK_TIMEOUT_S,
             )
 
