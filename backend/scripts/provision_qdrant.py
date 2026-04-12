@@ -29,14 +29,17 @@ from pathlib import Path
 # subdirectory without setting env vars manually.
 # ---------------------------------------------------------------------------
 
-_ENV_PATH = Path(__file__).parent.parent / ".env"
+_BACKEND_ENV = Path(__file__).parent.parent / ".env"
+_ROOT_ENV = Path(__file__).parent.parent.parent / ".env"
+_ENV_PATH = _BACKEND_ENV if _BACKEND_ENV.exists() else _ROOT_ENV
+
 if _ENV_PATH.exists():
     from dotenv import load_dotenv  # type: ignore[import-untyped]
 
     load_dotenv(_ENV_PATH)
     print(f"[provision] Loaded env from {_ENV_PATH}")
 else:
-    print(f"[provision] No .env found at {_ENV_PATH} — using process environment")
+    print(f"[provision] No .env found at {_BACKEND_ENV} or {_ROOT_ENV} — using process environment")
 
 
 async def main() -> None:
