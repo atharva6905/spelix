@@ -111,11 +111,13 @@ class SparseRetrievalService:
         # patch qdrant_client.models.SparseVector at call time.
         from qdrant_client import models as qdrant_models
 
+        indices: list[int] = sparse_vector["indices"]  # type: ignore[assignment]
+        values: list[float] = sparse_vector["values"]  # type: ignore[assignment]
         response = await self._qdrant.query_points(
             collection=collection,
             query=qdrant_models.SparseVector(
-                indices=sparse_vector["indices"],
-                values=sparse_vector["values"],
+                indices=indices,
+                values=values,
             ),
             using=_SPARSE_VECTOR_NAME,
             limit=top_k,
