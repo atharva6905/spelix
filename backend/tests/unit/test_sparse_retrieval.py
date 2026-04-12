@@ -1,6 +1,7 @@
 """Tests for SparseRetrievalService — BM25 sparse vector retrieval.
 
 TDD gate for P2-009 (FR-AICP-09 — hybrid RAG pipeline, sparse leg).
+Also covers exercise_filter parameter (P2-011, FR-AICP-12).
 
 Covers:
 1. sparse_search calls query_points with the correct collection name
@@ -13,6 +14,8 @@ Covers:
 8. _build_sparse_vector returns None for blank text
 9. Points with invalid payloads are skipped (defensive parsing)
 10. sparse_search accepts "coach_brain" collection
+11. exercise_filter passes query_filter to query_points (FR-AICP-12)
+12. None exercise_filter omits query_filter
 """
 
 from __future__ import annotations
@@ -294,6 +297,59 @@ class TestSparseSearch:
         query_arg = call_kwargs.get("query")
         assert isinstance(query_arg, qdrant_models.SparseVector), (
             f"Expected SparseVector, got {type(query_arg)}"
+        )
+
+    # -----------------------------------------------------------------------
+    # P2-011 — exercise_filter tests (FR-AICP-12)
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_exercise_filter_passes_query_filter_to_query_points(self) -> None:
+        """When exercise_filter is provided, query_points must receive a query_filter
+        with a FieldCondition matching payload.exercise == exercise_filter value.
+        """
+        from qdrant_client import models as qdrant_models
+
+        service = _make_service()
+        service._qdrant.query_points.return_value = _make_query_response([])
+
+        await service.sparse_search(
+            "squat depth hip mobility",
+            collection="coach_brain",
+            exercise_filter="squat",
+        )
+
+        service._qdrant.query_points.assert_awaited_once()
+        call_kwargs = service._qdrant.query_points.call_args.kwargs
+
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None, (
+            "query_filter must be passed to query_points when exercise_filter is set."
+        )
+        assert isinstance(query_filter, qdrant_models.Filter), (
+            f"query_filter must be qdrant_client.models.Filter, got {type(query_filter)}"
+        )
+        must_conditions = query_filter.must
+        assert must_conditions and len(must_conditions) == 1
+        condition = must_conditions[0]
+        assert isinstance(condition, qdrant_models.FieldCondition)
+        assert condition.key == "exercise"
+        assert isinstance(condition.match, qdrant_models.MatchValue)
+        assert condition.match.value == "squat"
+
+    @pytest.mark.asyncio
+    async def test_no_exercise_filter_omits_query_filter(self) -> None:
+        """When exercise_filter is None (default), query_filter must NOT be passed
+        to query_points.
+        """
+        service = _make_service()
+        service._qdrant.query_points.return_value = _make_query_response([])
+
+        await service.sparse_search("deadlift hip hinge")
+
+        call_kwargs = service._qdrant.query_points.call_args.kwargs
+        assert "query_filter" not in call_kwargs, (
+            "query_filter must not be present in query_points call when exercise_filter is None."
         )
 
 

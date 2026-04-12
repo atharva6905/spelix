@@ -1,6 +1,6 @@
-"""RetrievalService — dense + hybrid retrieval from Qdrant (P2-008, P2-010).
+"""RetrievalService — dense + hybrid retrieval from Qdrant (P2-008, P2-010, P2-011).
 
-Requirements: FR-AICP-09
+Requirements: FR-AICP-09, FR-AICP-12
 
 Dense retrieval (P2-008):
   Embed the query via Cohere embed-v4 (input_type=SEARCH_QUERY) and issue a
@@ -150,6 +150,7 @@ class RetrievalService:
         query: str,
         collection: CollectionName = _DEFAULT_COLLECTION,
         top_k: int = 10,
+        exercise_filter: str | None = None,
     ) -> list[RetrievedContext]:
         """Embed ``query`` with Cohere and retrieve top-K dense matches from Qdrant.
 
@@ -162,6 +163,11 @@ class RetrievalService:
             Defaults to "papers_rag".
         top_k:
             Maximum number of results to return.  Forwarded to Qdrant as ``limit``.
+        exercise_filter:
+            When provided, restricts results to points whose ``exercise`` payload
+            field matches this value exactly.  Primarily useful for the
+            ``coach_brain`` collection which has a keyword index on ``exercise``
+            (FR-AICP-12, P2-011).  Has no effect when None.
 
         Returns
         -------
@@ -178,18 +184,40 @@ class RetrievalService:
         query_vector: list[float] = vectors[0]
 
         logger.debug(
-            "dense_search: embedded query (%d dims) for collection=%r top_k=%d",
+            "dense_search: embedded query (%d dims) for collection=%r top_k=%d exercise_filter=%r",
             len(query_vector),
             collection,
             top_k,
+            exercise_filter,
         )
 
-        # Step 2: query Qdrant dense index.
+        # Step 2: build optional payload filter (FR-AICP-12).
+        # Deferred import follows ADR-032 source-patch pattern.
+        query_filter = None
+        if exercise_filter is not None:
+            from qdrant_client import models as qdrant_models
+
+            query_filter = qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="exercise",
+                        match=qdrant_models.MatchValue(value=exercise_filter),
+                    )
+                ]
+            )
+
+        # Step 3: query Qdrant dense index.
+        qdrant_kwargs: dict = {
+            "query": query_vector,
+            "limit": top_k,
+            "with_payload": True,
+        }
+        if query_filter is not None:
+            qdrant_kwargs["query_filter"] = query_filter
+
         result = await self._qdrant.query_points(
             collection,
-            query=query_vector,
-            limit=top_k,
-            with_payload=True,
+            **qdrant_kwargs,
         )
 
         # Step 3: parse ScoredPoints into RetrievedContext.
@@ -231,6 +259,7 @@ class RetrievalService:
         top_k: int = 10,
         rrf_k: int = 60,
         rerank_top_n: int | None = None,
+        exercise_filter: str | None = None,
     ) -> list[RetrievedContext]:
         """Run dense + sparse retrieval, fuse via RRF, rerank with Cohere Rerank 4.0.
 
@@ -258,6 +287,11 @@ class RetrievalService:
         rerank_top_n:
             Explicit top-N for Cohere Rerank.  Defaults to ``top_k`` when
             None.
+        exercise_filter:
+            When provided, restricts both dense and sparse searches to points
+            whose ``exercise`` payload field matches this value (FR-AICP-12,
+            P2-011).  Forwarded verbatim to ``dense_search`` and
+            ``sparse_search``.
 
         Returns
         -------
@@ -270,14 +304,29 @@ class RetrievalService:
         # Step 1: run dense + sparse concurrently (sparse is no-op if missing)
         if self._sparse is not None:
             dense_results, sparse_results = await asyncio.gather(
-                self.dense_search(query, collection=collection, top_k=top_k),
-                self._sparse.sparse_search(query, collection=collection, top_k=top_k),
+                self.dense_search(
+                    query,
+                    collection=collection,
+                    top_k=top_k,
+                    exercise_filter=exercise_filter,
+                ),
+                self._sparse.sparse_search(
+                    query,
+                    collection=collection,
+                    top_k=top_k,
+                    exercise_filter=exercise_filter,
+                ),
             )
         else:
             logger.debug(
                 "hybrid_search: no sparse_service configured — using dense-only fallback"
             )
-            dense_results = await self.dense_search(query, collection=collection, top_k=top_k)
+            dense_results = await self.dense_search(
+                query,
+                collection=collection,
+                top_k=top_k,
+                exercise_filter=exercise_filter,
+            )
             sparse_results = []
 
         logger.debug(
