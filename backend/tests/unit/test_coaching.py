@@ -2,13 +2,14 @@
 Unit tests for ThresholdConfig, CoachingOutput schema, and CoachingService.
 
 Requirements: B-023 (FR-RESL-03, Appendix D), B-025 (FR-SCOR-00),
-              FR-AICP-03, FR-AICP-04, FR-AICP-05, FR-AICP-06
+              FR-AICP-03, FR-AICP-04, FR-AICP-05, FR-AICP-06, FR-AICP-07
 
 All LLM calls are mocked — never call real Anthropic API.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -808,3 +809,439 @@ class TestCoachingService:
         assert "Athlete Profile" in user_content
         assert "Visual Analysis" in user_content
         assert keyframe_text in user_content
+
+
+# ---------------------------------------------------------------------------
+# D-001: Native instructor streaming tests (FR-AICP-07)
+# Replace stream-then-reparse with instructor create_partial (ADR-021)
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateCoachingStreamingNative:
+    """FR-AICP-07: generate_coaching_streaming uses instructor create_partial.
+
+    These tests verify:
+    - Native streaming produces a valid CoachingOutput without a second LLM call.
+    - Redis pub/sub chunks are published during streaming.
+    - Done sentinel is published after stream completes.
+    - Retry logic still works for retryable errors.
+    - Token usage is not double-counted (raw_client not used for a second parse).
+    """
+
+    @pytest.mark.asyncio
+    async def test_streaming_returns_valid_coaching_output(self) -> None:
+        """create_partial yields final CoachingOutput — no second instructor call."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+
+        # Simulate create_partial yielding two partial snapshots and a final complete one
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            # Yield a couple of intermediate partials then the final result
+            partial1 = _make_coaching_output(summary="Good depth...")
+            partial2 = expected
+            for item in [partial1, partial2]:
+                yield item
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+            )
+
+        assert isinstance(result, CoachingOutput)
+        assert result.summary == expected.summary
+        assert result.disclaimer == MANDATORY_DISCLAIMER
+
+    @pytest.mark.asyncio
+    async def test_streaming_no_second_llm_call(self) -> None:
+        """Verify only create_partial is called — create (the reparse call) is NOT called."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        create_call_count = 0
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            yield expected
+
+        async def mock_create(**kwargs: Any) -> CoachingOutput:
+            nonlocal create_call_count
+            create_call_count += 1
+            return expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+        mock_instructor.chat.completions.create = mock_create
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+            )
+
+        # The old reparse call must NOT happen
+        assert create_call_count == 0, (
+            "generate_coaching_streaming made a second LLM call (reparse). "
+            "This doubles token cost and must be eliminated."
+        )
+
+    @pytest.mark.asyncio
+    async def test_streaming_publishes_chunks_to_redis(self) -> None:
+        """Redis pub/sub receives chunk messages during streaming."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        published_messages: list[dict[str, Any]] = []
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            partial1 = _make_coaching_output(summary="Good depth on all reps.")
+            yield partial1
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        mock_redis = AsyncMock()
+
+        async def capture_publish(channel: str, message: str) -> None:
+            published_messages.append(json.loads(message))
+
+        mock_redis.publish = capture_publish
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                analysis_id="test-analysis-123",
+                pubsub_redis=mock_redis,
+            )
+
+        # Must have published at least one chunk
+        chunk_messages = [m for m in published_messages if m.get("type") == "chunk"]
+        assert len(chunk_messages) >= 1, "No chunk messages published to Redis"
+        # Every chunk must have a 'text' key
+        for msg in chunk_messages:
+            assert "text" in msg, f"Chunk message missing 'text' key: {msg}"
+
+    @pytest.mark.asyncio
+    async def test_streaming_publishes_done_sentinel(self) -> None:
+        """Redis pub/sub receives done sentinel after stream completes."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        published_messages: list[dict[str, Any]] = []
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        mock_redis = AsyncMock()
+
+        async def capture_publish(channel: str, message: str) -> None:
+            published_messages.append(json.loads(message))
+
+        mock_redis.publish = capture_publish
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                analysis_id="test-analysis-456",
+                pubsub_redis=mock_redis,
+            )
+
+        done_messages = [m for m in published_messages if m.get("type") == "done"]
+        assert len(done_messages) == 1, "Done sentinel not published (or published more than once)"
+
+    @pytest.mark.asyncio
+    async def test_streaming_publishes_to_correct_channel(self) -> None:
+        """Chunks and sentinel are published to coaching:{analysis_id} channel."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        published_channels: list[str] = []
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        mock_redis = AsyncMock()
+
+        async def capture_publish(channel: str, message: str) -> None:
+            published_channels.append(channel)
+
+        mock_redis.publish = capture_publish
+
+        analysis_id = "abc-789"
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            await service.generate_coaching_streaming(
+                exercise_type="bench",
+                exercise_variant="flat",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.85,
+                thresholds=ThresholdConfig(),
+                analysis_id=analysis_id,
+                pubsub_redis=mock_redis,
+            )
+
+        expected_channel = f"coaching:{analysis_id}"
+        assert all(ch == expected_channel for ch in published_channels), (
+            f"Messages published to wrong channels: {set(published_channels)}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_streaming_skips_redis_when_pubsub_none(self) -> None:
+        """When pubsub_redis=None, no Redis calls are made."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            # Must not raise even without Redis
+            result = await service.generate_coaching_streaming(
+                exercise_type="deadlift",
+                exercise_variant="conventional",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.80,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+            )
+
+        assert isinstance(result, CoachingOutput)
+
+    @pytest.mark.asyncio
+    async def test_streaming_retry_on_529(self) -> None:
+        """529 overload during streaming → retries with backoff, then raises."""
+        import anthropic
+
+        mock_client = MagicMock()
+        overload_error = anthropic.APIStatusError(
+            message="Overloaded",
+            response=MagicMock(status_code=529),
+            body={"error": {"type": "overloaded_error", "message": "Overloaded"}},
+        )
+
+        call_count = 0
+
+        async def mock_create_partial_fail(**kwargs: Any) -> Any:
+            nonlocal call_count
+            call_count += 1
+            raise overload_error
+            yield  # make it an async generator
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial_fail
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.APIStatusError) as exc_info:
+                    await service.generate_coaching_streaming(
+                        exercise_type="squat",
+                        exercise_variant="high_bar",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.90,
+                        thresholds=ThresholdConfig(),
+                        pubsub_redis=None,
+                    )
+
+        assert exc_info.value.status_code == 529
+        assert sleep_calls == [1.0, 2.0, 4.0]
+        assert call_count == 4  # 1 initial + 3 retries
+
+    @pytest.mark.asyncio
+    async def test_streaming_retry_on_timeout(self) -> None:
+        """APITimeoutError during streaming → retries with backoff."""
+        import anthropic
+        import httpx
+
+        mock_client = MagicMock()
+        timeout_error = anthropic.APITimeoutError(
+            request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+
+        async def mock_create_partial_timeout(**kwargs: Any) -> Any:
+            raise timeout_error
+            yield
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial_timeout
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.APITimeoutError):
+                    await service.generate_coaching_streaming(
+                        exercise_type="deadlift",
+                        exercise_variant="conventional",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.85,
+                        thresholds=ThresholdConfig(),
+                        pubsub_redis=None,
+                    )
+
+        assert sleep_calls == [1.0, 2.0, 4.0]
+
+    @pytest.mark.asyncio
+    async def test_streaming_401_fails_immediately(self) -> None:
+        """401 auth error during streaming → fails immediately, no retries."""
+        import anthropic
+
+        mock_client = MagicMock()
+        auth_error = anthropic.AuthenticationError(
+            message="Invalid API key",
+            response=MagicMock(status_code=401),
+            body={"error": {"type": "authentication_error", "message": "Invalid API key"}},
+        )
+
+        async def mock_create_partial_auth_fail(**kwargs: Any) -> Any:
+            raise auth_error
+            yield
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial_auth_fail
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+            with patch("app.services.coaching.asyncio.sleep", side_effect=mock_sleep):
+                service = CoachingService(anthropic_client=mock_client)
+                with pytest.raises(anthropic.AuthenticationError):
+                    await service.generate_coaching_streaming(
+                        exercise_type="squat",
+                        exercise_variant="high_bar",
+                        rep_metrics=_make_sample_rep_metrics(),
+                        confidence_score=0.90,
+                        thresholds=ThresholdConfig(),
+                        pubsub_redis=None,
+                    )
+
+        # Zero backoff sleeps on 401
+        assert sleep_calls == []
+
+    @pytest.mark.asyncio
+    async def test_streaming_uses_cache_control_on_system_prompt(self) -> None:
+        """FR-AICP-21: create_partial must be called with cache_control on system prompt."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        captured_kwargs: dict[str, Any] = {}
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+            )
+
+        system = captured_kwargs.get("system")
+        assert system is not None, "system prompt not passed to create_partial"
+        # Must be a list (Anthropic cache_control format)
+        assert isinstance(system, list), (
+            "system must be a list with cache_control, not a plain string"
+        )
+        assert len(system) == 1
+        block = system[0]
+        assert block.get("type") == "text"
+        assert "cache_control" in block, "cache_control missing from system prompt block"
+        assert block["cache_control"]["type"] == "ephemeral"
+
+    @pytest.mark.asyncio
+    async def test_streaming_output_no_injury_language(self) -> None:
+        """Coaching output must never contain banned injury language."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+            )
+
+        output_text = result.model_dump_json().lower()
+        banned_phrases = ["injury risk", "injury prevention"]
+        for phrase in banned_phrases:
+            assert phrase not in output_text, (
+                f"Banned phrase '{phrase}' found in coaching output"
+            )

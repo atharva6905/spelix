@@ -382,25 +382,47 @@ class CoachingService:
         analysis_id: Any = None,
         pubsub_redis: Any = None,
     ) -> CoachingOutput:
-        """Stream coaching from Claude, publish chunks to Redis, return validated output.
+        """Stream coaching from Claude via instructor create_partial, publish chunks to Redis.
 
         FR-AICP-07: Coaching output streamed via SSE.
         FR-AICP-21: Prompt caching on system prompt via Anthropic cache-control.
 
-        Flow:
-        1. Call Anthropic streaming API with cache-control on system prompt.
-        2. For each text chunk, publish to Redis channel ``coaching:{analysis_id}``.
-        3. Accumulate full response text.
-        4. After stream completes, publish ``{"type": "done"}`` sentinel.
-        5. Validate accumulated text into CoachingOutput via instructor.
-        6. Return the validated CoachingOutput.
+        Flow (D-001 — replaces stream-then-reparse pattern from ADR-021):
+        1. Call instructor.create_partial with cache-control on system prompt.
+        2. For each partial CoachingOutput snapshot, compute the text delta vs the
+           previous snapshot and publish it to Redis channel ``coaching:{analysis_id}``.
+        3. The last yielded snapshot is the fully validated CoachingOutput.
+        4. After the generator exhausts, publish ``{"type": "done"}`` sentinel.
+        5. Return the final validated CoachingOutput — no second LLM call.
 
         If pubsub_redis is None, skips Redis publishing (useful for tests).
-        Falls back to non-streaming generate_coaching() on error.
+
+        Parameters
+        ----------
+        exercise_type:
+            One of "squat", "bench", "deadlift".
+        exercise_variant:
+            Exercise-specific variant string (e.g. "high_bar", "conventional").
+        rep_metrics:
+            List of per-rep metric dicts extracted by the CV pipeline.
+        confidence_score:
+            Mean landmark visibility / Tier 5 score across all reps (0–1).
+        thresholds:
+            Loaded ThresholdConfig instance.
+        body_stats:
+            Optional athlete profile dict (height, weight, limb ratios).
+        keyframe_analysis_text:
+            Optional GPT-4o keyframe analysis text (Phase 1).
+        analysis_id:
+            Analysis UUID — used as Redis channel suffix. None → no channel.
+        pubsub_redis:
+            An async Redis client with a ``publish(channel, message)`` coroutine.
+            None → Redis publishing is skipped entirely.
         """
-        if self._raw_client is None:
+        if self._instructor_client is None:
             raise ValueError(
-                "CoachingService was constructed with anthropic_client=None."
+                "CoachingService was constructed with anthropic_client=None. "
+                "Provide a valid client or patch the instructor client in tests."
             )
 
         system_prompt = _build_system_prompt()
@@ -415,7 +437,16 @@ class CoachingService:
         )
 
         channel = f"coaching:{analysis_id}" if analysis_id else None
-        accumulated_text = ""
+        messages = [{"role": "user", "content": user_prompt}]
+
+        # FR-AICP-21: cache-control on system prompt (Anthropic block format)
+        system_blocks = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
 
         last_exc: Exception | None = None
 
@@ -424,77 +455,80 @@ class CoachingService:
                 await asyncio.sleep(delay)
 
             try:
-                # FR-AICP-21: cache-control on system prompt
-                # Anthropic SDK MessageStreamManager is async-context-manager compatible
-                # at runtime; the type stub is missing __aenter__/__aexit__.
-                async with self._raw_client.messages.stream(  # type: ignore[attr-defined]
+                final_result: CoachingOutput | None = None
+                previous_json = ""
+
+                # instructor.create_partial is an AsyncGenerator that yields
+                # progressively-complete partial CoachingOutput snapshots.
+                # The last snapshot is the fully validated result.
+                # No second LLM call is needed — this replaces the stream-then-reparse
+                # pattern (ADR-021, D-001).
+                async for partial in self._instructor_client.chat.completions.create_partial(
+                    response_model=CoachingOutput,
+                    messages=messages,
                     model=self._model,
                     max_tokens=MAX_TOKENS,
                     temperature=TEMPERATURE,
-                    system=[
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                    messages=[{"role": "user", "content": user_prompt}],
-                ) as stream:
-                    accumulated_text = ""
-                    async for text in stream.text_stream:
-                        accumulated_text += text
+                    system=system_blocks,
+                ):
+                    final_result = partial
 
-                        # Publish chunk to Redis for SSE endpoint
-                        if pubsub_redis and channel:
+                    # Publish text delta to Redis for SSE endpoint.
+                    # We diff the JSON representation of the partial model against
+                    # the previous snapshot to produce an incremental text chunk.
+                    if pubsub_redis and channel:
+                        current_json = partial.model_dump_json(exclude_none=True)
+                        # Compute the new characters added since the last snapshot
+                        delta = current_json[len(previous_json):]
+                        if delta:
                             await pubsub_redis.publish(
                                 channel,
-                                json.dumps({"type": "chunk", "text": text}),
+                                json.dumps({"type": "chunk", "text": delta}),
                             )
+                        previous_json = current_json
 
-                # Publish done sentinel
+                # Publish done sentinel after generator exhausts
                 if pubsub_redis and channel:
                     await pubsub_redis.publish(
                         channel,
                         json.dumps({"type": "done"}),
                     )
 
-                # Validate accumulated text into CoachingOutput via instructor
-                if self._instructor_client is None:
-                    raise ValueError("Instructor client not available")
+                if final_result is None:
+                    # Generator yielded nothing — treat as an empty response error
+                    raise ValueError(
+                        "instructor create_partial yielded no results for "
+                        f"exercise_type={exercise_type!r}"
+                    )
 
-                validated: CoachingOutput = await self._instructor_client.chat.completions.create(
-                    model=self._model,
-                    max_tokens=MAX_TOKENS,
-                    temperature=0.1,
-                    system=system_prompt,
-                    messages=[
-                        {"role": "user", "content": user_prompt},
-                        {"role": "assistant", "content": accumulated_text},
-                        {
-                            "role": "user",
-                            "content": (
-                                "Parse the coaching feedback above into the required "
-                                "structured format. Preserve all content exactly."
-                            ),
-                        },
-                    ],
-                    response_model=CoachingOutput,
-                )
-                return validated
+                return final_result
 
             except Exception as exc:
                 if _is_auth_error(exc):
                     logger.critical(
-                        "Anthropic 401 authentication error during streaming."
+                        "Anthropic 401 authentication error during streaming. "
+                        "exercise_type=%s",
+                        exercise_type,
                     )
                     raise
 
                 if _is_retryable(exc):
                     last_exc = exc
-                    logger.warning("Retryable Anthropic streaming error: %s", exc)
+                    logger.warning(
+                        "Retryable Anthropic streaming error: %s. "
+                        "exercise_type=%s",
+                        exc,
+                        exercise_type,
+                    )
                     continue
 
-                logger.error("Non-retryable Anthropic streaming error: %s", exc)
+                logger.error(
+                    "Non-retryable Anthropic streaming error: %s. "
+                    "exercise_type=%s exercise_variant=%s",
+                    exc,
+                    exercise_type,
+                    exercise_variant,
+                )
                 raise
 
         assert last_exc is not None

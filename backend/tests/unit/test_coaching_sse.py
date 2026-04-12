@@ -146,7 +146,12 @@ class TestStreamFromPubsub:
 class TestGenerateCoachingStreaming:
     @pytest.mark.asyncio
     async def test_publishes_chunks_to_redis(self) -> None:
-        """Streaming coaching should publish chunks to Redis pub/sub."""
+        """Streaming coaching should publish chunks to Redis pub/sub.
+
+        D-001 refactored streaming to use instructor.create_partial which yields
+        progressively-complete partial CoachingOutput snapshots.  The mock must
+        return an async iterable of partial models.
+        """
         from app.config import ThresholdConfig
         from app.services.coaching import CoachingService
 
@@ -156,26 +161,29 @@ class TestGenerateCoachingStreaming:
 
         analysis_id = uuid4()
 
-        # Mock the streaming context manager
-        mock_text_stream = AsyncMock()
-
-        async def text_iter():
-            for chunk in ["Hello ", "world ", "coaching"]:
-                yield chunk
-
-        mock_text_stream.text_stream = text_iter()
-
-        mock_stream_cm = AsyncMock()
-        mock_stream_cm.__aenter__ = AsyncMock(return_value=mock_text_stream)
-        mock_stream_cm.__aexit__ = AsyncMock(return_value=False)
-
-        mock_anthropic.messages = MagicMock()
-        mock_anthropic.messages.stream = MagicMock(return_value=mock_stream_cm)
-
-        # Mock the instructor validation call
         from app.schemas.coaching import CoachingOutput
 
-        mock_validated = CoachingOutput(
+        # Build progressively-complete partial snapshots that instructor
+        # create_partial would yield.  Each snapshot adds more fields.
+        partial_1 = CoachingOutput(
+            summary="Good",
+            strengths=["Depth"],
+            issues=[],
+            correction_plan=["Cue"],
+            disclaimer="d",
+            raw_prompt_tokens=0,
+            raw_completion_tokens=0,
+        )
+        partial_2 = CoachingOutput(
+            summary="Good session.",
+            strengths=["Solid depth"],
+            issues=[],
+            correction_plan=["Keep tracking"],
+            disclaimer="d",
+            raw_prompt_tokens=0,
+            raw_completion_tokens=0,
+        )
+        final = CoachingOutput(
             summary="Good session.",
             strengths=["Solid depth"],
             issues=[],
@@ -188,8 +196,14 @@ class TestGenerateCoachingStreaming:
             raw_completion_tokens=200,
         )
 
+        async def partial_iter():
+            for snapshot in [partial_1, partial_2, final]:
+                yield snapshot
+
         mock_instructor = AsyncMock()
-        mock_instructor.chat.completions.create = AsyncMock(return_value=mock_validated)
+        mock_instructor.chat.completions.create_partial = MagicMock(
+            return_value=partial_iter()
+        )
 
         with patch("app.services.coaching.instructor") as mock_mod:
             mock_mod.from_anthropic.return_value = mock_instructor
@@ -206,26 +220,28 @@ class TestGenerateCoachingStreaming:
             )
 
         assert isinstance(result, CoachingOutput)
+        assert result.summary == "Good session."
 
-        # Verify Redis publish was called for each chunk + done sentinel
+        # Verify Redis publish was called for chunk deltas + done sentinel
         channel = f"coaching:{analysis_id}"
         publish_calls = mock_pubsub_redis.publish.call_args_list
 
-        # 3 chunks + 1 done = 4 publish calls
-        assert len(publish_calls) == 4
+        # Each partial snapshot that produces a JSON delta → chunk publish,
+        # plus 1 done sentinel at the end.
+        assert len(publish_calls) >= 2  # at least 1 chunk + 1 done
 
-        # Check chunk messages
-        for i, chunk_text in enumerate(["Hello ", "world ", "coaching"]):
-            call_channel, call_data = publish_calls[i].args
+        # Last publish must be the done sentinel
+        last_channel, last_data = publish_calls[-1].args
+        assert last_channel == channel
+        parsed_last = json.loads(last_data)
+        assert parsed_last["type"] == "done"
+
+        # All non-done publishes must be chunk type
+        for call in publish_calls[:-1]:
+            call_channel, call_data = call.args
             assert call_channel == channel
             parsed = json.loads(call_data)
             assert parsed["type"] == "chunk"
-            assert parsed["text"] == chunk_text
-
-        # Check done sentinel
-        done_channel, done_data = publish_calls[3].args
-        assert done_channel == channel
-        assert json.loads(done_data)["type"] == "done"
 
     @pytest.mark.asyncio
     async def test_works_without_redis(self) -> None:
@@ -235,24 +251,9 @@ class TestGenerateCoachingStreaming:
 
         mock_anthropic = MagicMock()
 
-        # Mock streaming
-        mock_text_stream = AsyncMock()
-
-        async def text_iter():
-            yield "coaching output"
-
-        mock_text_stream.text_stream = text_iter()
-
-        mock_stream_cm = AsyncMock()
-        mock_stream_cm.__aenter__ = AsyncMock(return_value=mock_text_stream)
-        mock_stream_cm.__aexit__ = AsyncMock(return_value=False)
-
-        mock_anthropic.messages = MagicMock()
-        mock_anthropic.messages.stream = MagicMock(return_value=mock_stream_cm)
-
         from app.schemas.coaching import CoachingOutput
 
-        mock_validated = CoachingOutput(
+        final = CoachingOutput(
             summary="Good session.",
             strengths=["Solid depth"],
             issues=[],
@@ -265,8 +266,13 @@ class TestGenerateCoachingStreaming:
             raw_completion_tokens=200,
         )
 
+        async def partial_iter():
+            yield final
+
         mock_instructor = AsyncMock()
-        mock_instructor.chat.completions.create = AsyncMock(return_value=mock_validated)
+        mock_instructor.chat.completions.create_partial = MagicMock(
+            return_value=partial_iter()
+        )
 
         with patch("app.services.coaching.instructor") as mock_mod:
             mock_mod.from_anthropic.return_value = mock_instructor
