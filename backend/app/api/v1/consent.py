@@ -1,9 +1,9 @@
 """FastAPI router for consent endpoints (P2-029).
 
 Routes:
-    POST /api/v1/consent/          — grant consent (inserts new row, granted=True)
-    GET  /api/v1/consent/          — list all consent records for current user
-    POST /api/v1/consent/withdraw  — withdraw consent (inserts new row, granted=False)
+    POST /api/v1/consent          — grant consent (inserts new row, granted=True)
+    GET  /api/v1/consent          — list all consent records for current user
+    POST /api/v1/consent/withdraw — withdraw consent (inserts new row, granted=False)
 
 Append-only: withdrawals insert NEW rows — existing rows are never updated.
 
@@ -28,14 +28,14 @@ def _get_repo(db: AsyncSession = Depends(get_db)) -> ConsentRepository:
     return ConsentRepository(db)
 
 
-@router.post("/", response_model=ConsentResponse, status_code=201)
+@router.post("", response_model=ConsentResponse, status_code=201)
 async def grant_consent(
     body: ConsentCreate,
     user: CurrentUser = Depends(get_current_user),
     repo: ConsentRepository = Depends(_get_repo),
 ) -> ConsentResponse:
     """Grant consent — inserts a new row with granted=True."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     record = ConsentRecord(
         user_id=user["id"],
         consent_type=body.consent_type,
@@ -49,7 +49,7 @@ async def grant_consent(
     return ConsentResponse.model_validate(saved)
 
 
-@router.get("/", response_model=list[ConsentResponse])
+@router.get("", response_model=list[ConsentResponse])
 async def list_consents(
     user: CurrentUser = Depends(get_current_user),
     repo: ConsentRepository = Depends(_get_repo),
@@ -69,7 +69,7 @@ async def withdraw_consent(
 
     Append-only: the original grant row is preserved for audit purposes.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     record = ConsentRecord(
         user_id=user["id"],
         consent_type=body.consent_type,

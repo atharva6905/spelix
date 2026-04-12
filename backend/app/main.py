@@ -20,7 +20,7 @@ if os.getenv("SENTRY_DSN"):
         environment=os.getenv("SPELIX_ENV", "development"),
     )
 
-app = FastAPI(title="Spelix API", version="0.1.0")
+app = FastAPI(title="Spelix API", version="0.1.0", redirect_slashes=False)
 
 # Rate limiting (NFR-SECU-10)
 app.state.limiter = limiter

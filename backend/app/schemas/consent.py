@@ -17,10 +17,10 @@ ConsentType = Literal[
 
 
 class ConsentCreate(BaseModel):
-    """Request body for POST /api/v1/consent/."""
+    """Request body for POST /api/v1/consent."""
 
     consent_type: ConsentType
-    granted: bool
+    granted: bool = True
     consent_version: str
     ip_address_hash: Optional[str] = None
 
