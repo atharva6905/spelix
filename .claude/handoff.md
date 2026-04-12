@@ -1,23 +1,13 @@
-# Session 17 Handoff → Session 18: Batch 5 complete — citation validation, safety filter, Qdrant fallback, rerank timeout
+# Session 18 Handoff → Session 19: Batch 6 complete — citation tooltips + follow-up chat
 
 ## Completed
 
 | Task | Commit / PR | Description |
 |------|-------------|-------------|
-| P2-017 | `b48c5c1` PR #21 | ValidateOutputTool — regex [N] extraction, cross-ref against CitationBlocks, populate Issue.citation_indices, flag invalid references. Wired before CoVe in worker. |
-| P2-018 | `b48c5c1` PR #21 | SafetyFilter — replace prohibited "injury risk"/"injury prevention" phrases, inject medical screening disclaimer. Runs on all coaching outputs. |
-| P2-019 | `b48c5c1` PR #21 | Qdrant unavailable fallback — degraded_mode flag on CoachingOutput, SSE "degraded" phase event, pipeline never fails on retrieval failure. |
-| P2-020 | `b48c5c1` PR #21 | Rerank timeout — 3s asyncio.wait_for on Cohere rerank, fallback to RRF-fused scores. |
-| Schema | `b48c5c1` PR #21 | Issue.citation_indices (list[int]), CoachingOutput.degraded_mode (bool) — backward compatible. |
-| Lint fix | `7939a1e` PR #21 | Pre-existing ruff E402 in test_coaching_worker.py — mid-file import moved to top. |
+| P2-021 | `5cce808` PR #22 | CitationTooltip — parseWithCitations() splits `[N]` markers into interactive superscript buttons with hover/focus tooltips (title, authors, year, DOI link). Wired into summary, strengths, issues, correction_plan. Degraded mode amber banner when `degraded_mode=true`. Frontend types updated: `CoachingIssue.citation_indices`, `CoachingOutput.degraded_mode`. |
+| P2-022 | `0173006` PR #23 | Follow-up chat — full-stack. Backend: migration 005 (`chat_messages` table), `ChatMessage` model, `ChatMessageRepository`, `ChatService` (Claude Sonnet 4.6, non-streaming, context from coaching_result + retrieved_sources), `SafetyFilter.apply_text()`, POST+GET `/analyses/{id}/chat` with 30/day rate limit. Frontend: `useChat` hook (history load, optimistic send, error handling), `ChatPanel` component (message list, typing indicator, Enter-to-send), mounted below coaching on ResultsPage. |
 
 ## Remaining
-
-### Phase 2 Batch 6 — Frontend (gate: P2-013 ✅)
-| ID | Status | Deps met? | Notes |
-|----|--------|-----------|-------|
-| P2-021 | open | ✅ | Citation rendering in results page |
-| P2-022 | open | ✅ | Follow-up chat UI |
 
 ### Phase 2 Batch 7 — Coach Brain (partial done)
 | ID | Status | Deps met? | Notes |
@@ -44,47 +34,51 @@
 
 ## Test counts
 
-- **Backend**: 1229 passed / 19 skipped / 0 failures (+31 new from Batch 5)
-- **Frontend**: 178 passed / 0 failures (unchanged — no frontend changes this session)
+- **Backend**: 1242 passed / 19 skipped / 0 failures (+13 new from Batch 6)
+- **Frontend**: 212 passed / 0 failures (+17 new from Batch 6)
 - **Coverage**: ~91% backend
-- **Known failures**: none
-- **Alembic head**: `004_phase2_rag_coach_brain` (applied, no new migration this batch)
+- **Known failures**: 2 DB-dependent tests in test_models.py + test_repositories.py fail locally until migration 005 is applied to Supabase; CI passes (uses create_test_tables.py)
+- **Alembic head**: `005_add_chat_messages` (applied to droplet — rebuild in progress)
+
+## Droplet status
+
+- Containers being rebuilt (`docker compose build --no-cache`) to pick up P2-022 code (chat endpoint + migration 005)
+- After rebuild completes, verify: `ssh spelix-droplet "docker exec spelix-backend-1 uv run alembic current"`
+- Migration 005 creates `chat_messages` table — should auto-apply on container restart if entrypoint runs alembic
 
 ## E2E verification
 
-**Pending** — PR #21 awaiting CI green + merge. After merge, restart droplet containers to pick up QDRANT_URL/QDRANT_API_KEY/COHERE_API_KEY env vars. Then run an analysis via spelix.app and verify:
-1. Coaching output has `degraded_mode` field in structured_output_json
-2. SSE stream includes `"degraded"` phase event when Qdrant is unreachable
-3. No "injury risk" / "injury prevention" in any coaching text
-
-## Blockers
-
-None — Qdrant/Cohere env vars now on droplet. Containers need restart after merge.
+**Pending** — after droplet rebuild completes and Vercel deploy settles:
+1. Navigate to spelix.app, open a completed analysis
+2. Verify `[N]` citation markers appear as superscript buttons in coaching text
+3. Hover a marker — tooltip shows title/authors/year/DOI
+4. Scroll to chat panel below coaching, type a question, press Enter
+5. Verify assistant response appears
+6. Check no "injury risk" language in any output
+7. Check browser console for errors
 
 ## New files this session
 
-- `backend/app/services/validate_output.py` — ValidateOutputTool
-- `backend/app/services/safety_filter.py` — SafetyFilter
-- `backend/tests/unit/test_validate_output.py` — 13 tests
-- `backend/tests/unit/test_safety_filter.py` — 12 tests
-- `backend/tests/unit/test_qdrant_fallback.py` — 3 tests
+### P2-021 (frontend only)
+- `frontend/src/components/CitationTooltip.tsx` — `parseWithCitations()` + `CitationTooltip`
+- `frontend/src/components/__tests__/CitationTooltip.test.tsx` — 13 tests
 
-## Pipeline order (after Batch 5)
-
-```
-retrieval (with 3s rerank timeout P2-020)
-  → coaching generation
-  → degraded_mode stamp (P2-019)
-  → citation validation (P2-017, before CoVe)
-  → CoVe verification
-  → safety filter (P2-018, after CoVe)
-  → faithfulness gate
-  → store
-```
+### P2-022 (full-stack)
+- `backend/alembic/versions/005_add_chat_messages.py` — migration
+- `backend/app/models/chat_message.py` — SQLAlchemy model
+- `backend/app/repositories/chat_message.py` — DB access
+- `backend/app/schemas/chat.py` — Pydantic schemas
+- `backend/app/services/chat.py` — ChatService
+- `backend/app/api/v1/chat.py` — REST endpoints
+- `backend/tests/unit/test_chat_api.py` — 13 tests
+- `frontend/src/hooks/useChat.ts` — chat state hook
+- `frontend/src/hooks/__tests__/useChat.test.ts` — 5 tests
+- `frontend/src/components/ChatPanel.tsx` — chat UI
+- `frontend/src/components/__tests__/ChatPanel.test.tsx` — 10 tests
 
 ## Next session start
 
 ```bash
 /status
 ```
-Then continue with **Batch 6 (P2-021, P2-022)** — Frontend citation rendering + follow-up chat UI. All deps met.
+Then continue with **Batch 7 (P2-025, P2-026)** — Coach Brain seed corpus + hybrid retrieval. Or **Batch 8 (P2-032–034)** — eval logging if Coach Brain corpus data isn't ready.
