@@ -1,20 +1,20 @@
-# Session 18 Handoff → Session 19: Batch 6 complete — citation tooltips + follow-up chat
+# Session 19 Handoff → Session 20: Three production bugfixes — status page, quality gate guidance, portrait framing
 
 ## Completed
 
 | Task | PR | Squash SHA | Description |
 |------|----|------------|-------------|
-| P2-021 | #22 | `5cce808` | Citation tooltips (FR-RESL-06). `parseWithCitations()` in `CitationTooltip.tsx` splits `[N]` markers into superscript `<button>` elements with CSS-only hover/focus tooltips (title, authors, year, DOI link). Wired into summary, strengths, issues, correction_plan in `ResultsPage.tsx`. Degraded-mode amber banner when `degraded_mode=true` (FR-AICP-15). Types updated: `CoachingIssue.citation_indices`, `CoachingOutput.degraded_mode`. |
-| P2-022 | #23 | `0173006` | Follow-up chat (FR-RESL-09, FR-AICP-17). **Backend**: migration 005 `chat_messages` table, `ChatMessage` model, `ChatMessageRepository`, `ChatService` (Claude Sonnet 4.6, non-streaming, context = coaching_result + retrieved_sources), `SafetyFilter.apply_text()`, POST+GET `/analyses/{id}/chat` with 30/day rate limit. **Frontend**: `useChat` hook (history load, optimistic send, error rollback), `ChatPanel` component (message list, typing indicator, Enter-to-send), mounted below coaching on ResultsPage. |
-| — | — | `5632077` | Handoff + backlog docs commit (superseded by this file). |
-| ADRs | — | pending | ADR-P2-021 (CSS-only tooltips), ADR-P2-022a (non-streaming chat MVP), ADR-P2-022b (SafetyFilter.apply_text). |
-| Backlog fix | — | pending | P2-013/014/015/016 rows corrected from `open` to `done` with correct PR SHAs (stale from session 16-17). |
+| BUG-001 | #24 | `d768d95` | **Fix status page "Loading…" forever.** `useAnalysisStatus` hook subscribed to Supabase Realtime UPDATE events but never fetched initial state. Added `getAnalysisStatus()` call on mount so the page shows current status immediately. Updated 8 AnalysisStatusPage tests + 1 new initial-fetch test. 213 frontend tests pass. |
+| BUG-002 | #25 | `93620fa` | **Include `quality_gate_result` in status endpoint response.** `AnalysisStatusResponse` schema was missing the field, so the status page couldn't show specific rejection guidance (e.g. "move closer to camera"). Added `quality_gate_result: dict | None` to the Pydantic schema. 9 backend status endpoint tests pass. |
+| BUG-003 | #26 | `a11ff80` | **Fix framing quality gate rejecting well-framed portrait videos.** The `check_framing()` gate measured `bbox_width × bbox_height` as fraction of frame area (threshold 30%). Portrait 9:16 videos naturally produce ~21% area even when the subject fills the frame well. Fix: scale minimum threshold by aspect ratio (`width/height`) for portrait videos. E.g., 9:16 → threshold = 0.30 × 0.5625 = 0.169. Landscape threshold unchanged. 74 quality gate tests pass (+3 new). |
 
 ### Infra actions completed
-- Droplet containers rebuilt (`docker compose build --no-cache backend worker`)
-- Migration 005 applied via direct SQL from container (`CREATE TABLE chat_messages ...`)
-- Alembic version updated: `004_phase2_rag_coach_brain` → `005_add_chat_messages`
-- Containers healthy: backend (Up, healthy), worker (Up), redis (Up, healthy)
+- Droplet containers rebuilt twice (`docker compose -f docker-compose.prod.yml build --no-cache backend worker`)
+- PR #24 and #25 verified on prod via Playwright MCP
+- PR #26 deployed but **E2E verification interrupted by droplet OOM** — hard reboot required
+
+### Droplet OOM incident
+The `--no-cache` Docker build + immediate MediaPipe Heavy processing on the 2GB droplet exhausted RAM. SSH became unresponsive. Droplet needs a **hard reboot via DigitalOcean dashboard** (Power > Hard Reboot). After reboot, containers should auto-start via Docker Compose restart policy. If not: `ssh spelix-droplet "cd /home/deploy/spelix && docker compose -f docker-compose.prod.yml up -d"`.
 
 ## Remaining
 
@@ -24,6 +24,7 @@
 | P2-025 | open | ✅ (P2-023 + P2-024 done) | Seed corpus ingestion (≥20 entries) |
 | P2-026 | open | ✅ (P2-023 + P2-010 done) | Coach Brain hybrid retrieval + routing logic |
 | P2-027 | open | blocked on P2-026 | Cold-start fallback |
+| P2-028 | open | ✅ (P2-023 done) | Privacy-preserving trigger conditions |
 | P2-029 | open | ✅ (P2-001 done) | Three-tier consent UI |
 | P2-030 | open | blocked on P2-029 | Consent withdrawal cascade |
 | P2-031 | open | no deps | DPIA — hard privacy gate |
@@ -31,51 +32,70 @@
 ### Phase 2 Batch 8 — Eval Logging (all deps met)
 | ID | Status | Deps met? | Notes |
 |----|--------|-----------|-------|
-| P2-032 | open | ✅ | Per-analysis RAGAS/HHEM eval scores |
-| P2-033 | open | ✅ | Retrieval metrics logging |
-| P2-034 | open | ✅ | Langfuse Cloud setup |
+| P2-032 | open | needs P2-034 | Retrieval metrics logging |
+| P2-033 | open | ✅ | Per-analysis RAGAS/HHEM eval scores |
+| P2-034 | open | no deps | Langfuse Cloud setup |
 
 ### Tech debt (no deps)
 | ID | Status | Notes |
 |----|--------|-------|
-| D-004..D-010 | open | Session 13 cleanup items. D-005 (720p fixture) blocks D-008. |
-| P2-007 | open | Corpus curation — seed research papers (data work, not code) |
+| D-004..D-010 | open | Session 13 cleanup items. D-005 (720p fixture) may be partially addressed now that portrait framing gate is fixed — re-test with e2e/fixtures videos. |
 
 ## Test counts
 
-- **Backend**: 1242 passed / 19 skipped / 0 failures (+13 new from P2-022)
-- **Frontend**: 212 passed / 0 failures (+17 new from P2-021 + P2-022)
+- **Backend**: 1242 passed / 19 skipped / 0 failures (unchanged from session 19 — no new backend feature work, only schema + quality gate fixes)
+- **Frontend**: 213 passed / 0 failures (+1 new from PR #24)
 - **Coverage**: ~91% backend (CI enforces ≥90%)
-- **Known local-only failures**: 2 DB-dependent integration tests (`test_models.py::test_cascade_delete_rep_metrics`, `test_repositories.py::test_delete_removes_row`) fail locally because they connect to Supabase prod which had the old schema. CI passes — it uses `scripts/create_test_tables.py` which reflects all models including `ChatMessage`.
+- **Known local-only failures**: 2 DB-dependent integration tests (`test_models.py::test_cascade_delete_rep_metrics`, `test_repositories.py::test_delete_removes_row`) — CI passes.
 - **Alembic head**: `005_add_chat_messages` (applied on droplet)
 
 ## E2E verification
 
-**Not yet performed** — PR #22 and #23 merged to main today. Vercel frontend deploys automatically; droplet containers rebuilt and restarted with new code + migration 005 applied.
+### PR #24 — Status page initial fetch ✅
+- Navigated to `/analysis/df0b9f2c-...` (quality-gate-rejected squat)
+- Status page shows "Video could not be processed" immediately (was stuck on "Loading…" before fix)
+- Detected exercise card: "Squat — high bar, Confirmed by vision analysis"
+- Console errors: 0
+- Network: all 200s
 
-**Verify in next session** (after deploy settles ~2 min):
-1. `mcp__playwright__browser_navigate` → `https://spelix.app`
-2. Login, navigate to a completed analysis results page
-3. **Citation markers**: verify `[N]` superscript buttons appear in coaching text sections
-4. **Tooltip**: hover a citation marker → tooltip shows title/authors/year + DOI link
-5. **Chat panel**: scroll below coaching → "Ask a follow-up question" panel visible
-6. **Send message**: type a question, press Enter → verify assistant response appears
-7. **Safety language**: no "injury risk" or "injury prevention" in any coaching or chat text
-8. **Degraded mode**: (only testable if Qdrant is offline — skip unless simulating)
-9. `browser_console_messages` level=error → should be empty
-10. `browser_network_requests` → no 4xx/5xx
+### PR #25 — Quality gate guidance in status endpoint ✅
+- Navigated to `/analysis/f798d657-...` (quality-gate-rejected deadlift)
+- Status page now shows: "You appear too far from the camera. Please move closer so your body fills at least 30% of the frame."
+- Previously showed only "What to check:" with no details
+- Console errors: 0
+
+### PR #26 — Portrait framing gate fix ⏳ PENDING
+- Code deployed to droplet, containers rebuilt
+- Test upload of deadlift video submitted (analysis ID: `c1aa6d28-86d9-446c-8667-0392a844c89a`)
+- Worker began processing (MediaPipe ran) but droplet went OOM during processing
+- **Verify after droplet reboot**: re-upload a test video and confirm it passes quality gate → processing → coaching → completed
+- Once a completed analysis exists: verify citation tooltips (P2-021) + follow-up chat (P2-022) on the results page
+
+### Upload flow verified ✅
+- All 3 exercises uploaded successfully (squat, bench, deadlift) via Playwright MCP
+- Upload form: exercise type → variant → file select → submit → redirect to status page
+- Exercise auto-detection working: confirmed for all 3 types (vision fallback)
+- No safety language violations observed across any page
+
+### Transient CORS issue noted
+- Initial page loads after container restart sometimes show CORS errors (`No 'Access-Control-Allow-Origin'`)
+- Self-resolves within ~30 seconds after backend health check completes
+- Not a code bug — timing issue with Caddy → backend proxying during startup
 
 ## Blockers
 
-None. All Batch 6 deps were met. Qdrant/Cohere/Anthropic env vars confirmed on droplet from session 17.
+1. **Droplet needs hard reboot** — OOM from `--no-cache` Docker build + MediaPipe processing. Cannot verify PR #26 or test citation/chat features until droplet recovers.
+2. **Future deploys**: avoid `docker compose build --no-cache` on the 2GB droplet. Use regular `docker compose build` (with cache) unless Dockerfile structure changed. Alternatively, `docker system prune` before building.
 
 ## Next session start
 
 ```bash
+# 1. Reboot droplet first (if not already done via DO dashboard)
+# 2. Then:
 /status
 ```
 
-Then either:
-- **Batch 7 (P2-025, P2-026)** — Coach Brain seed corpus ingestion + hybrid retrieval routing. Requires `spelix-rag-engineer` agent. P2-025 is data work (curating ≥20 coach brain entries); P2-026 is code.
-- **Batch 8 (P2-032–034)** — Eval logging. All deps met. Pure backend work. Good choice if Coach Brain corpus data isn't ready yet.
-- **E2E verification first** — run Playwright MCP against spelix.app to verify Batch 5+6 features before starting new work.
+After `/status` confirms containers are healthy:
+1. Upload test-deadlift.mp4 via Playwright MCP → verify it passes quality gate with the portrait fix
+2. If analysis reaches `completed`: verify citation tooltips + follow-up chat on results page
+3. Then proceed to Batch 7 (P2-025 seed corpus, P2-026 hybrid retrieval) or Batch 8 (P2-034 Langfuse)
