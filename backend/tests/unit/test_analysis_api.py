@@ -481,6 +481,7 @@ class TestGetAnalysisStatus:
     def _make_status_analysis(self, status="processing"):
         obj = _make_mock_analysis(status=status)
         obj.detection_result = None
+        obj.quality_gate_result = None
         return obj
 
     def test_get_status_returns_200_with_status_fields(self):
@@ -591,7 +592,7 @@ class TestGetAnalysisStatus:
         assert resp.status_code == 200
         body = resp.json()
         # Only the three AnalysisStatusResponse fields should be present
-        assert set(body.keys()) == {"id", "status", "updated_at", "detection_result"}
+        assert set(body.keys()) == {"id", "status", "updated_at", "detection_result", "quality_gate_result"}
 
     def test_get_status_includes_detection_result(self):
         """Status response exposes detection_result when set (FR-XDET-07)."""

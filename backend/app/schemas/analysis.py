@@ -106,6 +106,7 @@ class AnalysisStatusResponse(BaseModel):
     status: str
     updated_at: datetime
     detection_result: DetectionResultSchema | None = None
+    quality_gate_result: dict | None = None
 
     model_config = {"from_attributes": True}
 
