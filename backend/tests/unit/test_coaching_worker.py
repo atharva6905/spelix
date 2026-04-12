@@ -811,6 +811,5 @@ async def test_eval_scores_langfuse_score_called():
 
     # Langfuse.score() should have been called for both metrics
     score_calls = mock_langfuse.score.call_args_list
-    names_called = {call.kwargs.get("name") or call.args[1] if call.args else call.kwargs.get("name") for call in score_calls}
     # At least faithfulness was logged
     assert any("faithfulness" in str(c) for c in score_calls)
