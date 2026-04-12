@@ -92,10 +92,21 @@ First session using `/team` (Agent Teams) for execution. 3 Sonnet teammates (lan
 1. **Droplet OOM (4th session)** — 2GB droplet cannot run MediaPipe Heavy + backend simultaneously. SSH times out. Needs hard reboot from DO dashboard, then: add 2GB swap, pull latest main, rebuild + restart containers. Until resolved, no video can complete processing on prod and no E2E verification is possible.
 2. **`.env.example` not updated** — langfuse-eval teammate couldn't write to it (permission denied). `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` need to be added manually.
 
+## Infrastructure — DigitalOcean MCP
+
+DigitalOcean MCP server configured in session 23. Claude Code can now manage the droplet directly (reboot, check status, monitor) without the DO dashboard.
+
+- **MCP server**: `@digitalocean/mcp-server` added via `claude mcp add digitalocean -s user`
+- **API token**: stored as `DIGITALOCEAN_API_TOKEN` environment variable (NOT in config files)
+- **Capability**: droplet list, reboot/power-cycle, status checks — solves the D-014 "need DO dashboard reboot" blocker
+
+Next session: verify the MCP tools load, then use them to reboot the droplet and resolve D-014 without user intervention.
+
 ## Next session start
 
 ```bash
-# 1. Hard reboot droplet from DO dashboard (if still unresponsive)
+# 0. Verify DO MCP is loaded — check for digitalocean tools in /mcp
+# 1. Use DO MCP to check droplet status / reboot if OOM-frozen
 # 2. After reboot, add swap + deploy all pending PRs:
 ssh spelix-droplet "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"
 ssh spelix-droplet "cd /home/deploy/spelix && git pull && docker compose -f docker-compose.prod.yml build backend worker && docker compose -f docker-compose.prod.yml up -d backend worker"
