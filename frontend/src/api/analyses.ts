@@ -302,3 +302,64 @@ export async function listAnalyses(
 
   return resp.json() as Promise<AnalysisListResponse>;
 }
+
+// ---------------------------------------------------------------------------
+// Types — Chat (P2-022, FR-RESL-09, FR-AICP-17)
+// ---------------------------------------------------------------------------
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export interface ChatHistoryResponse {
+  messages: ChatMessage[];
+}
+
+// ---------------------------------------------------------------------------
+// API — Chat
+// ---------------------------------------------------------------------------
+
+export async function getChatHistory(
+  analysisId: string,
+): Promise<ChatHistoryResponse> {
+  const token = await getAuthToken();
+  const resp = await fetch(
+    `${API_BASE}/api/v1/analyses/${analysisId}/chat`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to fetch chat history");
+  }
+
+  return resp.json() as Promise<ChatHistoryResponse>;
+}
+
+export async function sendChatMessage(
+  analysisId: string,
+  content: string,
+): Promise<ChatMessage> {
+  const token = await getAuthToken();
+  const resp = await fetch(
+    `${API_BASE}/api/v1/analyses/${analysisId}/chat`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content }),
+    },
+  );
+
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to send message");
+  }
+
+  return resp.json() as Promise<ChatMessage>;
+}

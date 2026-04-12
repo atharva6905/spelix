@@ -63,6 +63,12 @@ class SafetyFilter:
     """Post-generation safety enforcement for coaching output."""
 
     @staticmethod
+    def apply_text(text: str) -> str:
+        """Apply prohibited-phrase replacement to plain text (e.g. chat responses)."""
+        cleaned, _ = _replace_prohibited(text)
+        return cleaned
+
+    @staticmethod
     def apply(output: CoachingOutput) -> SafetyFilterResult:
         try:
             return SafetyFilter._apply_impl(output)

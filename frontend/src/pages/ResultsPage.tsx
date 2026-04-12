@@ -13,6 +13,7 @@ import { useParams, Link } from "react-router";
 import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
 import type { CoachingIssue, Citation, RepMetricDetail } from "@/api/analyses";
 import { parseWithCitations } from "@/components/CitationTooltip";
+import ChatPanel from "@/components/ChatPanel";
 import {
   getConfidenceCategory,
   type ConfidenceCategory,
@@ -682,6 +683,9 @@ export default function ResultsPage() {
             />
           </div>
         )}
+
+        {/* Follow-up chat (FR-RESL-09, FR-AICP-17) */}
+        {coachingData && <ChatPanel analysisId={analysis.id} />}
 
         {/* Rep metrics table (FR-RESL-04) */}
         <div className="rounded-lg bg-white p-6 shadow-sm">
