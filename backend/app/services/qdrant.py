@@ -1,0 +1,264 @@
+"""QdrantClientWrapper — async wrapper around qdrant-client AsyncQdrantClient.
+
+Implements P2-002 (FR-AICP-09, ADR-BRAIN-01, ADR-RAG-03, ADR-P2-001).
+
+Architecture notes:
+- Both collections use 1024-dim dense vectors (ADR-RAG-03) and server-side
+  BM25 sparse vectors named 'bm25' with IDF modifier (ADR-BRAIN-03).
+- coach_brain gets keyword payload indexes on 'exercise' and 'status' so
+  filters at query time are fast without a full-scan.
+- The factory ``get_qdrant_client`` follows the two-state cache pattern from
+  ``api/v1/analyses.py::_make_storage_service`` so the underlying gRPC/HTTP
+  connection is reused across requests (ADR-032).
+- ``qdrant_client.AsyncQdrantClient`` is imported inside ``get_qdrant_client``
+  (not at module top) so that ``patch("qdrant_client.AsyncQdrantClient")``
+  intercepts the lookup at call time.  This is the ADR-032 source-patch
+  pattern — patching the top-level ``from qdrant_client import AsyncQdrantClient``
+  binding would only replace the module attribute, not the already-bound local
+  name in this module's namespace.
+
+Usage::
+
+    from app.services.qdrant import get_qdrant_client
+
+    wrapper = await get_qdrant_client()
+    if wrapper is not None:
+        await wrapper.ensure_collections()
+        ok = await wrapper.ping()
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import TYPE_CHECKING, Any, Sequence
+
+from qdrant_client.models import (
+    Distance,
+    Modifier,
+    PayloadSchemaType,
+    SparseIndexParams,
+    SparseVectorParams,
+    VectorParams,
+)
+
+if TYPE_CHECKING:
+    from qdrant_client import AsyncQdrantClient
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Collection names — single source of truth (ADR-BRAIN-01)
+# ---------------------------------------------------------------------------
+
+COLLECTION_PAPERS_RAG = "papers_rag"
+COLLECTION_COACH_BRAIN = "coach_brain"
+
+# Vector dimensions — cross-cutting invariant from ADR-RAG-03
+_VECTOR_SIZE = 1024
+
+# Sparse vector name used for server-side BM25 (ADR-BRAIN-03)
+_SPARSE_VECTOR_NAME = "bm25"
+
+# ---------------------------------------------------------------------------
+# Module-level factory cache (ADR-032 two-state pattern)
+# ---------------------------------------------------------------------------
+
+_qdrant_client_cache: QdrantClientWrapper | None = None
+_qdrant_client_cache_initialized: bool = False
+
+
+async def get_qdrant_client() -> QdrantClientWrapper | None:
+    """Build and cache a ``QdrantClientWrapper`` backed by ``AsyncQdrantClient``.
+
+    Reads ``QDRANT_URL`` and ``QDRANT_API_KEY`` from environment variables.
+    Returns ``None`` when ``QDRANT_URL`` is not set (tests, local dev without
+    Qdrant Cloud configured) — callers must guard on None.
+
+    The constructed wrapper is cached at module level so repeated calls return
+    the same instance without reconnecting.
+
+    ``qdrant_client.AsyncQdrantClient`` is imported inside this function body
+    (not at module top) so that tests can patch it via
+    ``patch("qdrant_client.AsyncQdrantClient")`` and intercept the constructor
+    call at runtime (ADR-032 source-patch pattern).
+
+    Regression coverage: ``tests/unit/test_qdrant_client.py::TestGetQdrantClientFactory``.
+    """
+    global _qdrant_client_cache, _qdrant_client_cache_initialized
+
+    if _qdrant_client_cache_initialized:
+        return _qdrant_client_cache
+
+    qdrant_url = os.environ.get("QDRANT_URL")
+    qdrant_api_key = os.environ.get("QDRANT_API_KEY")
+
+    if not qdrant_url:
+        logger.warning(
+            "get_qdrant_client: QDRANT_URL not set — Qdrant unavailable"
+        )
+        _qdrant_client_cache = None
+        _qdrant_client_cache_initialized = True
+        return None
+
+    try:
+        # Deferred import so patch("qdrant_client.AsyncQdrantClient") intercepts
+        # the constructor call at test time (ADR-032).
+        import qdrant_client as _qdrant_client_mod
+
+        inner = _qdrant_client_mod.AsyncQdrantClient(
+            url=qdrant_url, api_key=qdrant_api_key
+        )
+        _qdrant_client_cache = QdrantClientWrapper(inner)
+    except Exception as exc:
+        logger.warning("get_qdrant_client: failed to construct client: %s", exc)
+        _qdrant_client_cache = None
+
+    _qdrant_client_cache_initialized = True
+    return _qdrant_client_cache
+
+
+# ---------------------------------------------------------------------------
+# QdrantClientWrapper
+# ---------------------------------------------------------------------------
+
+
+class QdrantClientWrapper:
+    """Async wrapper around ``qdrant_client.AsyncQdrantClient``.
+
+    Provides the minimal surface needed by Phase 2:
+
+    - ``ensure_collections()`` — idempotent provisioning of both collections
+    - ``ping()`` — health check returning ``bool``
+    - ``upsert_points()`` — thin passthrough to ``client.upsert``
+    - ``query_points()`` — thin passthrough to ``client.query_points``
+
+    Batch 2/3 will add higher-level retrieval methods directly to this class.
+
+    Parameters
+    ----------
+    client:
+        A live ``AsyncQdrantClient`` instance. Injected rather than constructed
+        internally so tests can supply a mock.
+    """
+
+    def __init__(self, client: AsyncQdrantClient) -> None:
+        self._client = client
+
+    # ------------------------------------------------------------------
+    # Provisioning
+    # ------------------------------------------------------------------
+
+    async def ensure_collections(self) -> None:
+        """Idempotently create both Qdrant collections if they don't exist.
+
+        Safe to call multiple times — a no-op if both collections already
+        exist.  This is the entrypoint for the one-shot provisioning script
+        and the startup path once Phase 2 worker is wired.
+
+        Collections created:
+        - ``papers_rag``: 1024-dim cosine + BM25 sparse (ADR-RAG-03, ADR-BRAIN-03)
+        - ``coach_brain``: same vector config + keyword indexes on
+          ``exercise`` and ``status`` (ADR-BRAIN-01)
+        """
+        await self._ensure_collection(COLLECTION_PAPERS_RAG, add_brain_indexes=False)
+        await self._ensure_collection(COLLECTION_COACH_BRAIN, add_brain_indexes=True)
+
+    async def _ensure_collection(
+        self, name: str, *, add_brain_indexes: bool
+    ) -> None:
+        exists = await self._client.collection_exists(collection_name=name)
+        if exists:
+            logger.info("ensure_collections: %r already exists — skipping", name)
+            return
+
+        logger.info("ensure_collections: creating collection %r", name)
+        await self._client.create_collection(
+            collection_name=name,
+            vectors_config=VectorParams(
+                size=_VECTOR_SIZE,
+                distance=Distance.COSINE,
+                on_disk=False,
+            ),
+            sparse_vectors_config={
+                _SPARSE_VECTOR_NAME: SparseVectorParams(
+                    index=SparseIndexParams(on_disk=False),
+                    modifier=Modifier.IDF,
+                )
+            },
+        )
+        logger.info("ensure_collections: created %r", name)
+
+        if add_brain_indexes:
+            await self._create_brain_indexes(name)
+
+    async def _create_brain_indexes(self, collection_name: str) -> None:
+        """Add keyword payload indexes for coach_brain query filters."""
+        for field in ("exercise", "status"):
+            await self._client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field,
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+            logger.info(
+                "ensure_collections: created payload index on %r.%s",
+                collection_name,
+                field,
+            )
+
+    # ------------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------------
+
+    async def ping(self) -> bool:
+        """Call the Qdrant health endpoint.
+
+        Returns ``True`` if the cluster responds, ``False`` on any exception.
+        Does NOT raise — callers (especially the keepalive cron) must be able
+        to handle ``False`` gracefully.
+        """
+        try:
+            await self._client.info()
+            return True
+        except Exception as exc:
+            logger.debug("ping: Qdrant health check failed: %s", exc)
+            return False
+
+    # ------------------------------------------------------------------
+    # Thin passthroughs (Phase 2 Batch 2/3 will add higher-level methods)
+    # ------------------------------------------------------------------
+
+    async def upsert_points(
+        self, collection: str, points: Sequence[Any]
+    ) -> Any:
+        """Thin passthrough to ``AsyncQdrantClient.upsert``.
+
+        Parameters
+        ----------
+        collection:
+            Target collection name (``papers_rag`` or ``coach_brain``).
+        points:
+            Sequence of ``PointStruct`` instances to upsert.
+        """
+        return await self._client.upsert(
+            collection_name=collection, points=points
+        )
+
+    async def query_points(
+        self, collection: str, query: Any, **kwargs: Any
+    ) -> Any:
+        """Thin passthrough to ``AsyncQdrantClient.query_points``.
+
+        Parameters
+        ----------
+        collection:
+            Target collection name.
+        query:
+            Dense query vector (list[float] of length 1024) or a Qdrant
+            ``Query`` object for hybrid queries.
+        **kwargs:
+            Forwarded verbatim to ``AsyncQdrantClient.query_points``.
+        """
+        return await self._client.query_points(
+            collection_name=collection, query=query, **kwargs
+        )

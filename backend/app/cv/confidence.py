@@ -1,8 +1,7 @@
 """
 Confidence scoring for CV pipeline.
 
-Phase 0: FR-CVPL-16 (simple mean visibility) — retained for backward compat.
-Phase 1: FR-CVPL-20–25 (Tier 1–5 composite confidence) — replaces Phase 0.
+Phase 1: FR-CVPL-20–25 (Tier 1–5 composite confidence).
 
 Also: FR-RESL-08 (session confidence), FR-REPM-04 (per-rep storage),
 FR-SCOR-10 (labels), FR-CVPL-25 (categorical labels only).
@@ -21,27 +20,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from app.cv.quality_gates import sigmoid
 
 if TYPE_CHECKING:
     from app.config import ThresholdConfig
     from app.cv.types import ConfidenceResult
-
-# ---------------------------------------------------------------------------
-# Exercise-specific landmark sets
-# ---------------------------------------------------------------------------
-
-# Squat and Deadlift: hips (23,24), knees (25,26), ankles (27,28)
-_SQUAT_DEADLIFT_LANDMARKS: frozenset[int] = frozenset({23, 24, 25, 26, 27, 28})
-
-# Bench: shoulders (11,12), elbows (13,14), wrists (15,16)
-_BENCH_LANDMARKS: frozenset[int] = frozenset({11, 12, 13, 14, 15, 16})
-
-_EXERCISE_LANDMARK_MAP: dict[str, frozenset[int]] = {
-    "squat": _SQUAT_DEADLIFT_LANDMARKS,
-    "deadlift": _SQUAT_DEADLIFT_LANDMARKS,
-    "bench": _BENCH_LANDMARKS,
-}
 
 # Column index for visibility within a (33, 5) landmark row
 _COL_VISIBILITY = 3
@@ -76,64 +58,6 @@ _GUIDANCE: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-
-def compute_rep_confidence(
-    landmarks_per_frame: list[np.ndarray],
-    start_frame: int,
-    end_frame: int,
-    exercise_type: str,
-) -> float:
-    """
-    Compute per-rep confidence for a single repetition (FR-CVPL-16).
-
-    Extracts the visibility column (index 3) for exercise-specific landmarks
-    across all frames in [start_frame, end_frame].  Applies sigmoid to handle
-    pre-sigmoid logit values from MediaPipe (GitHub #4411, #4462), then
-    returns the mean of all visibility values across the landmark set and
-    frame range.
-
-    Parameters
-    ----------
-    landmarks_per_frame:
-        List of (33, 5) arrays, one per frame, for the entire clip.
-    start_frame:
-        Inclusive start index of the rep within landmarks_per_frame.
-    end_frame:
-        Inclusive end index of the rep within landmarks_per_frame.
-    exercise_type:
-        One of "squat", "deadlift", "bench" (case-sensitive).
-
-    Returns
-    -------
-    float
-        Mean sigmoid-visibility in [0, 1].
-
-    Raises
-    ------
-    ValueError
-        If exercise_type is not a recognised exercise.
-    """
-    exercise_key = exercise_type.lower()
-    if exercise_key not in _EXERCISE_LANDMARK_MAP:
-        raise ValueError(
-            f"Unknown exercise type {exercise_type!r}. "
-            f"Expected one of: {sorted(_EXERCISE_LANDMARK_MAP.keys())}"
-        )
-
-    landmark_indices = _EXERCISE_LANDMARK_MAP[exercise_key]
-
-    vis_values: list[float] = []
-    for frame_idx in range(start_frame, end_frame + 1):
-        frame = landmarks_per_frame[frame_idx]
-        for lm_idx in landmark_indices:
-            raw_vis = float(frame[lm_idx, _COL_VISIBILITY])
-            vis_values.append(sigmoid(raw_vis))
-
-    if not vis_values:
-        return 0.0
-
-    return float(np.mean(vis_values))
 
 
 def compute_session_confidence(rep_confidences: list[float]) -> float:

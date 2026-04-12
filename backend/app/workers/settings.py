@@ -19,6 +19,7 @@ from arq.cron import cron
 
 from app.workers.analysis_worker import process_analysis
 from app.workers.cleanup import cleanup_expired_artifacts
+from app.workers.keepalive import ping_qdrant_health
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class WorkerSettings:
     functions = [process_analysis]
     cron_jobs = [
         cron(cleanup_expired_artifacts, hour=3, minute=0),  # 03:00 UTC nightly
+        cron(ping_qdrant_health, hour=2, minute=0),  # 02:00 UTC nightly (ADR-P2-001)
     ]
     on_startup = on_startup
     on_shutdown = on_shutdown

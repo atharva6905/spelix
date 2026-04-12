@@ -167,92 +167,125 @@ real metrics from real MediaPipe pose extraction.
 
 ---
 
-## Phase 1 — Known Deferred Items (non-blocking)
+## Phase 1 — Tech Debt (rolled into Phase 2 Batch 0)
 
-These are tracked as Phase 2 tech-debt items, not blockers.
+Session-14 rewrite: IDs re-numbered to match the Phase 2 kickoff brief. Old `P2-023/024/025`
+rows (same content as `D-001/002/003`) are deleted to avoid collision with new
+Phase 2 Coach Brain tasks that now occupy `P2-023..P2-034`.
 
-| ID | Title | Rationale |
-|----|-------|-----------|
-| D-001 | Double LLM call in `generate_coaching_streaming` — stream then re-validate with second instructor call. Doubles per-analysis token cost. Phase 2 will replace with instructor native streaming structured extraction. | Found by transition-gate auditor; Phase 1 correctness OK, cost optimization only. |
-| D-002 | Dead code — legacy `compute_rep_confidence` in `backend/app/cv/confidence.py` (no callers). Safe to remove in Phase 2 cleanup pass. | Superseded by `compute_confidence_result` Tier 1-5 pipeline. |
-| D-003 | ADR needed: document "stream-then-reparse" coaching pattern as Phase 1 tech debt and Phase 2 migration plan. | No ADR exists yet documenting the deviation from SRS "streams initial LLM response directly" phrasing. |
+| ID | Title | Status | Size | Commits | Notes |
+|----|-------|--------|------|---------|-------|
+| D-001 | Replace stream-then-reparse with instructor native streaming structured extraction | open | M | — | `services/coaching.py::generate_coaching_streaming` currently makes two LLM calls (stream raw text → second `instructor` call to re-validate into `CoachingOutput`). Halves per-analysis token cost when fixed. Tracked in ADR-021. Session 14 dispatch attempt bailed on FR-ID gate — re-dispatch next turn with explicit header. |
+| D-002 | Remove dead `compute_rep_confidence` from `cv/confidence.py` | done | S | `9d8137f` (guard test, TDD red) + `404b982` (function deletion, TDD green) | Superseded by `compute_confidence_result` Tier 1–5 pipeline (FR-CVPL-20..24, ADR-015). Deleted function body + orphaned `_SQUAT_DEADLIFT_LANDMARKS`/`_BENCH_LANDMARKS`/`_EXERCISE_LANDMARK_MAP` helpers. Guard test `TestComputeRepConfidenceIsRemoved` prevents reintroduction. |
+| D-003 | ADR: Phase 1 coaching stream-then-reparse as tech debt | done | S | — | **Already covered by ADR-021 (`decisions.md`). Closed with no new ADR — ADR-021 documents the deviation from SRS FR-AICP-07 phrasing and the migration plan that D-001 executes.** |
 
----
+## Phase 1 — Session 13 Production Hardening Follow-ups (renumbered D-004..D-010)
 
-## Phase 2 — Planning (Not Started)
-
-Generated directly from SRS Phase 2 MUST filter. Activate `spelix-rag-engineer` and
-`spelix-corpus-curator` at Phase 2 kickoff.
-
-### Infrastructure & Migrations
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-001 | Migration 004 — rag_documents + expert_annotations tables | M | — | FR-AICP-11 |
-| P2-002 | Qdrant Cloud cluster provisioning + collection schema | M | — | FR-AICP-09 |
-| P2-003 | Cohere API key env setup + embed-v4 client wrapper | S | — | FR-AICP-09 |
-
-### RAG Corpus Ingestion
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-004 | Document ingestion pipeline (chunk → embed → Qdrant upsert) | L | P2-002, P2-003 | FR-AICP-09 |
-| P2-005 | Recursive chunking at 500 tokens with 50-token overlap | M | P2-004 | FR-AICP-09 |
-| P2-006 | Metadata-as-payload pattern (title, authors, year, DOI, quality_tier) | S | P2-004 | FR-AICP-09 |
-| P2-007 | Corpus curation — seed research papers (Phase 2 initial set) | M | P2-004 | FR-AICP-09 |
-
-### Hybrid Retrieval
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-008 | Cohere dense embedding retrieval | M | P2-004 | FR-AICP-09 |
-| P2-009 | BM25 sparse retrieval over Qdrant payload | M | P2-004 | FR-AICP-09 |
-| P2-010 | Cohere Rerank 3.5 integration | M | P2-008, P2-009 | FR-AICP-09 |
-| P2-011 | Exercise-type filter at query time | S | P2-010 | FR-AICP-12 |
-| P2-012 | Min 3 docs per issue before generation guard | S | P2-010 | FR-AICP-09 |
-
-### Four-Stage Prompt Architecture
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-013 | Stage 1 — Cite-then-generate (retrieval before generation) | L | P2-010 | FR-AICP-08 |
-| P2-014 | Stage 2 — Structured generation (temperature split factual/motivational) | M | P2-013 | FR-AICP-08 |
-| P2-015 | Stage 3 — CoVe verification loop (claims → questions → revise) | XL | P2-014 | FR-AICP-08 |
-| P2-016 | Stage 4 — RAGAS faithfulness + TruLens groundedness gate | L | P2-015 | FR-AICP-08 |
-
-### Citation & Safety
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-017 | ValidateOutputTool — block uncited claims | M | P2-013 | FR-AICP-10 |
-| P2-018 | Mandatory safety hedging for medical clearance category | S | P2-014 | FR-AICP-14 |
-| P2-019 | Error handling — Qdrant unavailable fallback to ungrounded | M | P2-004 | FR-AICP-15 |
-| P2-020 | Error handling — Cohere rate limit + OpenAI embed fallback | M | P2-003 | FR-AICP-16 |
-
-### Frontend — Citations + Follow-Up Chat
-
-| ID | Title | Size | Deps | SRS IDs |
-|----|-------|------|------|---------|
-| P2-021 | Citation tooltips on coaching claims (hover → source) | M | P2-013 | FR-RESL-06 |
-| P2-022 | Follow-up chat panel below coaching | L | P2-013 | FR-RESL-09, FR-AICP-17 |
-
-### Phase 2 Cleanup (from Phase 1 deferred)
-
-| ID | Title | Size | Deps |
-|----|-------|------|------|
-| P2-023 | Replace stream-then-reparse with instructor native streaming | M | — |
-| P2-024 | Remove dead compute_rep_confidence function | S | — |
-| P2-025 | Write ADR for Phase 1 coaching pattern deviation | S | — |
-
-### Phase 2 Cleanup (from Session 13 production hardening)
+Previously occupied `P2-026..P2-032`. Renumbered to `D-*` tech-debt series so they don't
+collide with the new Phase 2 Coach Brain / DPIA / eval tasks below.
 
 | ID | Title | Size | Deps | Notes |
 |----|-------|------|------|-------|
-| P2-026 | Drop the doubled `videos/videos/` storage path prefix | S | — | `get_storage_path` returns `f"videos/{id}/{filename}"` and the bucket is also called `videos`, so signed URLs end up at `.../object/upload/sign/videos/videos/{id}/...`. Internally consistent (read + write use the same path), so NOT a functional bug — just an ugly leftover from before the bucket name was decided. Fix is one line in `storage.py` + a one-shot DB UPDATE / Storage MOVE to migrate any existing rows. Defer until prod has data we'd lose if migrated wrong. |
-| P2-027 | Replace `e2e/fixtures/squat-high-bar.mp4` with a real 720p side-view clip | S | — | Current fixture is 360p with body filling 8% of frame. The quality gate correctly rejects on `resolution` (need 720p) and `framing` (need ≥30%). Need a real 720p+ side-view squat clip where body fills ≥30% of frame so the **success path** (`processing → coaching → completed → results page → PDF`) can be verified end-to-end. Phone-recorded 10s clip is fine. |
-| P2-028 | Backend gotcha doc: "tests-mock-everything" anti-pattern with concrete examples | S | — | Add a dedicated section to `backend/CLAUDE.md` documenting the eight regression test patterns added in session 13 (`TestMakeStorageServiceFactory`, `TestGetDbCommit`, `TestMakeArqPoolFactory`, `TestGetServicePassesArqPool`, `TestThresholdConfigPathResolution`, `TestModelPathResolution`, `test_video_path_contains_real_uuid_not_string_none`, `test_error_handler_skips_transition_when_already_failed`) as canonical examples of "exercise the real factory with the third-party patched at its source". Reference ADR-032. |
-| P2-029 | CI factory-coverage smoke test | M | P2-028 | Add a CI step (or pytest marker) that asserts every factory function in `app/api/v1/*.py`, `app/services/*.py`, `app/workers/*.py` has at least ONE test that exercises the real factory path (not just the consumer). Linter or grep-based heuristic; doesn't need to be exhaustive. The goal is to make it impossible to add a new singleton/factory/cached-client without a regression test. |
-| P2-030 | Verify untested production subsystems via E2E once happy-path lands | S | P2-027 | After P2-027 lands a fixture that passes the quality gate, run the full E2E and surface any further dormant config bugs in: Anthropic coaching call (`ANTHROPIC_API_KEY`), OpenAI keyframe analysis (`OPENAI_API_KEY`, best-effort), WeasyPrint PDF generation (system fonts), Realtime status subscriptions, artifact upload to Storage. Each will surface as `error_message` on the row OR via the global exception handler from PR #4 if it fails. Probably zero changes needed but never been verified live. |
-| P2-031 | Add post-deploy smoke check to CI deploy workflow | S | — | Bake into the `Deploy to Production` job in `.github/workflows/ci.yml`: after `docker compose up -d --build` and the health check, run a one-shot Python script inside the backend container that constructs the storage factory, the arq pool, and the threshold config — exercising the real production env vars. Fail the deploy if any of them fail. Would have caught B-138/139/141/142/146a at deploy time instead of letting the user discover them via Playwright E2E. |
-| P2-032 | Tighten `AnalysisService.__init__` arq_pool typing | S | P2-031 | Currently `arq_pool: Any \| None = None` — defaulting to None was the dead-code parameter that hid Phase 0 B-145 for months. Tighten to `arq_pool: ArqRedis` (no default) once we're confident every call site passes a real pool. Existing test fixtures will need to construct a fake pool, but that's a one-time update and prevents the silent no-op forever. |
+| D-004 | Drop the doubled `videos/videos/` storage path prefix | S | — | `get_storage_path` returns `f"videos/{id}/{filename}"` and the bucket is also called `videos`, so signed URLs end up at `.../object/upload/sign/videos/videos/{id}/...`. Internally consistent, NOT a functional bug — ugly leftover from before the bucket name was decided. Fix is one line in `storage.py` + a one-shot DB UPDATE / Storage MOVE. Defer until prod has data that would be painful to migrate wrong. |
+| D-005 | Replace `e2e/fixtures/squat-high-bar.mp4` with a real 720p side-view clip | S | — | Current fixture is 360p, body fills 8% of frame. Quality gate correctly rejects on `resolution` and `framing`. Need real 720p+ side-view squat clip with ≥30% body coverage so success path (processing → coaching → completed → results → PDF) can be E2E-verified. |
+| D-006 | Backend gotcha doc: "tests-mock-everything" anti-pattern | S | — | Dedicated section in `backend/CLAUDE.md` documenting the 8 regression test patterns added in session 13 (`TestMakeStorageServiceFactory`, `TestGetDbCommit`, `TestMakeArqPoolFactory`, `TestGetServicePassesArqPool`, `TestThresholdConfigPathResolution`, `TestModelPathResolution`, `test_video_path_contains_real_uuid_not_string_none`, `test_error_handler_skips_transition_when_already_failed`) as canonical "exercise real factory with third-party patched at source" examples. Reference ADR-032. |
+| D-007 | CI factory-coverage smoke test | M | D-006 | CI step asserting every factory function in `api/v1/*.py`, `services/*.py`, `workers/*.py` has ≥1 test exercising the real factory path (not just the consumer). Grep-based heuristic; goal is to make it impossible to add a new singleton/factory/cached-client without a regression test. |
+| D-008 | Verify untested production subsystems via E2E after happy-path fixture lands | S | D-005 | Once D-005 lands a fixture that passes the quality gate, run the full E2E and surface dormant config bugs in Anthropic coaching, OpenAI keyframe analysis, WeasyPrint PDF, Realtime status subscriptions, artifact Storage upload. |
+| D-009 | Post-deploy smoke check in CI deploy workflow | S | — | Bake into `Deploy to Production` job: after `docker compose up -d --build` and health check, run a one-shot Python script inside the backend container that constructs the storage factory, arq pool, and threshold config — exercising real production env vars. Fail the deploy on any failure. Would have caught B-138/139/141/142/146a at deploy time. |
+| D-010 | Tighten `AnalysisService.__init__` arq_pool typing | S | D-009 | Currently `arq_pool: Any \| None = None` — defaulting to None was the dead-code parameter that hid B-145 for months. Tighten to `arq_pool: ArqRedis` (no default) once every call site passes a real pool. Prevents the silent no-op forever. |
+
+---
+
+## Phase 2 — Active (kickoff 2026-04-11, session 14)
+
+Authoritative task list: Phase 2 kickoff brief.
+Active agents: `spelix-tdd`, `spelix-auditor`, `spelix-security-reviewer`, `spelix-migration`,
+`spelix-rag-engineer`, `spelix-corpus-curator` (6 total — at the agent roster cap).
+
+**Hard privacy gates** (block any production Coach Brain write until BOTH are met):
+1. `P2-031` (DPIA document) merged to main.
+2. `P2-029` (three-tier consent UI) passes `spelix-security-reviewer` sign-off.
+
+**Budget cap**: $0.10/analysis (NFR-PERF-05). Do not add LLM calls that push above.
+**Latency cap**: ≤90s end-to-end, ≤5s first coaching token, CoVe budget 6–13s/iter max_iterations=2.
+**Data provenance**: only `reviewed_approved` documents enter Qdrant `papers_rag`.
+Seed Coach Brain corpus only: `source=seed_manual_validated`. Distillation pipeline is Phase 3.
+
+### Batch 1 — Infrastructure (run /parallel — fully independent)
+
+| ID | Title | Size | Deps | SRS IDs | Status | Commits |
+|----|-------|------|------|---------|--------|---------|
+| P2-001 | Migration 004 — rag_documents + expert_annotations + coach_brain_entries + consent_records tables + retrieval_context + eval_scores JSONB columns on analyses + RLS on consent_records | M | — | FR-AICP-11, FR-BRAIN-01, FR-BRAIN-11, FR-BRAIN-16, NFR-PRIV-01 | done | `608e007` (initial migration + tests) + `d2eb0a0` (drop phantom `set_updated_at()` triggers + fix `pg_class.rowsecurity` helper). Applied to live Supabase. 17/17 integration tests pass. Column names landed as `retrieval_context` + `eval_scores` (not `retrieved_sources_json` + `eval_scores_json`) — Batches 2–8 must use these names. `expert_annotations` designed as chunk-level Qdrant mirror (document_id, chunk_index, chunk_text, embedding_model, qdrant_point_id, citation_metadata), not reviewer/action/notes. `coach_brain_entries.content` not `coaching_action`. `coach_brain_entries.status` enum: `seed \| active \| deprecated`. `consent_records.consent_type` enum: `coach_brain_contribution \| health_data_processing \| analytics`. |
+| P2-002 | Qdrant Cloud cluster provisioning + dual-collection schema (`papers_rag` + `coach_brain`, both 1024 dim cosine + BM25 sparse, payload indexes on coach_brain.exercise + status) + nightly keepalive ARQ cron `ping_qdrant_health` | M | — | FR-AICP-09, FR-BRAIN-01, FR-BRAIN-13, ADR-BRAIN-01, ADR-BRAIN-03, ADR-RAG-03, ADR-032, ADR-P2-001 | done | `d54f543` — QdrantClientWrapper + module-level factory cache + deferred source-patch import + ensure_collections() idempotent + ping() never-raises + thin upsert/query passthroughs. Shared Phase 2 RAG schemas (ChunkPayload, RetrievedContext, RetrievalResult, CitationBlock) in `schemas/rag.py`. Nightly `ping_qdrant_health` cron at 02:00 UTC (offset from 03:00 cleanup). `scripts/provision_qdrant.py` one-shot. 38 new tests (18 qdrant_client + 20 rag_schemas). `CoachBrainEntry` deferred to P2-023. **Live provisioning against Qdrant Cloud not yet run — next turn task.** |
+| P2-003 | Cohere API client wrapper — `embed-v4.0` + `rerank-v4.0-pro`, 96-batch limit, rate limit respect, explicit `output_dimension=1024`, `cohere.AsyncClientV2` (SDK v6+), mocked in all CI tests | S | — | FR-AICP-09, ADR-RAG-01, ADR-RAG-03, ADR-032 | done | `12b1e46` (test) + `eeec555` (impl) + `67c7df6` (config + `.env.example`). Cherry-picked from worktree `agent-adc83ac4`, dropped stale backlog-hygiene commit `3666581`. cohere SDK 6.1.0 is async-native (no `asyncio.to_thread`). `output_dimension=1024` passed on every call, asserted by regression test. `rerank-v4.0-pro` model pinned + test-asserted. 6 new tests. `COHERE_API_KEY` in `config.py` as `SecretStr`. |
+
+### Batch 2 — Ingestion Pipeline (gate: P2-002, P2-003 merged; /team phase2-rag)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-004 | Document ingestion pipeline: Docling parse → chunk → embed → Qdrant upsert. Idempotent via `sha256(paper_id:chunk_index)` as point ID. Only `reviewed_approved` documents enter Qdrant. | L | P2-002, P2-003 | FR-AICP-09, FR-RAGK-01, ADR-RAG-02 | open |
+| P2-005 | Recursive 500-token chunking, 50-token overlap, section-aware preprocessing (abstract / methods / results extracted separately) | M | P2-004 | FR-AICP-09 | open |
+| P2-006 | Metadata-as-payload pattern: title/authors/year/doi/quality_tier/section stored on every Qdrant point for filter-at-query-time | S | P2-004 | FR-AICP-09, FR-RAGK-06 | open |
+| P2-007 | Corpus curation — seed research papers. ≥10 per exercise. Sources: PubMed E-utilities, OpenAlex, Semantic Scholar. 4-layer quality tier weights (L1 SR/MA 2.0, L2 PEDro≥5 1.5, L3 PEDro 3-4 1.0, L4 guidelines 0.5). Recency boost ×1.2 for post-2020. | M | P2-004 | FR-RAGK-02, FR-RAGK-03 | open |
+
+### Batch 3 — Hybrid Retrieval (gate: P2-004 merged; /team phase2-rag)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-008 | Cohere dense embedding retrieval from papers_rag (`input_type="search_query"`) | M | P2-004 | FR-AICP-09 | open |
+| P2-009 | BM25 sparse retrieval via Qdrant server-side sparse vectors (not client-side) | M | P2-004 | FR-AICP-09 | open |
+| P2-010 | Cohere **Rerank 4.0** integration as cross-collection score normaliser. Reranks merged papers_rag + coach_brain results in one call. | M | P2-008, P2-009 | FR-AICP-09, ADR-RAG-01 | open |
+| P2-011 | Exercise-type filter at query time via Qdrant payload filter before reranking | S | P2-010 | FR-AICP-12 | open |
+| P2-012 | Min 3 docs per issue guard before generation — emit `coaching_unavailable` sentinel on failure | S | P2-010 | FR-AICP-09 | open |
+
+### Batch 4 — Four-Stage Prompt Architecture (gate: P2-010 merged)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-013 | Stage 1 — Cite-then-generate. Retrieved context injected as CitationBlock list; prompt instructs model to cite by index. | L | P2-010 | FR-AICP-08 | open |
+| P2-014 | Stage 2 — Structured generation with temperature split. Factual corrections temp=0.1, motivational cues temp=0.7. instructor + Pydantic v2. | M | P2-013 | FR-AICP-08 | open |
+| P2-015 | Stage 3 — CoVe verification loop (extract_claims → generate_questions → answer_independently → check_consistency → revise). max_iterations=2, 6–13s budget/iter. Non-convergence is NOT failure — stream with `cove_verified=false`. | XL | P2-014 | FR-AICP-08 | open |
+| P2-016 | Stage 4 — RAGAS `FaithfulnesswithHHEM` (Vectara HHEM-2.1-Open T5) gate. Score ≥0.8 stream; <0.8 route to flag_review queue but still stream (FR-AICP-15). | L | P2-015 | FR-AICP-08 | open |
+
+### Batch 5 — Citation & Safety
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-017 | `ValidateOutputTool` — block uncited factual claims. Any claim without matching citation index fails validation, triggers CoVe re-generation. | M | P2-013 | FR-AICP-10 | open |
+| P2-018 | Mandatory safety hedging for MEDICAL_CLEARANCE category issues. Inject standard disclaimer before any coaching text. "injury risk" / "injury prevention" PROHIBITED (Spelix language rule). | S | P2-014 | FR-AICP-14 | open |
+| P2-019 | Error handling — Qdrant unavailable fallback to ungrounded coaching with disclaimer. Never raise 500 on retrieval failure. | S | P2-004 | FR-AICP-09 | open |
+| P2-020 | Rerank timeout handling — if Cohere Rerank 4.0 exceeds 3s, skip rerank and use RRF-merged scores directly. Log to Langfuse. | S | P2-010 | FR-AICP-09 | open |
+
+### Batch 6 — Frontend (gate: P2-013 merged; /parallel)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-021 | Citation rendering on results page. Inline superscript footnotes. Click → expand paper metadata card with "Source: [title], [authors], [year]" format. | M | P2-013 | FR-RESL-06 | open |
+| P2-022 | Follow-up chat UI. Post-analysis chat panel using same RAG pipeline. Context window includes `coaching_result + retrieved_sources` from completed analysis. | L | P2-013 | FR-RESL-09, FR-AICP-17 | open |
+
+### Batch 7 — Coach Brain Foundation (gate: P2-002 merged; /team phase2-brain)
+
+P2-023 produces the canonical `CoachBrainEntry` schema — blocks P2-024..P2-028.
+`spelix-security-reviewer` sign-off is mandatory for P2-025 coaching strings,
+P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-023 | Coach Brain Qdrant collection schema + canonical `CoachBrainEntry` Pydantic schema in `app/schemas/coach_brain.py`. 1024 dim, BM25 sparse, payload indexes on exercise + status. **Blocks P2-024..P2-028.** | M | P2-002 | FR-BRAIN-01, ADR-BRAIN-01 | open |
+| P2-024 | Contextual embedding pipeline (FR-BRAIN-03). Prepend `"exercise:{ex} phase:{ph} type:{entry_type}\n{text}"` before embedding. Store enriched text separately from raw `coaching_action`. `input_type="search_document"`. | M | P2-023 | FR-BRAIN-03, ADR-BRAIN-02 | open |
+| P2-025 | Seed corpus ingestion — ≥20 entries covering squat (depth, knee cave, back rounding), bench (bar path, elbow flare, leg drive), deadlift (lumbar flexion, hip hinge, lockout). `status=approved`, `source=seed_manual_validated`, `confirmation_count=1`. | L | P2-023, P2-024 | FR-BRAIN-09, FR-BRAIN-18 | open |
+| P2-026 | Coach Brain hybrid retrieval in RetrieveTool. Queries BOTH collections concurrently (`asyncio.gather`), reranks merged results via Rerank 4.0. Routing: ≥0.82 `coach_brain_primary`; 0.65–0.82 `hybrid_brain_supplementary`; <0.65 `papers_only_fallback`. | M | P2-023, P2-010 | FR-BRAIN-04, ADR-BRAIN-03 | open |
+| P2-027 | Cold-start fallback logic (FR-BRAIN-05). When `retrieval_source=papers_only_fallback`, omit "Based on Coach Brain data..." prefix. Log fallback to Langfuse. | S | P2-026 | FR-BRAIN-05 | open |
+| P2-028 | Privacy-preserving trigger conditions (FR-BRAIN-10). Body proportion attributes in `trigger_tags` use categorical bins (3-5 categories), never raw measurements. Min group size n≥20 enforced before any pattern surfaces. | M | P2-023 | FR-BRAIN-10 | open |
+| P2-029 | Three-tier consent UI (FR-BRAIN-11). Tier 1 service consent (Article 6(1)(b)). Tier 2 explicit health-data consent (Article 9(2)(a), distinct interaction). Tier 3 optional aggregate consent (service must work without). Store to `consent_records` with timestamp + ip_hash + tier. | L | P2-001 | FR-BRAIN-11, ADR-BRAIN-05, NFR-PRIV-01 | open |
+| P2-030 | Consent withdrawal cascade (FR-BRAIN-16). ARQ job (NOT synchronous) that removes user analysis_ids from `source_analysis_ids` across ALL `coach_brain_entries`. If empty AND `confirmation_count<3`: soft-delete (`status=rejected`, `rejected_reason=source_consent_withdrawn`). | M | P2-001, P2-029 | FR-BRAIN-16 | open |
+| P2-031 | DPIA documentation (FR-BRAIN-15). Produce `docs/dpia.md` covering GDPR Article 35(7): systematic description, necessity/proportionality, risk assessment, mitigation measures. **Hard gate — no production Coach Brain writes without it.** | M | — | FR-BRAIN-15 | open |
+
+### Batch 8 — Eval Logging (gate: P2-016 merged; /parallel)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-032 | Retrieval metrics logging to Langfuse (FR-BRAIN-13). Per-query log of `retrieval_source` enum, similarity scores, hit counts, Coach Brain contribution %. Target: Coach Brain contributes to >40% of queries within 3 months. | M | P2-034 | FR-BRAIN-13 | open |
+| P2-033 | Per-analysis RAGAS + HHEM eval scores stored in `analyses.eval_scores_json`. Format: `{"faithfulness": float, "hhem": float, "cove_verified": bool, "cove_iterations": int}`. | M | P2-016, P2-001 | FR-AICP-16 | open |
+| P2-034 | Langfuse Cloud integration. `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` in env. `LangfuseClient` singleton injected into coaching service. Trace: `analysis_id` as `session_id`. Mock in all CI tests. | M | — | FR-BRAIN-13 | open |
 
