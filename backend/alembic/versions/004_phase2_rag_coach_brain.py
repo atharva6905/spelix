@@ -87,11 +87,6 @@ def upgrade() -> None:
         "expert_annotations",
         ["document_id"],
     )
-    op.execute(
-        "CREATE TRIGGER set_expert_annotations_updated_at "
-        "BEFORE UPDATE ON expert_annotations "
-        "FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
-    )
 
     # ------------------------------------------------------------------
     # coach_brain_entries — FR-BRAIN-01 + FR-BRAIN-16
@@ -176,11 +171,6 @@ def upgrade() -> None:
         ["source_analysis_ids"],
         postgresql_using="gin",
     )
-    op.execute(
-        "CREATE TRIGGER set_coach_brain_entries_updated_at "
-        "BEFORE UPDATE ON coach_brain_entries "
-        "FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
-    )
 
     # ------------------------------------------------------------------
     # consent_records — FR-BRAIN-11, NFR-PRIV-01, ADR-BRAIN-05
@@ -211,11 +201,6 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_consent_records_user_id", "consent_records", ["user_id"])
-    op.execute(
-        "CREATE TRIGGER set_consent_records_updated_at "
-        "BEFORE UPDATE ON consent_records "
-        "FOR EACH ROW EXECUTE FUNCTION set_updated_at()"
-    )
 
     # RLS on consent_records — FR-BRAIN-11, NFR-PRIV-01
     op.execute("ALTER TABLE consent_records ENABLE ROW LEVEL SECURITY")
@@ -247,21 +232,17 @@ def downgrade() -> None:
     op.execute("DROP POLICY IF EXISTS user_own_data ON consent_records")
     op.execute("ALTER TABLE consent_records DISABLE ROW LEVEL SECURITY")
     op.drop_index("ix_consent_records_user_id", table_name="consent_records")
-    op.execute("DROP TRIGGER IF EXISTS set_consent_records_updated_at ON consent_records")
     op.drop_table("consent_records")
 
     # coach_brain_entries
     op.drop_index("ix_coach_brain_entries_source_analysis_ids", table_name="coach_brain_entries")
     op.drop_index("ix_coach_brain_entries_trigger_tags", table_name="coach_brain_entries")
     op.drop_index("ix_coach_brain_entries_exercise_phase_status", table_name="coach_brain_entries")
-    op.execute("DROP TRIGGER IF EXISTS set_coach_brain_entries_updated_at ON coach_brain_entries")
     op.drop_table("coach_brain_entries")
 
     # expert_annotations
     op.drop_index("ix_expert_annotations_document_id", table_name="expert_annotations")
-    op.execute("DROP TRIGGER IF EXISTS set_expert_annotations_updated_at ON expert_annotations")
     op.drop_table("expert_annotations")
 
     # rag_documents
-    op.execute("DROP TRIGGER IF EXISTS set_rag_documents_updated_at ON rag_documents")
     op.drop_table("rag_documents")

@@ -134,9 +134,10 @@ async def _fk_targets_for_column(
 
 
 async def _rls_enabled(session: AsyncSession, table_name: str) -> bool:
+    # Postgres column is pg_class.relrowsecurity, not rowsecurity.
     result = await session.execute(
         text(
-            "SELECT rowsecurity FROM pg_class "
+            "SELECT relrowsecurity FROM pg_class "
             "JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace "
             "WHERE pg_class.relname = :t AND pg_namespace.nspname = 'public'"
         ),
