@@ -1,150 +1,109 @@
-# Session 13 Handoff → Session 14: Phase 2 Planning Kickoff
+# Session 14 Handoff → Session 15: Phase 2 Batch 2 + Coach Brain + D-001
 
-## Status
+## Completed
 
-- **Phase 1 production-functional** as of 2026-04-11 after 14 PRs (#3–#14, plus 2 docs commits) cleared 12 layers of dormant Phase 0 bugs. The full upload → worker pipeline → quality gates path runs end-to-end on `spelix.app`. Verified live via direct droplet SSH with the orphan analysis row `214bf593-bd41-45a4-81a1-98064a1fd199` — pipeline ran 100.48s, transitioned `quality_gate_pending → processing → quality_gate_rejected` cleanly, produced structured per-check metrics from real MediaPipe pose extraction.
-- **Backend**: 960 tests passing (was 895), 91% coverage. **Frontend**: 178 tests passing (was 177).
-- **Main branch**: clean, all CI green, last commit `6188e33` (docs catch-up for decisions.md + backlog.md).
-- **Outstanding**: one Phase 2 cleanup task (P2-027) blocking happy-path verification — need a real 720p+ side-view squat video fixture.
+| Task | Commits | PR | Description |
+|------|---------|-----|-------------|
+| D-002 | `9d8137f` (guard test, TDD red) + `404b982` (deletion, TDD green) | #15 | Dead `compute_rep_confidence` deleted from `cv/confidence.py`. Guard test `TestComputeRepConfidenceIsRemoved` prevents reintroduction. |
+| D-003 | — | — | Closed — already covered by ADR-021. No new ADR needed. |
+| P2-001 | `608e007` (migration + integration tests) + `d2eb0a0` (trigger fix + RLS helper fix) | #15 | Migration 004: `rag_documents`, `expert_annotations`, `coach_brain_entries`, `consent_records` + `retrieval_context` / `eval_scores` JSONB on `analyses` + RLS `user_own_data` on `consent_records`. Applied to live Supabase. |
+| P2-002 | `d54f543` | #15 | `QdrantClientWrapper` (dual-collection 1024-dim cosine + BM25 sparse), shared RAG Pydantic types (`ChunkPayload`, `RetrievedContext`, `RetrievalResult`, `CitationBlock`), nightly `ping_qdrant_health` cron at 02:00 UTC. `scripts/provision_qdrant.py` one-shot. |
+| P2-003 | `12b1e46` (test) + `eeec555` (impl) + `67c7df6` (config) | #15 | `CohereEmbedClient` — `embed-v4.0` + `rerank-v4.0-pro`, 96-batch chunking, `output_dimension=1024` mandatory + regression-test-asserted, `cohere.AsyncClientV2` v6.1.0 async-native. |
+| Docs | `fc4c885` (backlog + 11 ADRs) + `7b4872a` (mark tasks done) | #15 | `backlog.md` Phase 2 section rewritten from kickoff brief. `decisions.md` gained ADR-P2-001, ADR-RAG-01..03, ADR-BRAIN-01..07. |
+| CI fix | `d61f476` | #15 | `test_migration_004.py` refactored to `TEST_DATABASE_URL` + `@pytest.mark.integration` (self-skips in CI). `provision_qdrant.py` ruff F841 fixed. |
 
-## Completed this session
-
-| PR | Commit | Description |
-|----|--------|-------------|
-| #3 | `94dd0fa` | `_make_storage_service` returned `client=None` even with env vars set + initial global exception handler with CORS headers. |
-| #4 | `754393c` | Sync `create_client` vs awaited storage methods → `acreate_client` + module-level cache + enriched exception envelope (`detail.type`/`detail.message`). |
-| #5 | `02fcc88` | `/insights/global` + cleanup cron tz-aware datetime against naive `created_at` column → strip tzinfo. |
-| (env) | (droplet) | `SUPABASE_SERVICE_ROLE_KEY` was a JWT from the wrong Supabase project — fixed via `.env.prod` + `--force-recreate`. |
-| (dashboard) | (Supabase) | Created the missing `videos` storage bucket in the canonical project. |
-| #6 | `12cd90b` | Frontend `tus-js-client` against REST signed upload URL — wrong protocol. Switched to XHR PUT, dropped pause/resume. 22 tests rewritten. |
-| #7 | `4415ad0` | `get_db()` never committed — every DB write rolled back since Phase 0 B-005. SQLAlchemy `autocommit=False` strikes. |
-| #8 | `eb1a8c9` | `_get_service` never wired the ARQ pool → `start_analysis` silently no-op'd the worker enqueue while flipping the row to `quality_gate_pending`. |
-| #9 | `b427f17` | (a) `ThresholdConfig()` path resolution computed `/config/...` (filesystem root) inside Docker + Dockerfile didn't copy `config/` at all. (b) Status guard rejected `queued/quality_gate_pending → failed`. |
-| #10 | `92ecc85` | `start_analysis` AND `pipeline.run_cv_pipeline` both did `→ quality_gate_pending` → self-transition wall. Removed duplicate. |
-| #11 | `7076c4b` | `analysis.video_path` set to literal string `'None'` because `gen_uuid` runs at flush, not `__init__` + worker error handler `failed → failed` self-transition wall. |
-| #12 | `fb1b12d` | `mediapipe.solutions` doesn't exist on Linux x86_64 wheels (verified across 0.10.9–0.10.33) → migrated `pose_extraction.py` to MediaPipe Tasks API. Bake `pose_landmarker_heavy.task` into Docker image at build via curl. |
-| #13 | `491da90` | Tasks API `libmediapipe.so` needs `libGLESv2.so.2` + `libEGL.so.1` (verified via `ldd`). Added `libgles2` + `libegl1` to Dockerfile. |
-| #14 | `7bf8361` | `quality_gates.video_file_check` shells out to `ffprobe`. Added `ffmpeg` to Dockerfile. |
-| docs | `bd16861` | Session 13 handoff with full layer-by-layer breakdown. |
-| docs | `6188e33` | `decisions.md` + `backlog.md` catch-up: 6 new ADRs (027–032), 15 new B-IDs (B-138–B-149c), 7 new Phase 2 cleanup tasks (P2-026–P2-032). |
-| docs | (this commit) | `/adr` command path bug fix + new `/backlog` command + CLAUDE.md update protocol for decisions.md and backlog.md. |
-
-## Test counts
-
-- Backend: **960 passed**, 8 skipped, 0 failures, 91% coverage (was 895 at Phase 1 transition gate)
-- Frontend: **178 passed**, 0 failures, tsc clean (was 177)
-- CI: green on PRs #3 through #14 + the docs commits on `main`
-- Production E2E: pipeline verified end-to-end via SSH on the droplet (see "End-to-end production verification" in commit `bd16861`)
-
-## E2E verification
-
-Direct SSH against `spelix-droplet`:
-
-```
-worker-1 | 12:18:27: 0.31s → 9d507b689ed5450987af1528ee925f34:process_analysis(...)
-worker-1 | INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
-worker-1 | 12:20:08: 100.48s ← 9d507b689ed5450987af1528ee925f34:process_analysis ●
-```
-
-Final row state:
-
-```json
-{
-  "status": "quality_gate_rejected",
-  "retry_count": 0,
-  "error_message": null,
-  "quality_gate_result": {
-    "passed": false,
-    "checks": [
-      {"name": "video_file_check", "passed": true,  "metric_value": 14.23, "threshold": 120},
-      {"name": "resolution",       "passed": false, "metric_value": 360,   "threshold": 720},
-      {"name": "body_visibility",  "passed": true,  "metric_value": 0.6946,"threshold": 0.3},
-      {"name": "framing",          "passed": false, "metric_value": 0.0799,"threshold": 0.3},
-      {"name": "single_person",    "passed": true,  "metric_value": 0,     "threshold": 2}
-    ]
-  }
-}
-```
-
-The pipeline works end-to-end. The test fixture itself is what fails the gate (360p, body fills 8% of frame). Replace the fixture and the success path runs.
+PR #15 squash-merged as `2503e07`. Deploy to Production succeeded. Orphan worktree branches pruned (7 deleted).
 
 ## Remaining
 
-| ID | Title | Why it blocks Phase 2 | Owner |
-|----|-------|-----------------------|-------|
-| P2-027 | Replace `e2e/fixtures/squat-high-bar.mp4` with a real 720p+ side-view clip | Without this, the **success path** (`processing → coaching → completed → results page → PDF`) cannot be verified end-to-end. Pipeline rejects on `resolution` (360p < 720p) and `framing` (8% < 30%). | **You** — phone-record a 10–30s squat clip, drop in `e2e/fixtures/squat-high-bar.mp4`, commit. |
-| P2-030 | Verify untested production subsystems via E2E once happy path lands | Anthropic coaching, OpenAI keyframe, WeasyPrint PDF, Realtime status, artifact upload — none have been exercised in production yet. The orphan row never reached them because the gate rejected first. | Next session — run after P2-027 lands. |
+### Tech debt (no deps, can interleave)
+| ID | Status | Deps met? | Notes |
+|----|--------|-----------|-------|
+| D-001 | **open — dispatch failed** | ✅ | Instructor native streaming refactor. `spelix-coaching-engineer` bailed on FR-ID gate. Re-dispatch with `SRS_IDS: FR-AICP-07` in prompt header (first 5 lines). |
+| D-004..D-010 | open | varies | Session 13 cleanup items. D-005 (720p fixture) still blocks D-008 (happy-path E2E). D-007 blocked on D-006. D-010 blocked on D-009. Others independent. |
 
-The other Phase 2 cleanup tasks (P2-026, P2-028, P2-029, P2-031, P2-032) are not blocking — they're polish.
+### Phase 2 Batch 2 — Ingestion Pipeline (gate: P2-002 + P2-003 ✅)
+| ID | Status | Deps met? |
+|----|--------|-----------|
+| P2-004 | open | ✅ — start here |
+| P2-005 | open | blocked on P2-004 |
+| P2-006 | open | blocked on P2-004 |
+| P2-007 | open | blocked on P2-004 |
+
+### Phase 2 Batch 3 — Hybrid Retrieval (gate: P2-004)
+P2-008..P2-012 — all open, blocked on P2-004.
+
+### Phase 2 Batch 4 — Four-Stage Prompt (gate: P2-010)
+P2-013..P2-016 — all open, blocked on P2-010.
+
+### Phase 2 Batch 5 — Citation & Safety
+P2-017..P2-020 — all open, blocked on P2-013 or P2-014.
+
+### Phase 2 Batch 6 — Frontend (gate: P2-013)
+P2-021..P2-022 — all open, blocked on P2-013.
+
+### Phase 2 Batch 7 — Coach Brain Foundation (gate: P2-002 ✅)
+| ID | Status | Deps met? |
+|----|--------|-----------|
+| P2-023 | open | ✅ — start here (blocks P2-024..P2-028) |
+| P2-024..P2-028 | open | blocked on P2-023 |
+| P2-029 | open | P2-001 ✅ |
+| P2-030 | open | blocked on P2-029 |
+| P2-031 | open | no deps — **hard privacy gate** |
+
+### Phase 2 Batch 8 — Eval Logging (gate: P2-016)
+P2-032..P2-034 — all open, blocked on P2-016 (except P2-034 Langfuse Cloud which has no deps).
+
+## Test counts
+
+- **Backend local**: 1012 passed / 8 skipped (with `TEST_DATABASE_URL` set for migration integration tests)
+- **Backend CI**: 995 passed / 25 skipped (17 migration integration tests skip since `TEST_DATABASE_URL` unset)
+- **Frontend**: 178 passed / 0 failures / tsc clean (unchanged from session 13 — no frontend changes this session)
+- **Coverage**: 91% backend (unchanged — migration integration tests don't contribute to coverage)
+- **Known failures**: none
+- **Alembic head**: `004_phase2_rag_coach_brain` (applied to live Supabase)
+
+## E2E verification
+
+PR #15 was schema-only + infrastructure (new tables, new services not yet wired into pipeline, dep adds). No user-facing behavior change. Playwright MCP smoke check after deploy:
+
+- **Navigate**: `https://spelix.app` → redirected to `/upload`, page rendered with full form (exercise type, variant, video file, upload button).
+- **Console errors**: 0
+- **Failed network requests (4xx/5xx)**: 0
+- **Verdict**: PASS — production unaffected by Phase 2 infrastructure additions.
+
+Full flow walk-through (login → upload → status → results → PDF) deferred — no pipeline or coaching code changed; would exercise the same Phase 1 paths already verified in session 13.
 
 ## Blockers
 
-- **None code-side.** Main is clean, CI green, all 12 production layers fixed.
-- **One content-side**: P2-027. Recording a 10s squat clip at 720p is the only thing standing between us and full happy-path verification.
+1. **Qdrant Cloud collections not yet provisioned**. `scripts/provision_qdrant.py` exists but hasn't been run against the live cluster. Must run BEFORE any Batch 2 ingestion work (`P2-004`). Requires `QDRANT_URL` + `QDRANT_API_KEY` in `backend/.env` (already confirmed present).
+
+2. **P2-001 column-name drift from kickoff-brief spec**. The migration landed with different names than the spec draft. All downstream code (Batches 2–8) must reference:
+   - `analyses.retrieval_context` (not `retrieved_sources_json`)
+   - `analyses.eval_scores` (not `eval_scores_json`)
+   - `expert_annotations` = chunk-level Qdrant mirror (`document_id`, `chunk_index`, `chunk_text`, `embedding_model`, `qdrant_point_id`, `citation_metadata`) — NOT reviewer/action/notes
+   - `coach_brain_entries.content` (not `coaching_action`)
+   - `coach_brain_entries.status` CHECK: `seed|active|deprecated` (not `pending|approved|rejected`)
+   - `consent_records.consent_type` CHECK: `coach_brain_contribution|health_data_processing|analytics` (not `tier_1_service|tier_2_health_data|tier_3_aggregate`)
+
+   This is documented in `backlog.md` P2-001 done-row and `memory/session_state.md`. Agent dispatch prompts for Batch 2+ MUST include these column names explicitly or agents will write code against the stale spec.
+
+3. **Agent dispatch FR-ID lesson**. `spelix-migration`, `spelix-tdd`, `spelix-coaching-engineer` all refuse unless the dispatch prompt has explicit `SRS_IDS: FR-XXXX-NN` in the first 5 lines. Backlog-row references are NOT sufficient. `spelix-rag-engineer` is inconsistent (accepted P2-003, refused P2-002). Safest template: always frontload `SRS_IDS:` as a prompt header field.
 
 ## Next session start
 
-This session is ending. The next session should be a **Phase 2 planning kickoff**. Kick off with this exact sequence:
-
 ```bash
-# 1. Sync main + verify clean state
-git checkout main && git pull
-git log --oneline -5  # last 5 should include 6188e33 docs catch-up
-ssh spelix-droplet "cd /home/deploy/spelix && git log --oneline -1"
-# Both should show the same commit if the deploy ran cleanly.
+# 1. Load environment state
+/status
 
-# 2. Re-read the SRS Phase 2 Must filter to generate the canonical task list
-rg "\| \*\*Must\*\*.*\| 2 \s*\|" docs/SRS.md
-# Paste output into backlog.md under "Phase 2 — Planning" — REPLACE the
-# existing P2-001 through P2-022 IF they don't match the SRS exactly.
-# CLAUDE.md general rule says: "Never schedule batches from session memory
-# alone — Phase 1 missed FR-REPM-08/09 this way."
+# 2. Provision Qdrant Cloud (one-shot, first time only)
+cd backend && uv run python scripts/provision_qdrant.py
 
-# 3. Activate Phase 2 specialist agents (per Agent Architecture in CLAUDE.md):
-#    - spelix-rag-engineer (Qdrant, Cohere embed/rerank, hybrid retrieval, ingestion)
-#    - spelix-corpus-curator (research document ingestion, metadata, citation provenance)
-# Both agent definitions live in .claude/agents/ — verify they exist + are current.
+# 3. Re-dispatch D-001 (instructor native streaming refactor)
+#    Use spelix-coaching-engineer with SRS_IDS: FR-AICP-07 in prompt header
 
-# 4. Run /phase to execute the phase transition gate checklist:
-#    - Verify Phase 1 is actually complete (all MUSTs implemented, tests green,
-#      audit clean)
-#    - Update CLAUDE.md to "Current phase: Phase 2"
-#    - Update memory.md to phase=2 task=P2-001 status=ready
-
-# 5. Ask the user (Atharva) for:
-#    - Decision on Migration 004 schema (rag_documents + expert_annotations)
-#    - Qdrant Cloud cluster — already provisioned, or create now?
-#    - Cohere API key — already in .env.prod, or set up now?
-#    - Initial corpus seed — which research papers to ingest first
-#      (probably starting with the SRS-cited references for FR-AICP-09)
-
-# 6. Use /plan for the first Phase 2 task (P2-001 — Migration 004), then dispatch
-#    to spelix-migration. Do NOT skip /plan — Phase 1 missed FR-REPM-08/09 via
-#    backlog drift; the structured Explore → Plan → Execute workflow exists to
-#    prevent that.
-
-# 7. Run /adr inline whenever you make any architectural choice during Phase 2
-#    planning — Qdrant collection schema, chunking strategy, embedding model
-#    pinning, RLS policies on rag_documents, etc. The CLAUDE.md "decisions.md
-#    update protocol" section now makes this a hard rule. Don't batch.
-
-# 8. Run /backlog inline whenever you complete or discover a task. Same rule.
+# 4. Activate Phase 2 Batch 2 + Batch 7 in parallel:
+#    /team phase2-rag  — starting at P2-004 (ingestion pipeline)
+#    /team phase2-brain — starting at P2-023 (Coach Brain schema-first)
+#    Both gates met: P2-002 + P2-003 merged.
 ```
-
-## Session 14 expectations
-
-- **Length**: planning-only session, no code shipping. Should finish in <3 hours.
-- **Output**: a fully-seeded `backlog.md` Phase 2 section, ADR-033+ for any new architectural decisions, the first task (P2-001) planned via `/plan` and ready to execute in session 15.
-- **Optional**: if the user records the test fixture during the session, run the happy-path E2E verification (P2-030) before starting Phase 2 planning. That way Phase 1 closure is fully observed before opening Phase 2.
-
-## Key learnings carried forward from session 13
-
-1. **Mocking entire third-party modules masks dormant bugs.** Every Spelix test that touched storage / mediapipe / repo layer mocked them entirely, so production code paths were untested. ADR-032 codifies the "exercise real factory with source-patched third-party" rule. Phase 2 RAG tests MUST follow this pattern — mock at `cohere.Client`, not at `EmbeddingService`.
-2. **`SQLAlchemy default=` runs at flush, not construction.** Anyone reading `obj.id` before flush sees `None`. ADR-028. Pre-generate UUIDs explicitly.
-3. **`AsyncSession` requires explicit commit.** ADR-027. Every dependency or worker session block needs commit-on-success / rollback-on-exception.
-4. **State machine guards must allow operational `→ failed` transitions OR error handlers must guard against self-transitions.** ADR-031.
-5. **Linux mediapipe wheels never had `solutions`.** Use the Tasks API. ADR-029.
-6. **Docker `COPY` can't reach above the build context.** Bind-mounting via docker-compose is the cleanest fix. The same pattern will apply to Phase 2 RAG documents if they ever live outside `backend/`.
-7. **Pre-launch debugging via direct SSH (`spelix-droplet` alias) is way faster than asking the user to paste commands.** CLAUDE.md "Droplet Debugging (SSH)" section codifies this.
-8. **The enriched global exception handler (PR #4) was the single biggest force multiplier of the session.** Every subsequent layer was diagnosed in one browser fetch instead of requiring server-log access. Worth keeping permanently.
-9. **`/adr` and `/backlog` must be invoked INLINE with code changes**, not batched at end-of-session. Session 13 lost track of half the decisions because of end-of-session batching. CLAUDE.md "decisions.md & backlog.md Update Protocol" section codifies this.
