@@ -250,7 +250,9 @@ async def _run_pipeline(
                 if qdrant_wrapper is not None:
                     sparse_svc = SparseRetrievalService(qdrant_wrapper)
                     retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
-                    orchestrator = DualCollectionOrchestrator(retrieval_svc, cohere_client)
+                    orchestrator = DualCollectionOrchestrator(
+                        retrieval_svc, cohere_client, langfuse_client=langfuse_client
+                    )
 
                     retrieval_query = (
                         f"{analysis.exercise_type} {analysis.exercise_variant} technique coaching"
