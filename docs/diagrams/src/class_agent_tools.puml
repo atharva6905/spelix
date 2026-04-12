@@ -1,0 +1,119 @@
+@startuml class_agent_tools
+' Blackboard pattern — SRS §5.1 + §3.8 FR-AICP-18..20 + §3.16
+' LangGraph AgentState is a typed blackboard read/written by composable tools.
+' v2.1: retrieve_papers and retrieve_coach_brain are separate @tool functions
+' per FR-BRAIN-04; dual-collection concurrent retrieval per FR-AICP-09.
+
+!theme plain
+skinparam shadowing false
+skinparam roundcorner 4
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title LangGraph Agent — Blackboard Pattern with Composable Tools
+
+class AgentState <<TypedDict>> <<blackboard>> {
+  +analysis_id : UUID
+  +exercise_type : str
+  +exercise_variant : str
+  +rep_metrics : list[RepMetrics]
+  +form_deviations : list[Deviation]
+  +retrieved_papers : list[Chunk]
+  +retrieved_coach_brain : list[BrainEntry]
+  +retrieval_source : str
+  +user_history : list[AnalysisSummary]
+  +correction_plan : CorrectionPlan
+  +coaching_draft : StructuredCoaching
+  +cove_verified : bool
+  +cove_iterations : int
+  +messages : list[Message]
+}
+
+abstract class Tool <<Command>> {
+  +name : str
+  +description : str
+  +{abstract} execute(state: AgentState) : AgentState
+}
+
+class GetRepMetricsTool {
+  +execute(state) : AgentState
+  ' reads from DB for analysis_id
+}
+
+class RetrievePapersTool <<@tool>> {
+  -qdrant : QdrantClient
+  -collection = "papers_rag"
+  +execute(state) : AgentState
+  ' hybrid dense+sparse, filter exercise_type,
+  ' Cohere Rerank 4.0 top-5
+}
+
+class RetrieveCoachBrainTool <<@tool>> <<v2.0>> {
+  -qdrant : QdrantClient
+  -collection = "coach_brain"
+  +execute(state) : AgentState
+  ' payload filter status=approved,
+  ' enriched embedding_text to reranker,
+  ' cold-start fallback (FR-BRAIN-05)
+}
+
+class FlagFormDeviationTool {
+  -config : ThresholdConfig
+  +execute(state) : AgentState
+  ' compares metrics vs ThresholdConfig vN
+}
+
+class CompareToUserHistoryTool {
+  +execute(state) : AgentState
+}
+
+class GenerateCorrectionPlanTool {
+  +execute(state) : AgentState
+}
+
+class ValidateOutputTool <<Chain-of-Responsibility>> {
+  +execute(state) : AgentState
+  ' citation present → confidence →
+  ' safety hedging → structured schema
+}
+
+class CoVeVerifier <<FR-AICP-08>> {
+  +extract_claims(draft) : list[Claim]
+  +generate_questions(claims) : list[str]
+  +answer_independently() : list[Answer]
+  +revise_or_converge() : RevisionResult
+  -max_iterations = 2
+}
+
+class LangGraphCoachingGraph {
+  +compile() : CompiledGraph
+  +ainvoke(state) : AgentState
+}
+
+Tool <|-- GetRepMetricsTool
+Tool <|-- RetrievePapersTool
+Tool <|-- RetrieveCoachBrainTool
+Tool <|-- FlagFormDeviationTool
+Tool <|-- CompareToUserHistoryTool
+Tool <|-- GenerateCorrectionPlanTool
+Tool <|-- ValidateOutputTool
+
+LangGraphCoachingGraph o--> Tool : "conditional edges"
+LangGraphCoachingGraph ..> AgentState : "reads / writes"
+LangGraphCoachingGraph ..> CoVeVerifier : "verify draft"
+RetrievePapersTool ..> AgentState
+RetrieveCoachBrainTool ..> AgentState
+
+note bottom of LangGraphCoachingGraph
+  Phase 3 initial: deterministic
+  conditional edges (retrieve →
+  verify → compare → generate).
+  retrieve_papers + retrieve_coach_brain
+  dispatched concurrently via asyncio.gather
+  (ADR-BRAIN-01).
+end note
+
+@enduml

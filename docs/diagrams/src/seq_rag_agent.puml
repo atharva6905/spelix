@@ -1,0 +1,94 @@
+@startuml seq_rag_agent
+' Sequence — SRS §3.8 FR-AICP-08..10, §3.14 FR-RAGK-10, §3.16 FR-BRAIN-04..05
+' Phase 2 RAG retrieval + Phase 3 LangGraph agent with CoVe loop.
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+title Dual-Collection RAG Retrieval + CoVe Agent Loop (Phase 2 → Phase 3)
+
+participant "CoachingService" as Coach
+participant "LangGraph\nCoachingGraph" as Graph
+participant "RetrievalService" as Retrieval
+participant "Qdrant\npapers_rag" as QPapers
+participant "Qdrant\ncoach_brain" as QBrain
+participant "Cohere\nRerank 4.0" as Rerank
+participant "Claude\nSonnet 4.6" as LLM
+participant "HHEM\n(FaithfulnesswithHHEM)" as HHEM
+participant "Langfuse" as LF
+
+Coach -> Graph : ainvoke(AgentState)
+activate Graph
+
+Graph -> Graph : get_rep_metrics (from DB)
+Graph -> Graph : flag_form_deviation\n(ThresholdConfig vN)
+
+Graph -> Retrieval : retrieve(query, exercise_type)
+activate Retrieval
+
+par dual-collection concurrent (asyncio.gather)
+  Retrieval -> QPapers : hybrid query\n(dense + sparse BM25, RRF)\nfilter exercise_type,\ntop-20
+  QPapers --> Retrieval : 20 paper chunks
+also
+  Retrieval -> QBrain : hybrid query\npayload filter status=approved,\nenriched embedding_text,\ntop-20
+  QBrain --> Retrieval : 20 brain entries\n(or empty)
+end
+
+Retrieval -> Rerank : rerank(merged 40, query)
+Rerank --> Retrieval : top-10 with calibrated scores
+
+alt brain top score >= 0.82
+  note right of Retrieval : coach_brain_primary\n(brain as primary, papers supplementary)
+else 0.65 <= brain top < 0.82
+  note right of Retrieval : hybrid_brain_supplementary\n(papers primary, brain supplementary)
+else brain empty or < 0.65
+  note right of Retrieval : papers_only_fallback\n("Based on sports science literature")
+end
+
+Retrieval -> LF : log retrieval_source,\nsimilarity scores, hit counts (FR-BRAIN-13)
+Retrieval --> Graph : RetrievedContext\n(papers + brain entries, labeled)
+deactivate Retrieval
+
+Graph -> LLM : generate draft\n(cite-then-generate,\ntemp=0.1 factual)
+LLM --> Graph : StructuredCoaching draft
+
+== CoVe verification loop — FR-AICP-08 ==
+loop iteration ≤ max_iterations (=2)
+  Graph -> LLM : extract claims(draft)
+  LLM --> Graph : list[Claim]
+  Graph -> LLM : generate verification questions(claims)
+  LLM --> Graph : list[Question]
+  Graph -> LLM : answer independently(questions)
+  LLM --> Graph : list[Answer]
+  alt all answers consistent
+    Graph -> Graph : cove_verified = true\nconverge
+  else revisions needed
+    Graph -> LLM : revise draft
+    LLM --> Graph : revised StructuredCoaching
+  end
+end
+
+alt iterations exhausted without convergence
+  Graph -> Graph : cove_verified = false\n(do NOT fail analysis)
+end
+
+== Faithfulness gate ==
+Graph -> HHEM : score(draft, retrieved_context)
+HHEM --> Graph : faithfulness, correctness,\nrelevance, overall
+alt overall < 0.8
+  Graph -> Graph : flag for expert review\n(Phase 2 review queue)
+end
+
+Graph -> LF : log eval_scores, cove_verified
+Graph --> Coach : verified StructuredCoaching
+deactivate Graph
+
+note over Coach
+  Coach then streams via SSE —
+  see seq_sse_streaming.
+  eval_scores_json persisted on
+  coaching_results (Phase 2+).
+end note
+
+@enduml

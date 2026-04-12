@@ -1,0 +1,79 @@
+@startuml seq_sse_streaming
+' Sequence — SRS §3.8 FR-AICP-07 (SSE stream), FR-AICP-21 (prompt caching),
+' §3.10 FR-RESL-03. Covers cache hit/miss and status completion.
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+title SSE Coaching Stream — Prompt Cache Hit / Miss + Completion
+
+actor User
+participant "Browser\n(useSSE hook)" as Browser
+participant "FastAPI\n/api/v1/analyses/\n{id}/coaching/stream" as API
+participant "CoachingService" as Coach
+participant "PromptCacheManager" as Cache
+participant "Anthropic\nClaude Sonnet 4.6" as Claude
+database "Postgres" as DB
+participant "Supabase\nRealtime" as RT
+
+User -> Browser : Results page mount
+Browser -> API : GET /analyses/{id}/coaching/stream\n(EventSource, JWT)
+API -> API : Auth + row ownership check
+API --> Browser : 200 text/event-stream
+
+API -> Coach : stream(analysis_id)
+activate Coach
+Coach -> DB : load rep_metrics, form_scores,\nuser_profile, retrieved_context
+
+== Phase event: retrieving ==
+Coach -->> API : SSE {event:"phase", data:"retrieving"}
+API -->> Browser : "retrieving"
+Browser -> Browser : show spinner
+
+== Phase event: verifying (Phase 2+) ==
+Coach -->> API : SSE {event:"phase", data:"verifying"}
+API -->> Browser : "verifying"
+
+== Call Claude with cached blocks ==
+Coach -> Cache : wrap(llm_call)
+activate Cache
+Cache -> Claude : messages=[\n  {system + persona + tool schemas} cache_control,\n  {rep metrics + retrieved context} fresh,\n  {user turn}\n]
+
+alt cache hit (system/persona stable)
+  Claude --> Cache : usage.cache_read_input_tokens > 0\n(90% cost reduction)
+else cache miss
+  Claude --> Cache : usage.cache_creation_input_tokens > 0
+end
+deactivate Cache
+
+== Phase event: streaming ==
+Coach -->> API : SSE {event:"phase", data:"streaming"}
+API -->> Browser : "streaming"
+
+loop for each token chunk
+  Claude -->> Coach : content delta
+  Coach -->> API : SSE {event:"token", data:"..."}
+  API -->> Browser : token
+  Browser -> Browser : append to coaching panel
+end
+
+Claude -->> Coach : message_stop
+Coach -> DB : INSERT coaching_results\n(structured_output_json,\nretrieved_sources_json,\neval_scores_json, cove_verified,\nstream_complete=true)
+Coach -> DB : UPDATE analyses status="completed"
+DB -> RT : fire row change
+RT -->> Browser : status=completed (terminal)
+
+Coach -->> API : SSE {event:"done"}
+API -->> Browser : done
+Browser -> Browser : close EventSource,\nrender citations,\nshow "Download PDF"
+deactivate Coach
+
+note over Browser
+  Phase 0: FR-RESL-03 static markdown,
+  no SSE (results page polls REST).
+  Phase 1+ switches to this SSE flow
+  without rewriting the results page.
+end note
+
+@enduml

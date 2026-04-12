@@ -1,0 +1,52 @@
+@startuml state_rag_documents
+' State machine — SRS §3.14 FR-RAGK-03, §3.15 FR-EXPV-05..06
+' rag_documents.review_status lifecycle.
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam state {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title rag_documents.review_status Lifecycle — SRS §3.14
+
+[*] --> pending_review : Admin or\nExpert Reviewer uploads PDF\n(FR-RAGK-01)
+
+pending_review : Docling parsing\nSection-aware 500-token chunking\nMetadata stored (title, authors,\nyear, DOI, quality_tier, study_design)
+pending_review : NOT retrieved during coaching\n(FR-RAGK-03)
+
+pending_review --> reviewed_approved : Expert Reviewer approves\n(FR-EXPV-06)
+pending_review --> reviewed_rejected : Expert Reviewer rejects
+pending_review --> needs_revision : Expert flags issues
+
+needs_revision --> pending_review : Uploader resubmits
+
+reviewed_approved : Cohere embed-v4\n(1024 Matryoshka dims)\nServer-side BM25 sparse\nDeterministic chunk IDs
+reviewed_approved --> indexed : Qdrant upsert\n(papers_rag collection)
+
+indexed : retrieved by RetrievalService\n(hybrid dense+sparse + Rerank 4.0)\nquality_tier weight applied\nrecency boost if year >= 2020
+indexed --> [*] : (active corpus member)
+
+reviewed_approved --> deleted : Admin deletes\n(FR-RAGK-09)
+indexed --> deleted : Admin deletes\n(re-embed trigger or removal)
+reviewed_rejected --> [*]
+deleted --> [*]
+
+note right of pending_review
+  Auto-ingest sources (FR-RAGK-04):
+  PubMed E-utilities (MeSH),
+  OpenAlex, Semantic Scholar.
+  All new records land here.
+end note
+
+note right of indexed
+  4-layer corpus architecture:
+  L1 SR/MA weight 2.0,
+  L2 PEDro ≥5 weight 1.5,
+  L3 PEDro 3–4 weight 1.0,
+  L4 guidelines weight 0.5.
+end note
+
+@enduml

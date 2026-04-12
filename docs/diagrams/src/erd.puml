@@ -1,0 +1,223 @@
+@startuml erd
+' Spelix ERD — SRS v2.1 — 11 tables (FR-AUTH, §7.1, §7.2)
+' Regenerated from spec: adds coach_brain_entries, consent_records, athlete_memory
+
+!theme plain
+skinparam linetype ortho
+skinparam roundcorner 4
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+  HeaderBackgroundColor #E8E8E8
+}
+title Spelix Entity-Relationship Diagram — SRS v2.1 (11 tables)
+
+entity "users" as users <<Supabase Auth>> {
+  *id : UUID <<PK>>
+  --
+  email : text
+  role : text
+  created_at : timestamptz
+}
+
+entity "user_profiles" as user_profiles {
+  *id : UUID <<PK>>
+  --
+  user_id : UUID <<FK>>
+  height_cm : float
+  weight_kg : float
+  age : int
+  experience_level : text
+  arm_span_cm : float
+  femur_length_cm : float
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity "analyses" as analyses {
+  *id : UUID <<PK>>
+  --
+  user_id : UUID <<FK>>
+  status : varchar(30)
+  exercise_type : varchar(20)
+  exercise_variant : varchar(30)
+  confidence_score : float
+  form_score_safety : float
+  form_score_technique : float
+  form_score_path_balance : float
+  form_score_control : float
+  form_score_overall : float
+  video_path : text
+  annotated_video_path : text
+  plot_path : text
+  pdf_path : text
+  summary_json : jsonb
+  quality_gate_result : jsonb
+  tags : text[]
+  retry_count : int
+  threshold_version : varchar(50)
+  weight_kg : float
+  flagged_for_review : bool
+  is_golden_dataset : bool
+  error_message : text
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity "rep_metrics" as rep_metrics {
+  *id : UUID <<PK>>
+  --
+  analysis_id : UUID <<FK>>
+  rep_index : int
+  start_frame : int
+  end_frame : int
+  confidence_score : float
+  metrics_json : jsonb
+}
+
+entity "coaching_results" as coaching_results {
+  *id : UUID <<PK>>
+  --
+  analysis_id : UUID <<FK>>
+  structured_output_json : jsonb
+  retrieved_sources_json : jsonb
+  agent_trace_json : jsonb
+  eval_scores_json : jsonb
+  stream_complete : bool
+  cove_verified : bool
+  created_at : timestamptz
+}
+
+entity "expert_annotations" as expert_annotations {
+  *id : UUID <<PK>>
+  --
+  analysis_id : UUID <<FK>>
+  annotator_id : UUID <<FK>>
+  issues_identified : jsonb
+  coaching_quality_score : numeric
+  injury_advice_accurate : bool
+  engagement_advice_accurate : bool
+  suggested_corrections : text
+  cited_sources : jsonb
+  is_golden_label : bool
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity "rag_documents" as rag_documents {
+  *id : UUID <<PK>>
+  --
+  title : text
+  authors : text[]
+  year : int
+  doi : text
+  source_url : text
+  exercise_types : text[]
+  topic_tags : text[]
+  study_design : text
+  population : text
+  measurement_method : text
+  quality_tier : int
+  quality_score : float
+  review_status : text
+  reviewer_id : UUID <<FK>>
+  reviewed_at : timestamptz
+  chunk_count : int
+  embedding_model : text
+  retrieval_weight : float
+  ingested_at : timestamptz
+  last_updated : timestamptz
+}
+
+entity "admin_events" as admin_events {
+  *id : UUID <<PK>>
+  --
+  admin_id : UUID <<FK>>
+  action : text
+  target_type : text
+  target_id : UUID
+  metadata_json : jsonb
+  created_at : timestamptz
+}
+
+entity "coach_brain_entries" as coach_brain_entries <<v2.0 new>> {
+  *id : UUID <<PK>>
+  --
+  entry_type : text <<cue|heuristic|compensation>>
+  exercise : text <<squat|bench_press|deadlift>>
+  phase : text <<setup|descent|bottom|ascent|lockout>>
+  trigger_conditions : jsonb
+  coaching_action : text
+  raw_text : text
+  embedding_text : text
+  source_analysis_ids : UUID[]
+  confidence_score : float
+  confirmation_count : int
+  status : text <<candidate|approved|rejected>>
+  cove_verified : bool
+  cove_explanation : text
+  eval_scores : jsonb
+  approved_at : timestamptz
+  approved_by : UUID <<FK>>
+  rejected_reason : text
+  source : text <<seed_manual_validated|distillation_pipeline>>
+  created_at : timestamptz
+  updated_at : timestamptz
+}
+
+entity "consent_records" as consent_records <<v2.0 new>> {
+  *id : UUID <<PK>>
+  --
+  user_id : UUID <<FK>>
+  consent_type : text
+  granted_at : timestamptz
+  withdrawn_at : timestamptz
+  ip_address : inet
+  consent_version : varchar(20)
+  created_at : timestamptz
+}
+
+entity "athlete_memory" as athlete_memory <<Phase 4 — v2.0 new>> {
+  *id : UUID <<PK>>
+  --
+  athlete_id : UUID <<FK>>
+  session_date : timestamptz
+  exercise : text
+  cues_delivered : jsonb
+  cue_effectiveness : jsonb
+  form_scores : jsonb
+  notes : text
+  created_at : timestamptz
+}
+
+' Relationships
+users ||--o| user_profiles : "has profile"
+users ||--o{ analyses : "submits"
+users ||--o{ expert_annotations : "annotates"
+users ||--o{ admin_events : "triggers"
+users ||--o{ consent_records : "grants"
+users ||--o{ athlete_memory : "accumulates"
+users ||--o{ rag_documents : "reviews"
+users ||--o{ coach_brain_entries : "approves"
+
+analyses ||--o{ rep_metrics : "contains"
+analyses ||--|| coaching_results : "produces"
+analyses ||--o{ expert_annotations : "reviewed by"
+analyses }o--o{ coach_brain_entries : "distilled into\n(source_analysis_ids)"
+
+note right of coach_brain_entries
+  Source of truth for entries
+  also stored as vectors in Qdrant
+  `coach_brain` collection.
+  Qdrant point ID == this.id
+end note
+
+note bottom of analyses
+  RLS: user_id = auth.uid()
+  status transitions in §5.2a
+end note
+
+@enduml

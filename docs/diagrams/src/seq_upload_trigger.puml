@@ -1,0 +1,65 @@
+@startuml seq_upload_trigger
+' Sequence — SRS §3.3 FR-UPLD (signed URL), §3.5 FR-CVPL-03 (quality gate in worker)
+' Upload endpoint enqueues and returns immediately; quality gate runs async in worker.
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowThickness 1
+title Upload → Enqueue → Quality Gate — Signed URL Flow
+
+actor User
+participant "Browser\n(React)" as Browser
+participant "FastAPI\n/api/v1" as API
+participant "Supabase\nStorage" as Storage
+database "Supabase\nPostgres" as DB
+queue "Redis\n(ARQ)" as Queue
+participant "ARQ Worker" as Worker
+participant "Supabase\nRealtime" as RT
+
+User -> Browser : Select video + exercise
+Browser -> API : POST /uploads/request-url\n{filename, size, mime}
+API -> API : Auth (Supabase JWT)
+API -> Storage : Create signed upload URL\n(presigned, short TTL)
+Storage --> API : signed_url, storage_key
+API --> Browser : {signed_url, storage_key}
+
+Browser -> Storage : PUT video bytes (direct)
+Storage --> Browser : 200 OK
+
+Browser -> API : POST /analyses\n{storage_key, exercise_type, variant, tags, weight_kg}
+API -> DB : INSERT analyses\n(status="queued", retry_count=0)
+API -> Queue : enqueue(run_analysis, analysis_id)
+API --> Browser : 202 Accepted\n{analysis_id}
+Browser -> RT : subscribe channel\n"analysis:{id}" postgres_changes
+
+== Worker picks up job ==
+Queue -> Worker : run_analysis(analysis_id)
+Worker -> DB : UPDATE status="quality_gate_pending"
+DB -> RT : fire row change
+RT --> Browser : status=quality_gate_pending
+
+Worker -> Storage : download raw video (temp file)
+Worker -> Worker : QualityGateService.run_all(frames)
+note right of Worker
+  P0: full-body, framing (reject)
+  P1: single-person, resolution (reject)
+  P2: lighting, stability (warn)
+  P3: motion blur (warn)
+end note
+
+alt Gate rejected
+  Worker -> DB : UPDATE quality_gate_result,\nstatus="quality_gate_rejected",\nerror_message
+  DB -> RT : fire row change
+  RT --> Browser : status=quality_gate_rejected\n(terminal)
+  Worker -> Storage : delete temp file
+else Gate passed
+  Worker -> DB : UPDATE quality_gate_result,\nstatus="processing"
+  DB -> RT : fire row change
+  RT --> Browser : status=processing
+  Worker ->> Worker : CV pipeline\n(see seq_cv_pipeline)
+end
+
+@enduml

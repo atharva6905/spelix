@@ -1,0 +1,106 @@
+@startuml usecase_diagram
+' Spelix Use Case Diagram — SRS v2.1 §2.7
+' 32 use cases, 4 actors. UC-27..32 added in v2.0 for Coach Brain/consent/distillation.
+
+!theme plain
+left to right direction
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam usecase {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+skinparam actor {
+  BackgroundColor #E8E8E8
+  BorderColor #555
+}
+title Spelix Use Cases — SRS v2.1 (32 use cases, 4 actors)
+
+actor "Regular User" as user
+actor "Expert Reviewer" as reviewer
+actor "Admin" as admin
+actor "ARQ Worker\n(System)" as worker
+
+' Role extension
+reviewer --|> user
+admin --|> user
+
+rectangle "Spelix" {
+  usecase "UC-01 Register / sign in" as UC01
+  usecase "UC-02 Complete body stats profile" as UC02
+  usecase "UC-03 Upload exercise video" as UC03
+  usecase "UC-04 Configure exercise type/variant" as UC04
+  usecase "UC-05 View analysis results" as UC05
+  usecase "UC-06 View streaming coaching feedback" as UC06
+  usecase "UC-07 Interact with citation tooltips" as UC07
+  usecase "UC-08 View agent reasoning trace" as UC08
+  usecase "UC-09 Follow-up chat with AI coach" as UC09
+  usecase "UC-10 Download annotated video / PDF" as UC10
+  usecase "UC-11 View progress history and trends" as UC11
+  usecase "UC-12 Export personal data (CSV)" as UC12
+  usecase "UC-13 Delete account and all data" as UC13
+  usecase "UC-14 Run CV and AI coaching pipeline" as UC14
+  usecase "UC-15 Generate PDF report" as UC15
+  usecase "UC-16 Review flagged analysis" as UC16
+  usecase "UC-17 Submit coaching quality annotation" as UC17
+  usecase "UC-18 Upload research paper to corpus" as UC18
+  usecase "UC-19 Approve or reject paper" as UC19
+  usecase "UC-20 Label analysis as golden dataset" as UC20
+  usecase "UC-21 Validate angle thresholds" as UC21
+  usecase "UC-22 Manage users" as UC22
+  usecase "UC-23 View system health / queue" as UC23
+  usecase "UC-24 View analysis metadata log" as UC24
+  usecase "UC-25 View eval quality dashboard" as UC25
+  usecase "UC-26 Manage RAG corpus" as UC26
+  usecase "UC-27 Provide health data consent" as UC27 <<v2.0>>
+  usecase "UC-28 Withdraw health data consent" as UC28 <<v2.0>>
+  usecase "UC-29 Review Coach Brain entry" as UC29 <<v2.0>>
+  usecase "UC-30 Manage Coach Brain collection" as UC30 <<v2.0>>
+  usecase "UC-31 Ingest seed corpus" as UC31 <<v2.0>>
+  usecase "UC-32 Run distillation pipeline" as UC32 <<v2.0>>
+}
+
+' Regular User
+user --> UC01
+user --> UC02
+user --> UC03
+user --> UC04
+user --> UC05
+user --> UC06
+user --> UC07
+user --> UC08
+user --> UC09
+user --> UC10
+user --> UC11
+user --> UC12
+user --> UC13
+user --> UC27
+user --> UC28
+
+' Expert Reviewer (in addition to User actions)
+reviewer --> UC05
+reviewer --> UC16
+reviewer --> UC17
+reviewer --> UC18
+reviewer --> UC19
+reviewer --> UC20
+reviewer --> UC21
+reviewer --> UC29
+
+' Admin
+admin --> UC18
+admin --> UC22
+admin --> UC23
+admin --> UC24
+admin --> UC25
+admin --> UC26
+admin --> UC30
+admin --> UC31
+
+' ARQ Worker (system actor)
+worker --> UC14
+worker --> UC15
+worker --> UC32
+
+@enduml

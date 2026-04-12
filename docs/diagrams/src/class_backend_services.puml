@@ -1,0 +1,142 @@
+@startuml class_backend_services
+' Service layer — SRS §3.5 (FR-CVPL quality gates), §3.5 (5-tier confidence),
+' §5.1 (Repository, Strategy). Adds Phase 2+ DistillationService, RetrievalService.
+
+!theme plain
+skinparam shadowing false
+skinparam roundcorner 4
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title Backend Service Layer — Spelix v2.1
+
+package "CV Pipeline" {
+  class CVPipelineWorker <<ARQ task>> {
+    +run(analysis_id) : None
+    ' queued → quality_gate_pending →
+    ' (rejected | processing → coaching → completed)
+  }
+
+  class QualityGateService <<FR-CVPL-03..11>> {
+    -gates : list[GateCheck]
+    +run_all(frames) : QualityGateResult
+    ' P0: full-body, framing
+    ' P1: single-person, resolution
+    ' P2: lighting, stability (warn)
+    ' P3: motion blur (warn)
+  }
+
+  class PoseExtractionService <<FR-CVPL-12>> {
+    -model_complexity = 2
+    -min_detection_confidence = 0.5
+    +extract(video) : LandmarkSeries
+    ' BlazePose Heavy, 33 landmarks
+  }
+
+  class RepDetectionService <<FR-CVPL-15>> {
+    -analyzer : ExerciseAnalyzer
+    +segment(landmarks) : list[RepSegment]
+    ' Savitzky-Golay smoothing (window=7)
+  }
+
+  class ConfidenceCalculator <<5-tier FR-CVPL-20..25>> {
+    +tier1_landmark(vis, pres) : float
+    +tier2_angle(a,b,c) : float
+    +tier3_frame(frame) : float
+    +tier4_phase_adjusted(frame, phase) : float
+    +tier5_per_rep(rep) : float
+    ' Phase 1 replaces Phase 0 mean visibility
+  }
+
+  class BarbellDetectionService <<FR-BDET>> {
+    +track(frames) : BarPath
+    ' OpenCV contour detection
+  }
+
+  class ArtifactGenerator {
+    +render_annotated_video()
+    +render_bar_path_plot()
+    +render_pdf_report()
+  }
+}
+
+package "AI Coaching" {
+  class CoachingService <<FR-AICP>> {
+    +generate(analysis_id) : StreamingResponse
+    ' Phase 1: direct LLM;
+    ' Phase 2+: retrieve → CoVe → stream
+  }
+
+  class RetrievalService <<FR-AICP-09 + FR-BRAIN-04>> <<v2.0>> {
+    +retrieve(query, exercise_type) : RetrievedContext
+    ' asyncio.gather(
+    '   papers_rag.query,
+    '   coach_brain.query)
+    ' → merge → Cohere Rerank 4.0
+  }
+
+  class PromptCacheManager <<FR-AICP-21>> {
+    +wrap(llm_call) : CachedCall
+  }
+}
+
+package "Coach Brain (Phase 2+)" {
+  class DistillationService <<FR-BRAIN-06>> <<Phase 3>> {
+    -graph : StateGraph
+    +ainvoke(session) : DistillationOutput
+    ' extract_insights → validate_quality →
+    ' format_entry → store_entry (or rejected)
+  }
+
+  class CoachBrainRepository <<FR-BRAIN-01>> {
+    -pg : AsyncSession
+    -qdrant : QdrantClient
+    +upsert(entry) : UUID
+    +find_similar(vector, threshold) : list
+    +apply_lifecycle(candidate) : Lifecycle
+    ' ADD / UPDATE / NOOP / DELETE per FR-BRAIN-17
+  }
+
+  class ConsentService <<FR-BRAIN-11, -16>> {
+    +record(user, type, version) : ConsentRecord
+    +withdraw(user, type) : None
+    +strip_sources(user_id) : int
+    ' Cascades to source_analysis_ids on withdrawal
+  }
+}
+
+package "Data Access" {
+  interface AnalysisRepository <<Repository>>
+  class AnalysisRepoImpl
+  AnalysisRepository <|.. AnalysisRepoImpl
+}
+
+CVPipelineWorker --> QualityGateService
+CVPipelineWorker --> PoseExtractionService
+CVPipelineWorker --> RepDetectionService
+CVPipelineWorker --> ConfidenceCalculator
+CVPipelineWorker --> BarbellDetectionService
+CVPipelineWorker --> ArtifactGenerator
+CVPipelineWorker --> CoachingService
+CVPipelineWorker --> AnalysisRepository
+
+CoachingService --> RetrievalService
+CoachingService --> PromptCacheManager
+
+DistillationService --> CoachBrainRepository
+DistillationService --> RetrievalService : "CoVe cross-check"
+ConsentService --> CoachBrainRepository
+
+RetrievalService --> CoachBrainRepository : "coach_brain collection"
+
+note right of CoachBrainRepository
+  Postgres table (source of truth)
+  + Qdrant vector (same UUID).
+  Distinct HNSW config tuned for
+  frequent writes.
+end note
+
+@enduml

@@ -1,0 +1,87 @@
+@startuml class_exercise_analyzer
+' Strategy + Factory pattern — SRS §5.1 (Strategy), §3.5, §3.7
+' Exercise-specific analyzers selected at runtime by ExerciseAnalyzerFactory.
+
+!theme plain
+skinparam shadowing false
+skinparam roundcorner 4
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title Exercise Analyzer — Strategy + Factory Pattern
+
+interface ExerciseAnalyzer <<interface>> {
+  +detect_reps(landmarks: LandmarkSeries) : list[RepSegment]
+  +extract_metrics(rep: RepSegment) : dict[str, float]
+  +score_safety(metrics) : float
+  +score_technique(metrics) : float
+  +score_path_balance(metrics) : float
+  +score_control(metrics) : float
+  +primary_joint() : str
+  +relevant_landmarks() : set[int]
+}
+
+class ExerciseAnalyzerFactory <<factory>> {
+  +create(exercise_type: str, variant: str) : ExerciseAnalyzer
+}
+
+class SquatAnalyzer {
+  -primary_joint = "hip"
+  -valgus_caution_deg : float
+  -valgus_high_risk_deg : float
+  +detect_reps() : list[RepSegment]
+  +extract_metrics() : dict
+  ' hip <160°→descent, <90°→depth
+}
+
+class DeadliftAnalyzer {
+  -variant : str  ' conv | sumo | romanian
+  -primary_joint = "hip"
+  +detect_reps() : list[RepSegment]
+  +extract_metrics() : dict
+  ' Variant-specific metric sets (§3.7)
+}
+
+class BenchPressAnalyzer {
+  -variant : str  ' flat | incline | decline
+  -primary_joint = "elbow"
+  -grip_biacromial_ratio_max : float
+  +detect_reps() : list[RepSegment]
+  +extract_metrics() : dict
+  ' elbow >160°→lockout, <90°→bottom
+}
+
+class RepSegment <<value>> {
+  +start_frame : int
+  +end_frame : int
+  +phase_timestamps : dict
+  +confidence_score : float
+}
+
+class ThresholdConfig <<v1+>> {
+  +version : str
+  +per_exercise : dict
+  +load(path: Path) : ThresholdConfig
+}
+
+ExerciseAnalyzer <|.. SquatAnalyzer
+ExerciseAnalyzer <|.. DeadliftAnalyzer
+ExerciseAnalyzer <|.. BenchPressAnalyzer
+ExerciseAnalyzerFactory --> ExerciseAnalyzer : creates
+SquatAnalyzer ..> ThresholdConfig
+DeadliftAnalyzer ..> ThresholdConfig
+BenchPressAnalyzer ..> ThresholdConfig
+ExerciseAnalyzer ..> RepSegment
+
+note right of ExerciseAnalyzerFactory
+  Selection: (exercise_type, variant)
+  → concrete analyzer.
+  Phase 0 hardcoded thresholds;
+  Phase 1+ reads ThresholdConfig vN
+  (FR-SCOR-11).
+end note
+
+@enduml

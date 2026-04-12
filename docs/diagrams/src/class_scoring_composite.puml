@@ -1,0 +1,94 @@
+@startuml class_scoring_composite
+' Composite pattern — SRS §5.1 + §3.9 FR-SCOR-01..06
+' 4 ScoreComponents aggregated by OverallFormScore (open/closed for 5th dimension).
+
+!theme plain
+skinparam shadowing false
+skinparam roundcorner 4
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam class {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title Form Scoring System — Composite Pattern (4 Dimensions)
+
+interface ScoreComponent <<interface>> {
+  +compute(metrics: RepMetrics, config: ThresholdConfig) : float
+  +dimension_name() : str
+  +weight() : float
+  +severity_badge(score) : Severity
+}
+
+class SafetyScore <<form_score_safety>> {
+  ' User-facing: "Movement Quality"
+  -weight = 0.40
+  +compute() : float
+  ' lumbar angle, knee valgus, wrist alignment,
+  ' shoulder protraction, heel rise
+}
+
+class TechniqueScore <<form_score_technique>> {
+  -weight = 0.30
+  +compute() : float
+  ' depth, torso lean, hip/knee angles,
+  ' elbow flare, bar touch, grip/stance width
+}
+
+class PathBalanceScore <<form_score_path_balance>> {
+  -weight = 0.20
+  +compute() : float
+  ' bar path deviation, bar-to-body distance,
+  ' bar path classification, lateral weight shift
+}
+
+class ControlScore <<form_score_control>> {
+  -weight = 0.10
+  +compute() : float
+  ' eccentric duration, lockout quality,
+  ' phase of max deviation, rep-to-rep consistency
+}
+
+class OverallFormScore <<composite>> {
+  -components : list<ScoreComponent>
+  +compute_all(metrics) : FormRating
+  +weighted_composite(scores) : float
+  ' Default weights 40/30/20/10;
+  ' descriptors: Elite / Advanced /
+  ' Intermediate / Needs Work / Needs Attention
+}
+
+class FormRating <<value>> {
+  +overall : float  ' 1.0–10.0
+  +safety : float
+  +technique : float
+  +path_balance : float
+  +control : float
+  +descriptor : str
+  +badges : list<Severity>
+}
+
+class ThresholdConfig {
+  +version : str
+  +lookup(exercise, metric) : ThresholdSpec
+}
+
+ScoreComponent <|.. SafetyScore
+ScoreComponent <|.. TechniqueScore
+ScoreComponent <|.. PathBalanceScore
+ScoreComponent <|.. ControlScore
+OverallFormScore o--> "4..*" ScoreComponent
+OverallFormScore ..> FormRating : produces
+ScoreComponent ..> ThresholdConfig : reads
+
+note right of OverallFormScore
+  Open/closed: adding a 5th
+  dimension (FR-SCOR-06) needs
+  only a new ScoreComponent —
+  DB, UI, PDF, eval unchanged.
+  Phase 3 training-mode selector
+  (FR-SCOR-12) adjusts Technique
+  weight per Israetel.
+end note
+
+@enduml

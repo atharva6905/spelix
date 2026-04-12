@@ -1,0 +1,89 @@
+@startuml seq_cv_pipeline
+' Sequence — SRS §3.5 FR-CVPL, §3.6 FR-BDET, §3.7 FR-REPM, §3.9 FR-SCOR
+' ARQ worker pipe-and-filter: landmark → smoothing → rep detect → metrics → score → artifacts
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+title ARQ Worker — CV Pipeline (status: processing → coaching)
+
+participant "ARQ Worker" as Worker
+participant "PoseExtractionService" as Pose
+participant "BarbellDetectionService" as Bar
+participant "RepDetectionService" as Rep
+participant "ConfidenceCalculator" as Conf
+participant "ExerciseAnalyzer\n(Strategy)" as Analyzer
+participant "OverallFormScore\n(Composite)" as Score
+participant "ArtifactGenerator" as Art
+database "Postgres" as DB
+participant "Supabase Storage" as Storage
+participant "Supabase Realtime" as RT
+
+activate Worker
+note over Worker
+  Entry state: status=processing
+  CPU-bound ops wrapped in
+  run_in_executor (FR-CVPL-02)
+end note
+
+Worker -> Pose : extract(video)
+activate Pose
+Pose -> Pose : MediaPipe BlazePose Heavy\n(model_complexity=2,\nstatic_image_mode=True)
+Pose --> Worker : LandmarkSeries\n(33 landmarks × N frames,\nvisibility + presence)
+deactivate Pose
+
+Worker -> Bar : track(frames)
+activate Bar
+Bar --> Worker : BarPath\n(centroid trajectory)
+deactivate Bar
+
+Worker -> Rep : segment(landmarks)
+activate Rep
+Rep -> Rep : Savitzky-Golay filter\n(window=7, polyorder=3)
+Rep -> Analyzer : detect_reps(smoothed)
+Analyzer --> Rep : list[RepSegment]
+Rep --> Worker : reps
+deactivate Rep
+
+loop for each RepSegment
+  Worker -> Analyzer : extract_metrics(rep)
+  Analyzer --> Worker : metrics_dict\n(safety + technique + path_balance + control)
+  Worker -> Conf : tier5_per_rep(rep)
+  note right of Conf
+    Phase 1+ 5-tier algorithm:
+    landmark → angle → frame →
+    phase-adjusted → 10th pctile
+  end note
+  Conf --> Worker : confidence_score
+  Worker -> DB : INSERT rep_metrics\n(rep_index, metrics_json, confidence)
+end
+
+Worker -> Score : compute_all(all_rep_metrics)
+activate Score
+Score -> Score : weighted_composite\n(Safety 40% + Technique 30%\n+ PathBalance 20% + Control 10%)
+Score --> Worker : FormRating\n(overall + 4 dimensions + descriptor)
+deactivate Score
+
+Worker -> DB : UPDATE analyses\nform_score_*, confidence_score,\nthreshold_version, summary_json
+
+Worker -> Art : render_annotated_video(landmarks, reps)
+Art -> Storage : upload annotated.mp4
+Art --> Worker : annotated_video_path
+
+Worker -> Art : render_bar_path_plot(bar_path)
+Art -> Storage : upload path.png
+Art --> Worker : plot_path
+
+Worker -> DB : UPDATE status="coaching"
+DB -> RT : fire row change
+RT -->> "Browser" : status=coaching
+
+note over Worker
+  Hand off to CoachingService
+  (see seq_sse_streaming for Phase 1+
+   and seq_rag_agent for Phase 2+)
+end note
+deactivate Worker
+
+@enduml

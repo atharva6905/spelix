@@ -1,0 +1,63 @@
+@startuml state_analyses_status
+' State machine — SRS §5.2a (authoritative)
+' analyses.status transition table — invalid transitions are a defect.
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam state {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+  FontSize 11
+}
+title analyses.status State Machine — SRS §5.2a (Authoritative)
+
+[*] --> queued : row insert
+
+queued --> quality_gate_pending : worker pulls job
+
+quality_gate_pending --> quality_gate_rejected : P0/P1 gate failed\n(terminal)
+quality_gate_pending --> processing : gates passed
+
+processing --> coaching : CV pipeline complete\n(scores written)
+processing --> failed : CV/worker error
+
+coaching --> completed : SSE stream_complete\n+ coaching_results written
+coaching --> failed : LLM / CoVe / streaming error
+
+failed --> queued : retry (retry_count < 3,\nNFR-RELI-01 exponential backoff)
+
+quality_gate_rejected --> [*]
+completed --> [*]
+failed --> [*] : retry_count == 3
+
+note right of quality_gate_pending
+  Quality gate runs as first step
+  in the ARQ worker job, NOT in
+  the FastAPI request handler
+  (FR-CVPL-03 architectural decision).
+end note
+
+note right of coaching
+  Phase 0: synchronous coaching
+  (no SSE, results poll REST).
+  Phase 1+: SSE stream; Phase 2+:
+  CoVe runs BEFORE streaming.
+end note
+
+note bottom of failed
+  Supabase Realtime fires a row-change
+  event on every transition. On RT
+  disconnect, frontend falls back to
+  REST poll GET /analyses/{id}/status.
+end note
+
+note left of completed
+  Distillation pipeline (FR-BRAIN-06)
+  runs asynchronously AFTER completed.
+  It does NOT add new states here —
+  its state lives on coach_brain_entries.
+end note
+
+@enduml

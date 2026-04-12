@@ -1,0 +1,91 @@
+@startuml state_agent_flow
+' State machine — SRS §3.8 FR-AICP-07..10, -18..20; §3.16 FR-BRAIN-04..05
+' LangGraph coaching graph node flow with CoVe verify + retry loop (Phase 3).
+
+!theme plain
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 11
+skinparam state {
+  BackgroundColor #FAFAFA
+  BorderColor #555
+}
+title LangGraph Coaching Graph — Node Flow with CoVe Loop
+
+[*] --> load_context
+
+load_context : get_rep_metrics\nload user_profile\nload rep history
+load_context --> flag_deviations
+
+flag_deviations : flag_form_deviation\nvs ThresholdConfig vN
+flag_deviations --> retrieve_evidence
+
+state "retrieve_evidence\n(concurrent)" as retrieve_evidence {
+  state "retrieve_papers" as rp : Qdrant papers_rag\nhybrid dense+sparse
+  state "retrieve_coach_brain" as rb : Qdrant coach_brain\nstatus=approved,\nenriched embedding_text
+  [*] --> rp
+  [*] --> rb
+  rp --> [*]
+  rb --> [*]
+}
+
+retrieve_evidence --> route_retrieval
+
+route_retrieval : FR-BRAIN-05\nretrieval_source =
+route_retrieval --> coach_brain_primary : brain top ≥ 0.82
+route_retrieval --> hybrid_brain_supplementary : 0.65 ≤ brain top < 0.82
+route_retrieval --> papers_only_fallback : no brain ≥ 0.65
+
+coach_brain_primary --> compare_history
+hybrid_brain_supplementary --> compare_history
+papers_only_fallback --> compare_history
+
+compare_history : compare_to_user_history
+compare_history --> generate_plan
+
+generate_plan : generate_correction_plan\n(Claude Sonnet 4.6,\ninstructor+Pydantic v2,\ntemp=0.1 factual)
+generate_plan --> cove_verify
+
+state cove_verify {
+  state "extract_claims" as ec
+  state "generate_questions" as gq
+  state "answer_independently" as ai
+  state "check_consistency" as cc
+  [*] --> ec
+  ec --> gq
+  gq --> ai
+  ai --> cc
+  cc --> [*]
+}
+
+cove_verify --> validate_output : converged\ncove_verified=true
+cove_verify --> generate_plan : revise\n(iterations < 2)
+cove_verify --> validate_output : max iterations\ncove_verified=false\n(do NOT fail)
+
+validate_output : chain of validators\n— citation present\n— confidence threshold\n— safety hedging\n— schema check
+validate_output --> faithfulness_gate
+
+faithfulness_gate : HHEM faithfulness\nRAGAS ≥ 0.8
+faithfulness_gate --> stream_response : pass
+faithfulness_gate --> flag_review : sub-threshold
+
+flag_review : route to\nExpert Review Queue
+flag_review --> stream_response : always stream\n(FR-AICP-15)
+
+stream_response : SSE token stream\n+ persist coaching_results,\neval_scores_json
+stream_response --> [*]
+
+note right of retrieve_evidence
+  asyncio.gather across both
+  Qdrant collections; merged and
+  reranked by Cohere Rerank 4.0.
+end note
+
+note left of cove_verify
+  FR-AICP-08 four-stage:
+  extract → question → answer →
+  revise. max_iterations=2.
+  Non-convergence is not a failure.
+end note
+
+@enduml
