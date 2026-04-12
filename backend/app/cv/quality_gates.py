@@ -319,7 +319,14 @@ def check_framing(
 
     mean_fraction = float(np.mean(fractions)) if fractions else 0.0
 
-    if mean_fraction < _FRAMING_MIN_FRACTION:
+    # Portrait videos (height > width) naturally have smaller bbox area
+    # fractions because the body's landmark width is a smaller fraction of
+    # the tall frame.  Scale the minimum threshold by aspect ratio so
+    # well-framed portrait footage isn't rejected.
+    aspect = frame_width / frame_height if frame_height > 0 else 1.0
+    min_threshold = _FRAMING_MIN_FRACTION * aspect if aspect < 1.0 else _FRAMING_MIN_FRACTION
+
+    if mean_fraction < min_threshold:
         passed = False
         user_message = _FRAMING_TOO_SMALL_MSG
     elif mean_fraction > _FRAMING_MAX_FRACTION:
@@ -331,7 +338,7 @@ def check_framing(
 
     # threshold reported as the violated bound (or the min bound when passing)
     threshold = (
-        _FRAMING_MIN_FRACTION if mean_fraction <= _FRAMING_MIN_FRACTION
+        min_threshold if mean_fraction <= min_threshold
         else _FRAMING_MAX_FRACTION
     )
 
