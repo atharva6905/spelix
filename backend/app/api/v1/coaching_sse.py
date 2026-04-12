@@ -79,6 +79,9 @@ async def _stream_from_pubsub(
                 else:
                     yield "event: done\ndata: {}\n\n"
                 break
+            elif msg_type == "phase":
+                phase_payload = json.dumps({"phase": data["phase"]})
+                yield f"event: phase\ndata: {phase_payload}\n\n"
             elif msg_type == "chunk":
                 chunk_payload = json.dumps({"text": data["text"]})
                 yield f"data: {chunk_payload}\n\n"
