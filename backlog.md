@@ -242,10 +242,10 @@ Seed Coach Brain corpus only: `source=seed_manual_validated`. Distillation pipel
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P2-013 | Stage 1 — Cite-then-generate. Retrieved context injected as CitationBlock list; prompt instructs model to cite by index. | L | P2-010 | FR-AICP-08 | open |
-| P2-014 | Stage 2 — Structured generation with temperature split. Factual corrections temp=0.1, motivational cues temp=0.7. instructor + Pydantic v2. | M | P2-013 | FR-AICP-08 | open |
-| P2-015 | Stage 3 — CoVe verification loop (extract_claims → generate_questions → answer_independently → check_consistency → revise). max_iterations=2, 6–13s budget/iter. Non-convergence is NOT failure — stream with `cove_verified=false`. | XL | P2-014 | FR-AICP-08 | open |
-| P2-016 | Stage 4 — RAGAS `FaithfulnesswithHHEM` (Vectara HHEM-2.1-Open T5) gate. Score ≥0.8 stream; <0.8 route to flag_review queue but still stream (FR-AICP-15). | L | P2-015 | FR-AICP-08 | open |
+| P2-013 | Stage 1 — Cite-then-generate. Retrieved context injected as CitationBlock list; prompt instructs model to cite by index. | L | P2-010 | FR-AICP-08 | done — PR #19 `698714d` |
+| P2-014 | Stage 2 — Structured generation with temperature split. Factual corrections temp=0.1, motivational cues temp=0.7. instructor + Pydantic v2. | M | P2-013 | FR-AICP-08 | done — PR #20 `6970f53` |
+| P2-015 | Stage 3 — CoVe verification loop (extract_claims → generate_questions → answer_independently → check_consistency → revise). max_iterations=2, 6–13s budget/iter. Non-convergence is NOT failure — stream with `cove_verified=false`. | XL | P2-014 | FR-AICP-08 | done — PR #20 `6970f53` |
+| P2-016 | Stage 4 — RAGAS `FaithfulnesswithHHEM` (Vectara HHEM-2.1-Open T5) gate. Score ≥0.8 stream; <0.8 route to flag_review queue but still stream (FR-AICP-15). | L | P2-015 | FR-AICP-08 | done — PR #20 `6970f53` |
 
 ### Batch 5 — Citation & Safety
 
@@ -286,6 +286,6 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
 | P2-032 | Retrieval metrics logging to Langfuse (FR-BRAIN-13). Per-query log of `retrieval_source` enum, similarity scores, hit counts, Coach Brain contribution %. Target: Coach Brain contributes to >40% of queries within 3 months. | M | P2-034 | FR-BRAIN-13 | open |
-| P2-033 | Per-analysis RAGAS + HHEM eval scores stored in `analyses.eval_scores`. Format: `{"faithfulness": float, "hhem": float, "cove_verified": bool, "cove_iterations": int}`. | M | P2-016, P2-001 | FR-AICP-16 | open |
+| P2-033 | Per-analysis RAGAS + HHEM eval scores stored in `analyses.eval_scores`. Format: `{"faithfulness": float, "hhem": float, "cove_verified": bool, "cove_iterations": int}`. | M | P2-016 ✅, P2-001 ✅ | FR-AICP-16 | open |
 | P2-034 | Langfuse Cloud integration. `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` in env. `LangfuseClient` singleton injected into coaching service. Trace: `analysis_id` as `session_id`. Mock in all CI tests. | M | — | FR-BRAIN-13 | open |
 
