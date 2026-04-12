@@ -1261,7 +1261,7 @@ def _make_retrieved_context(
     doi: str | None = "10.1016/j.jbiomech.2021.110001",
     chunk_text: str = "Excessive knee valgus is associated with altered load distribution.",
     score: float = 0.87,
-) -> "RetrievedContext":
+) -> object:
     """Return a minimal RetrievedContext for testing."""
     from app.schemas.rag import ChunkPayload, RetrievedContext
 
