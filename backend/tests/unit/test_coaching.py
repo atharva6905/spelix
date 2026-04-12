@@ -19,7 +19,7 @@ from app.config import ThresholdConfig
 from app.schemas.coaching import CoachingOutput, Issue
 from app.services.coaching import (
     CoachingService,
-    _build_citation_blocks,
+    build_citation_blocks,
     _build_user_prompt,
 )
 
@@ -1287,56 +1287,56 @@ def _make_retrieved_context(
 class TestCiteThenGenerate:
     """FR-AICP-08: Cite-then-generate prompt architecture tests (P2-013)."""
 
-    # --- _build_citation_blocks ---
+    # --- build_citation_blocks ---
 
-    def test_build_citation_blocks_index_starts_at_one(self) -> None:
+    def testbuild_citation_blocks_index_starts_at_one(self) -> None:
         """CitationBlock index must be 1-based."""
 
         contexts = [_make_retrieved_context(index=1), _make_retrieved_context(index=2)]
-        blocks = _build_citation_blocks(contexts)
+        blocks = build_citation_blocks(contexts)
 
         assert blocks[0].index == 1
         assert blocks[1].index == 2
 
-    def test_build_citation_blocks_title_and_authors(self) -> None:
+    def testbuild_citation_blocks_title_and_authors(self) -> None:
         """CitationBlock must carry title and authors from ChunkPayload."""
 
         ctx = _make_retrieved_context(
             title="Deadlift mechanics review",
             authors=["Brown, K.", "Taylor, L."],
         )
-        blocks = _build_citation_blocks([ctx])
+        blocks = build_citation_blocks([ctx])
 
         assert len(blocks) == 1
         assert blocks[0].title == "Deadlift mechanics review"
         assert blocks[0].authors == ["Brown, K.", "Taylor, L."]
 
-    def test_build_citation_blocks_year_and_doi(self) -> None:
+    def testbuild_citation_blocks_year_and_doi(self) -> None:
         """CitationBlock carries year and doi (may be None)."""
 
         ctx_with_doi = _make_retrieved_context(year=2019, doi="10.1016/test.doi")
         ctx_no_doi = _make_retrieved_context(doi=None, year=None)
 
-        blocks = _build_citation_blocks([ctx_with_doi, ctx_no_doi])
+        blocks = build_citation_blocks([ctx_with_doi, ctx_no_doi])
 
         assert blocks[0].year == 2019
         assert blocks[0].doi == "10.1016/test.doi"
         assert blocks[1].doi is None
         assert blocks[1].year is None
 
-    def test_build_citation_blocks_excerpt_truncated(self) -> None:
+    def testbuild_citation_blocks_excerpt_truncated(self) -> None:
         """chunk_text_excerpt must be truncated to 300 chars."""
 
         long_text = "A" * 500
         ctx = _make_retrieved_context(chunk_text=long_text)
-        blocks = _build_citation_blocks([ctx])
+        blocks = build_citation_blocks([ctx])
 
         assert len(blocks[0].chunk_text_excerpt) <= 300
 
-    def test_build_citation_blocks_empty_list(self) -> None:
+    def testbuild_citation_blocks_empty_list(self) -> None:
         """Empty context list produces empty CitationBlock list."""
 
-        assert _build_citation_blocks([]) == []
+        assert build_citation_blocks([]) == []
 
     # --- _build_user_prompt with retrieved_contexts ---
 

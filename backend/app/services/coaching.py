@@ -99,7 +99,7 @@ def _build_system_prompt() -> str:
     )
 
 
-def _build_citation_blocks(contexts: list[RetrievedContext]) -> list[CitationBlock]:
+def build_citation_blocks(contexts: list[RetrievedContext]) -> list[CitationBlock]:
     """Convert retrieved contexts to numbered CitationBlock list for the prompt.
 
     Assigns 1-based index values matching the [N] markers embedded in the
@@ -221,7 +221,7 @@ def _build_user_prompt(
 
     # Retrieved Evidence section (Phase 2 — FR-AICP-08 cite-then-generate)
     if retrieved_contexts:
-        citation_blocks = _build_citation_blocks(retrieved_contexts)
+        citation_blocks = build_citation_blocks(retrieved_contexts)
         lines.append("Retrieved Evidence:")
         for block in citation_blocks:
             authors_str = ", ".join(block.authors) if block.authors else "Unknown"
