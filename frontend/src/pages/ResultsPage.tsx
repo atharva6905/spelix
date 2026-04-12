@@ -11,7 +11,8 @@
 import { useState } from "react";
 import { useParams, Link } from "react-router";
 import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
-import type { CoachingIssue, RepMetricDetail } from "@/api/analyses";
+import type { CoachingIssue, Citation, RepMetricDetail } from "@/api/analyses";
+import { parseWithCitations } from "@/components/CitationTooltip";
 import {
   getConfidenceCategory,
   type ConfidenceCategory,
@@ -380,12 +381,9 @@ interface CoachingOutputProps {
     // Phase 1 fields (FR-AICP-03, FR-AICP-06)
     safety_warnings?: string[];
     recommended_cues?: string[];
-    citations?: Array<{
-      title: string;
-      authors: string[];
-      year: number;
-      doi?: string | null;
-    }>;
+    citations?: Citation[];
+    // Phase 2 fields (P2-019)
+    degraded_mode?: boolean;
   };
 }
 
@@ -394,15 +392,32 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
     ? sortIssuesBySeverity(structured.issues)
     : [];
 
+  const citations = structured.citations ?? [];
+
   return (
     <div className="space-y-6">
+      {/* Phase 2: Degraded mode banner (P2-019, FR-AICP-15) */}
+      {structured.degraded_mode && (
+        <div
+          data-testid="degraded-mode-banner"
+          className="rounded-md border-l-4 border-yellow-400 bg-yellow-50 p-4"
+        >
+          <p className="text-sm font-medium text-yellow-800">
+            Results generated without research backing. Source references are
+            unavailable for this analysis.
+          </p>
+        </div>
+      )}
+
       {/* Summary */}
       {structured.summary && (
         <div data-testid="coaching-summary">
           <h3 className="mb-2 text-base font-semibold text-gray-900">
             Summary
           </h3>
-          <p className="text-gray-700">{structured.summary}</p>
+          <p className="text-gray-700">
+            {parseWithCitations(structured.summary, citations)}
+          </p>
         </div>
       )}
 
@@ -415,7 +430,7 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
           <ul className="list-disc space-y-1 pl-5">
             {structured.strengths.map((s, i) => (
               <li key={i} className="text-gray-700">
-                {s}
+                {parseWithCitations(s, citations)}
               </li>
             ))}
           </ul>
@@ -443,7 +458,9 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
                   <p className="text-sm font-medium text-gray-800">
                     Rep {issue.rep_number} — {issue.joint}
                   </p>
-                  <p className="text-sm text-gray-600">{issue.description}</p>
+                  <p className="text-sm text-gray-600">
+                    {parseWithCitations(issue.description, citations)}
+                  </p>
                 </div>
               </li>
             ))}
@@ -460,7 +477,7 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
           <ol className="list-decimal space-y-1 pl-5">
             {structured.correction_plan.map((step, i) => (
               <li key={i} className="text-gray-700">
-                {step}
+                {parseWithCitations(step, citations)}
               </li>
             ))}
           </ol>

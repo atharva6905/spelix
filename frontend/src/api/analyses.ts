@@ -86,6 +86,7 @@ export interface CoachingIssue {
   joint: string;
   description: string;
   severity: "High" | "Medium" | "Low";
+  citation_indices?: number[];
 }
 
 export interface Citation {
@@ -107,6 +108,8 @@ export interface CoachingOutput {
   confidence_level?: string;
   safety_warnings?: string[];
   dimension_addressed?: string;
+  // Phase 2 fields (P2-019)
+  degraded_mode?: boolean;
 }
 
 export interface CoachingResultDetail {
