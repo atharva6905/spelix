@@ -20,6 +20,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.24",
+    "qdrant-client>=1.17.1",
     "redis>=5.3.1",
     "scipy>=1.17.1",
     "sentry-sdk[fastapi]>=2.57.0",
