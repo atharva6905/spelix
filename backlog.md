@@ -175,7 +175,7 @@ Phase 2 Coach Brain tasks that now occupy `P2-023..P2-034`.
 
 | ID | Title | Status | Size | Commits | Notes |
 |----|-------|--------|------|---------|-------|
-| D-001 | Replace stream-then-reparse with instructor native streaming structured extraction | open | M | — | `services/coaching.py::generate_coaching_streaming` currently makes two LLM calls (stream raw text → second `instructor` call to re-validate into `CoachingOutput`). Halves per-analysis token cost when fixed. Tracked in ADR-021. Session 14 dispatch attempt bailed on FR-ID gate — re-dispatch next turn with explicit header. |
+| D-001 | Replace stream-then-reparse with instructor native streaming structured extraction | done | M | — | `42f54cd` (PR #16). Replaced with `create_partial` — single LLM call, JSON-diff deltas for Redis pub/sub. ADR-021 tech debt resolved. |
 | D-002 | Remove dead `compute_rep_confidence` from `cv/confidence.py` | done | S | `9d8137f` (guard test, TDD red) + `404b982` (function deletion, TDD green) | Superseded by `compute_confidence_result` Tier 1–5 pipeline (FR-CVPL-20..24, ADR-015). Deleted function body + orphaned `_SQUAT_DEADLIFT_LANDMARKS`/`_BENCH_LANDMARKS`/`_EXERCISE_LANDMARK_MAP` helpers. Guard test `TestComputeRepConfidenceIsRemoved` prevents reintroduction. |
 | D-003 | ADR: Phase 1 coaching stream-then-reparse as tech debt | done | S | — | **Already covered by ADR-021 (`decisions.md`). Closed with no new ADR — ADR-021 documents the deviation from SRS FR-AICP-07 phrasing and the migration plan that D-001 executes.** |
 
@@ -223,9 +223,9 @@ Seed Coach Brain corpus only: `source=seed_manual_validated`. Distillation pipel
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P2-004 | Document ingestion pipeline: Docling parse → chunk → embed → Qdrant upsert. Idempotent via `sha256(paper_id:chunk_index)` as point ID. Only `reviewed_approved` documents enter Qdrant. | L | P2-002, P2-003 | FR-AICP-09, FR-RAGK-01, ADR-RAG-02 | open |
-| P2-005 | Recursive 500-token chunking, 50-token overlap, section-aware preprocessing (abstract / methods / results extracted separately) | M | P2-004 | FR-AICP-09 | open |
-| P2-006 | Metadata-as-payload pattern: title/authors/year/doi/quality_tier/section stored on every Qdrant point for filter-at-query-time | S | P2-004 | FR-AICP-09, FR-RAGK-06 | open |
+| P2-004 | Document ingestion pipeline: Docling parse → chunk → embed → Qdrant upsert. Idempotent via `sha256(paper_id:chunk_index)` as point ID. Only `reviewed_approved` documents enter Qdrant. | done | L | P2-002, P2-003 | FR-AICP-09, FR-RAGK-01, ADR-RAG-02 | `42f54cd` (PR #16). IngestionService with 500-token section-aware chunking, SHA-256 deterministic point IDs, status guard. |
+| P2-005 | Recursive 500-token chunking, 50-token overlap, section-aware preprocessing (abstract / methods / results extracted separately) | done | M | P2-004 | FR-AICP-09 | Delivered as part of P2-004 `IngestionService._chunk_text` + `_section_chunks`. `42f54cd` (PR #16). |
+| P2-006 | Metadata-as-payload pattern: title/authors/year/doi/quality_tier/section stored on every Qdrant point for filter-at-query-time | done | S | P2-004 | FR-AICP-09, FR-RAGK-06 | Delivered as part of P2-004 via `ChunkPayload` fields on every Qdrant point. `42f54cd` (PR #16). |
 | P2-007 | Corpus curation — seed research papers. ≥10 per exercise. Sources: PubMed E-utilities, OpenAlex, Semantic Scholar. 4-layer quality tier weights (L1 SR/MA 2.0, L2 PEDro≥5 1.5, L3 PEDro 3-4 1.0, L4 guidelines 0.5). Recency boost ×1.2 for post-2020. | M | P2-004 | FR-RAGK-02, FR-RAGK-03 | open |
 
 ### Batch 3 — Hybrid Retrieval (gate: P2-004 merged; /team phase2-rag)
@@ -271,7 +271,7 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P2-023 | Coach Brain Qdrant collection schema + canonical `CoachBrainEntry` Pydantic schema in `app/schemas/coach_brain.py`. 1024 dim, BM25 sparse, payload indexes on exercise + status. **Blocks P2-024..P2-028.** | M | P2-002 | FR-BRAIN-01, ADR-BRAIN-01 | open |
+| P2-023 | Coach Brain Qdrant collection schema + canonical `CoachBrainEntry` Pydantic schema in `app/schemas/coach_brain.py`. 1024 dim, BM25 sparse, payload indexes on exercise + status. **Blocks P2-024..P2-028.** | done | M | P2-002 | FR-BRAIN-01, ADR-BRAIN-01 | `42f54cd` (PR #16). 4 schemas: Entry/Create/Update/Payload. Aligned with migration 004 (trigger_tags=list[str], entry_type=cue/correction/principle/drill). |
 | P2-024 | Contextual embedding pipeline (FR-BRAIN-03). Prepend `"exercise:{ex} phase:{ph} type:{entry_type}\n{text}"` before embedding. Store enriched text separately from raw `coaching_action`. `input_type="search_document"`. | M | P2-023 | FR-BRAIN-03, ADR-BRAIN-02 | open |
 | P2-025 | Seed corpus ingestion — ≥20 entries covering squat (depth, knee cave, back rounding), bench (bar path, elbow flare, leg drive), deadlift (lumbar flexion, hip hinge, lockout). `status=approved`, `source=seed_manual_validated`, `confirmation_count=1`. | L | P2-023, P2-024 | FR-BRAIN-09, FR-BRAIN-18 | open |
 | P2-026 | Coach Brain hybrid retrieval in RetrieveTool. Queries BOTH collections concurrently (`asyncio.gather`), reranks merged results via Rerank 4.0. Routing: ≥0.82 `coach_brain_primary`; 0.65–0.82 `hybrid_brain_supplementary`; <0.65 `papers_only_fallback`. | M | P2-023, P2-010 | FR-BRAIN-04, ADR-BRAIN-03 | open |
