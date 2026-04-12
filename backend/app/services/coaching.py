@@ -1,9 +1,9 @@
-"""CoachingService — Phase 0 LLM coaching pipeline.
+"""CoachingService — Phase 0/1/2 LLM coaching pipeline.
 
 Calls Claude Sonnet 4.6 via the instructor library to produce a structured
 CoachingOutput validated by Pydantic v2.
 
-Requirements: FR-RESL-03, Appendix D (B-023)
+Requirements: FR-RESL-03, Appendix D (B-023), FR-AICP-08
 
 Error handling (per Appendix D.2):
     - 429 / 529 (rate limit / overload): exponential backoff 1s → 2s → 4s,
@@ -31,6 +31,7 @@ import instructor
 from app.config import ThresholdConfig
 from app.cv.confidence import confidence_label
 from app.schemas.coaching import CoachingOutput
+from app.schemas.rag import CitationBlock, RetrievedContext
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,41 @@ def _build_system_prompt() -> str:
     )
 
 
+def _build_citation_blocks(contexts: list[RetrievedContext]) -> list[CitationBlock]:
+    """Convert retrieved contexts to numbered CitationBlock list for the prompt.
+
+    Assigns 1-based index values matching the [N] markers embedded in the
+    prompt's Retrieved Evidence section.  The caller passes this list alongside
+    the prompt so downstream code can cross-reference LLM output citations.
+
+    Parameters
+    ----------
+    contexts:
+        Ordered list of RetrievedContext objects (already reranked).
+
+    Returns
+    -------
+    list[CitationBlock]
+        One CitationBlock per context, index starting at 1.
+    """
+    blocks: list[CitationBlock] = []
+    for i, ctx in enumerate(contexts, start=1):
+        chunk = ctx.chunk
+        # Truncate excerpt to 300 chars to keep prompts manageable
+        excerpt = chunk.text[:300].strip()
+        blocks.append(
+            CitationBlock(
+                index=i,
+                title=chunk.title,
+                authors=chunk.authors,
+                year=chunk.year,
+                doi=chunk.doi,
+                chunk_text_excerpt=excerpt,
+            )
+        )
+    return blocks
+
+
 def _build_user_prompt(
     exercise_type: str,
     exercise_variant: str,
@@ -106,6 +142,7 @@ def _build_user_prompt(
     thresholds: ThresholdConfig,
     body_stats: dict[str, Any] | None = None,
     keyframe_analysis_text: str | None = None,
+    retrieved_contexts: list[RetrievedContext] | None = None,
 ) -> str:
     """Build the per-analysis user turn (fresh context, not cached).
 
@@ -127,6 +164,12 @@ def _build_user_prompt(
     keyframe_analysis_text:
         Optional GPT-4o keyframe analysis text (Phase 1 visual analysis).
         When provided, prepended as a "Visual Analysis" section.
+    retrieved_contexts:
+        Optional list of reranked RetrievedContext objects from the RAG
+        pipeline (Phase 2, FR-AICP-08). When provided and non-empty, a
+        numbered "Retrieved Evidence" section is prepended and cite-then-
+        generate instructions are appended. When None or empty, the prompt
+        is identical to the Phase 1 format.
     """
     rep_count = len(rep_metrics)
     confidence_label_str = confidence_label(confidence_score)
@@ -173,6 +216,26 @@ def _build_user_prompt(
         lines += [
             "Visual Analysis (keyframe):",
             keyframe_analysis_text,
+            "",
+        ]
+
+    # Retrieved Evidence section (Phase 2 — FR-AICP-08 cite-then-generate)
+    if retrieved_contexts:
+        citation_blocks = _build_citation_blocks(retrieved_contexts)
+        lines.append("Retrieved Evidence:")
+        for block in citation_blocks:
+            authors_str = ", ".join(block.authors) if block.authors else "Unknown"
+            year_str = str(block.year) if block.year is not None else "n.d."
+            doi_str = f" DOI: {block.doi}" if block.doi else ""
+            lines.append(
+                f"[{block.index}] {block.title} ({authors_str}, {year_str}).{doi_str}"
+            )
+            lines.append(f'    "{block.chunk_text_excerpt}" (relevance: {retrieved_contexts[block.index - 1].score:.2f})')
+        lines += [
+            "",
+            "When referencing evidence from the Retrieved Evidence section above, cite by",
+            "number (e.g., [1], [2]). Only cite evidence that directly supports your point.",
+            "Do not fabricate citations.",
             "",
         ]
 
@@ -255,6 +318,7 @@ class CoachingService:
         thresholds: ThresholdConfig,
         body_stats: dict[str, Any] | None = None,
         keyframe_analysis_text: str | None = None,
+        retrieved_contexts: list[RetrievedContext] | None = None,
     ) -> CoachingOutput:
         """Call Claude and return a validated CoachingOutput.
 
@@ -277,6 +341,11 @@ class CoachingService:
         keyframe_analysis_text:
             Optional GPT-4o keyframe analysis text for the Visual Analysis
             section of the prompt (Phase 1). When None, section is omitted.
+        retrieved_contexts:
+            Optional list of reranked RetrievedContext objects from the RAG
+            pipeline (Phase 2, FR-AICP-08). When provided and non-empty, the
+            cite-then-generate pattern is activated in the user prompt.
+            Defaults to None (Phase 0/1 behaviour unchanged).
 
         Returns
         -------
@@ -308,6 +377,7 @@ class CoachingService:
             thresholds=thresholds,
             body_stats=body_stats,
             keyframe_analysis_text=keyframe_analysis_text,
+            retrieved_contexts=retrieved_contexts,
         )
 
         messages = [{"role": "user", "content": user_prompt}]
@@ -379,6 +449,7 @@ class CoachingService:
         thresholds: ThresholdConfig,
         body_stats: dict[str, Any] | None = None,
         keyframe_analysis_text: str | None = None,
+        retrieved_contexts: list[RetrievedContext] | None = None,
         analysis_id: Any = None,
         pubsub_redis: Any = None,
     ) -> CoachingOutput:
@@ -413,6 +484,11 @@ class CoachingService:
             Optional athlete profile dict (height, weight, limb ratios).
         keyframe_analysis_text:
             Optional GPT-4o keyframe analysis text (Phase 1).
+        retrieved_contexts:
+            Optional list of reranked RetrievedContext objects from the RAG
+            pipeline (Phase 2, FR-AICP-08). When provided and non-empty, the
+            cite-then-generate pattern is activated in the user prompt.
+            Defaults to None (Phase 0/1 behaviour unchanged).
         analysis_id:
             Analysis UUID — used as Redis channel suffix. None → no channel.
         pubsub_redis:
@@ -434,6 +510,7 @@ class CoachingService:
             thresholds=thresholds,
             body_stats=body_stats,
             keyframe_analysis_text=keyframe_analysis_text,
+            retrieved_contexts=retrieved_contexts,
         )
 
         channel = f"coaching:{analysis_id}" if analysis_id else None

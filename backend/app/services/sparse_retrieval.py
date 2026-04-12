@@ -1,6 +1,7 @@
 """SparseRetrievalService — BM25 sparse vector search via Qdrant server-side index.
 
-Requirements: FR-AICP-09 (hybrid RAG pipeline — sparse leg of dense+BM25 hybrid).
+Requirements: FR-AICP-09 (hybrid RAG pipeline — sparse leg of dense+BM25 hybrid),
+FR-AICP-12 (exercise-type filter at query time, P2-011).
 
 Architecture notes:
 - Qdrant collections are configured with a sparse vector named "bm25" using
@@ -80,6 +81,7 @@ class SparseRetrievalService:
         query: str,
         collection: CollectionName = _DEFAULT_COLLECTION,
         top_k: int = 10,
+        exercise_filter: str | None = None,
     ) -> list[RetrievedContext]:
         """BM25 sparse vector search using Qdrant's server-side sparse index.
 
@@ -95,6 +97,10 @@ class SparseRetrievalService:
             Target collection name ("papers_rag" or "coach_brain").
         top_k:
             Maximum number of results to return.
+        exercise_filter:
+            When provided, restricts results to points whose ``exercise``
+            payload field matches this value exactly.  Primarily useful for
+            the ``coach_brain`` collection (FR-AICP-12, P2-011).
 
         Returns
         -------
@@ -113,16 +119,33 @@ class SparseRetrievalService:
 
         indices: list[int] = sparse_vector["indices"]  # type: ignore[assignment]
         values: list[float] = sparse_vector["values"]  # type: ignore[assignment]
-        response = await self._qdrant.query_points(
-            collection=collection,
-            query=qdrant_models.SparseVector(
+
+        # Build optional payload filter for exercise-type restriction (FR-AICP-12).
+        query_filter = None
+        if exercise_filter is not None:
+            query_filter = qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="exercise",
+                        match=qdrant_models.MatchValue(value=exercise_filter),
+                    )
+                ]
+            )
+
+        qdrant_kwargs: dict = {
+            "collection": collection,
+            "query": qdrant_models.SparseVector(
                 indices=indices,
                 values=values,
             ),
-            using=_SPARSE_VECTOR_NAME,
-            limit=top_k,
-            with_payload=True,
-        )
+            "using": _SPARSE_VECTOR_NAME,
+            "limit": top_k,
+            "with_payload": True,
+        }
+        if query_filter is not None:
+            qdrant_kwargs["query_filter"] = query_filter
+
+        response = await self._qdrant.query_points(**qdrant_kwargs)
 
         return _parse_response(response, collection)
 

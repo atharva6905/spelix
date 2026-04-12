@@ -19,6 +19,7 @@ from app.config import ThresholdConfig
 from app.schemas.coaching import CoachingOutput, Issue
 from app.services.coaching import (
     CoachingService,
+    _build_citation_blocks,
     _build_user_prompt,
 )
 
@@ -1245,3 +1246,334 @@ class TestGenerateCoachingStreamingNative:
             assert phrase not in output_text, (
                 f"Banned phrase '{phrase}' found in coaching output"
             )
+
+
+# ---------------------------------------------------------------------------
+# FR-AICP-08: cite-then-generate prompt architecture (P2-013)
+# ---------------------------------------------------------------------------
+
+
+def _make_retrieved_context(
+    index: int = 1,
+    title: str = "Knee valgus biomechanics during squat",
+    authors: list[str] | None = None,
+    year: int = 2021,
+    doi: str | None = "10.1016/j.jbiomech.2021.110001",
+    chunk_text: str = "Excessive knee valgus is associated with altered load distribution.",
+    score: float = 0.87,
+) -> object:
+    """Return a minimal RetrievedContext for testing."""
+    from app.schemas.rag import ChunkPayload, RetrievedContext
+
+    if authors is None:
+        authors = ["Smith, J.", "Jones, A."]
+
+    chunk = ChunkPayload(
+        id=f"sha256-{index:04d}",
+        text=chunk_text,
+        paper_id=f"paper-{index}",
+        chunk_index=0,
+        section="results",
+        token_count=len(chunk_text.split()),
+        quality_tier="L2_rct",
+        title=title,
+        authors=authors,
+        year=year,
+        doi=doi,
+    )
+    return RetrievedContext(chunk=chunk, score=score, collection="papers_rag")
+
+
+class TestCiteThenGenerate:
+    """FR-AICP-08: Cite-then-generate prompt architecture tests (P2-013)."""
+
+    # --- _build_citation_blocks ---
+
+    def test_build_citation_blocks_index_starts_at_one(self) -> None:
+        """CitationBlock index must be 1-based."""
+
+        contexts = [_make_retrieved_context(index=1), _make_retrieved_context(index=2)]
+        blocks = _build_citation_blocks(contexts)
+
+        assert blocks[0].index == 1
+        assert blocks[1].index == 2
+
+    def test_build_citation_blocks_title_and_authors(self) -> None:
+        """CitationBlock must carry title and authors from ChunkPayload."""
+
+        ctx = _make_retrieved_context(
+            title="Deadlift mechanics review",
+            authors=["Brown, K.", "Taylor, L."],
+        )
+        blocks = _build_citation_blocks([ctx])
+
+        assert len(blocks) == 1
+        assert blocks[0].title == "Deadlift mechanics review"
+        assert blocks[0].authors == ["Brown, K.", "Taylor, L."]
+
+    def test_build_citation_blocks_year_and_doi(self) -> None:
+        """CitationBlock carries year and doi (may be None)."""
+
+        ctx_with_doi = _make_retrieved_context(year=2019, doi="10.1016/test.doi")
+        ctx_no_doi = _make_retrieved_context(doi=None, year=None)
+
+        blocks = _build_citation_blocks([ctx_with_doi, ctx_no_doi])
+
+        assert blocks[0].year == 2019
+        assert blocks[0].doi == "10.1016/test.doi"
+        assert blocks[1].doi is None
+        assert blocks[1].year is None
+
+    def test_build_citation_blocks_excerpt_truncated(self) -> None:
+        """chunk_text_excerpt must be truncated to 300 chars."""
+
+        long_text = "A" * 500
+        ctx = _make_retrieved_context(chunk_text=long_text)
+        blocks = _build_citation_blocks([ctx])
+
+        assert len(blocks[0].chunk_text_excerpt) <= 300
+
+    def test_build_citation_blocks_empty_list(self) -> None:
+        """Empty context list produces empty CitationBlock list."""
+
+        assert _build_citation_blocks([]) == []
+
+    # --- _build_user_prompt with retrieved_contexts ---
+
+    def test_prompt_with_retrieved_contexts_includes_evidence_section(self) -> None:
+        """When retrieved_contexts is provided, prompt must contain 'Retrieved Evidence'."""
+        contexts = [_make_retrieved_context()]
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=contexts,
+        )
+        assert "Retrieved Evidence:" in prompt
+
+    def test_prompt_with_none_retrieved_contexts_has_no_evidence_section(self) -> None:
+        """When retrieved_contexts is None, prompt must NOT contain 'Retrieved Evidence'."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=None,
+        )
+        assert "Retrieved Evidence" not in prompt
+
+    def test_prompt_with_empty_retrieved_contexts_has_no_evidence_section(self) -> None:
+        """When retrieved_contexts is empty list, prompt must NOT contain 'Retrieved Evidence'."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=[],
+        )
+        assert "Retrieved Evidence" not in prompt
+
+    def test_prompt_citation_numbering_is_correct(self) -> None:
+        """Retrieved Evidence markers must be [1], [2], [3] in order."""
+        contexts = [
+            _make_retrieved_context(index=1, title="Paper One"),
+            _make_retrieved_context(index=2, title="Paper Two"),
+            _make_retrieved_context(index=3, title="Paper Three"),
+        ]
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=contexts,
+        )
+        assert "[1]" in prompt
+        assert "[2]" in prompt
+        assert "[3]" in prompt
+        # Ordering: [1] appears before [2] which appears before [3]
+        assert prompt.index("[1]") < prompt.index("[2]") < prompt.index("[3]")
+
+    def test_prompt_cite_then_generate_instruction_present(self) -> None:
+        """Cite-then-generate instruction must appear when contexts are provided."""
+        contexts = [_make_retrieved_context()]
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=contexts,
+        )
+        assert "Do not fabricate citations." in prompt
+        assert "Only cite evidence that directly supports your point." in prompt
+
+    def test_prompt_evidence_includes_score(self) -> None:
+        """Relevance score must appear in the evidence section."""
+        ctx = _make_retrieved_context(score=0.91)
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=[ctx],
+        )
+        assert "0.91" in prompt
+
+    def test_prompt_evidence_includes_doi(self) -> None:
+        """DOI must appear in the evidence section when present."""
+        ctx = _make_retrieved_context(doi="10.1016/j.jbiomech.2021.110001")
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=[ctx],
+        )
+        assert "10.1016/j.jbiomech.2021.110001" in prompt
+
+    # --- generate_coaching backwards compatibility ---
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_accepts_retrieved_contexts(self) -> None:
+        """generate_coaching with retrieved_contexts must forward them to the prompt."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        captured_messages: list[Any] = []
+
+        async def capture_create(**kwargs: Any) -> CoachingOutput:
+            captured_messages.extend(kwargs.get("messages", []))
+            return expected
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = capture_create
+
+        contexts = [_make_retrieved_context(title="Squat depth and knee mechanics")]
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                retrieved_contexts=contexts,
+            )
+
+        assert isinstance(result, CoachingOutput)
+        assert len(captured_messages) == 1
+        user_content: str = captured_messages[0]["content"]
+        assert "Retrieved Evidence" in user_content
+        assert "Squat depth and knee mechanics" in user_content
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_backwards_compat_no_contexts(self) -> None:
+        """generate_coaching with no retrieved_contexts is unchanged from Phase 1."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        captured_messages: list[Any] = []
+
+        async def capture_create(**kwargs: Any) -> CoachingOutput:
+            captured_messages.extend(kwargs.get("messages", []))
+            return expected
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = capture_create
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                # No retrieved_contexts arg — defaults to None
+            )
+
+        assert isinstance(result, CoachingOutput)
+        user_content: str = captured_messages[0]["content"]
+        assert "Retrieved Evidence" not in user_content
+
+    # --- generate_coaching_streaming backwards compatibility ---
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_streaming_accepts_retrieved_contexts(self) -> None:
+        """generate_coaching_streaming with retrieved_contexts must include evidence in prompt."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        captured_kwargs: dict[str, Any] = {}
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        contexts = [_make_retrieved_context(title="Bench press scapular mechanics")]
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching_streaming(
+                exercise_type="bench",
+                exercise_variant="flat",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.88,
+                thresholds=ThresholdConfig(),
+                retrieved_contexts=contexts,
+                pubsub_redis=None,
+            )
+
+        assert isinstance(result, CoachingOutput)
+        messages = captured_kwargs.get("messages", [])
+        assert len(messages) == 1
+        user_content: str = messages[0]["content"]
+        assert "Retrieved Evidence" in user_content
+        assert "Bench press scapular mechanics" in user_content
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_streaming_backwards_compat_no_contexts(self) -> None:
+        """generate_coaching_streaming with no retrieved_contexts is unchanged from Phase 1."""
+        mock_client = MagicMock()
+        expected = _make_coaching_output()
+        captured_kwargs: dict[str, Any] = {}
+
+        async def mock_create_partial(**kwargs: Any) -> Any:
+            captured_kwargs.update(kwargs)
+            yield expected
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            result = await service.generate_coaching_streaming(
+                exercise_type="squat",
+                exercise_variant="high_bar",
+                rep_metrics=_make_sample_rep_metrics(),
+                confidence_score=0.90,
+                thresholds=ThresholdConfig(),
+                pubsub_redis=None,
+                # No retrieved_contexts — defaults to None
+            )
+
+        assert isinstance(result, CoachingOutput)
+        messages = captured_kwargs.get("messages", [])
+        user_content: str = messages[0]["content"]
+        assert "Retrieved Evidence" not in user_content
