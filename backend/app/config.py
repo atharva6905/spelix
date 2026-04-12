@@ -1,6 +1,12 @@
-"""ThresholdConfig — loads exercise thresholds from config/thresholds_v{N}.json.
+"""config.py — application configuration helpers.
 
-Requirements: FR-SCOR-00 (B-025), FR-SCOR-11 (Phase 1)
+Sections:
+  1. ThresholdConfig — loads exercise thresholds from config/thresholds_v{N}.json
+     (FR-SCOR-00, FR-SCOR-11).
+  2. API key helpers — typed accessors for third-party service credentials.
+     - get_cohere_api_key() — COHERE_API_KEY as SecretStr (Phase 2 RAG, P2-003)
+
+Requirements: FR-SCOR-00 (B-025), FR-SCOR-11 (Phase 1), FR-AICP-09 (Phase 2)
 
 Phase 0 uses config/thresholds_v0.json (hardcoded named constants, no magic
 numbers scattered through the codebase). Phase 1 uses config/thresholds_v1.json
@@ -13,7 +19,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+
 from typing import Any
+
+from pydantic import SecretStr
 
 # ---------------------------------------------------------------------------
 # Path resolution
@@ -201,3 +210,33 @@ class ThresholdConfig:
                 f"in threshold config {self._version!r}. "
                 f"Available: {list(block.keys())}"
             )
+
+
+# ---------------------------------------------------------------------------
+# API key helpers (Phase 2 — P2-003)
+# ---------------------------------------------------------------------------
+
+
+def get_cohere_api_key() -> SecretStr:
+    """Return COHERE_API_KEY as a SecretStr.
+
+    Raises RuntimeError if the environment variable is absent. Call sites
+    should invoke this once at service construction time (not per-request).
+
+    The SecretStr wrapper prevents the key from appearing in logs, tracebacks,
+    or repr() output — call .get_secret_value() only where the raw string is
+    required (i.e. when constructing the cohere.AsyncClientV2 client).
+
+    Example::
+
+        key: SecretStr = get_cohere_api_key()
+        client = cohere.AsyncClientV2(api_key=key.get_secret_value())
+    """
+    raw = os.environ.get("COHERE_API_KEY")
+    if not raw:
+        raise RuntimeError(
+            "COHERE_API_KEY environment variable is not set. "
+            "Phase 2 RAG features require a valid Cohere API key. "
+            "Add it to backend/.env or set it in the deployment environment."
+        )
+    return SecretStr(raw)
