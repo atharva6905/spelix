@@ -38,7 +38,7 @@ class CoachBrainRepository:
                 ),
                 {"aid": aid},
             )
-            modified += result.rowcount
+            modified += result.rowcount  # type: ignore[union-attr]
         return modified
 
     async def soft_delete_empty_unconfirmed(self) -> int:
@@ -64,4 +64,4 @@ class CoachBrainRepository:
                 ),
             )
         )
-        return result.rowcount
+        return result.rowcount  # type: ignore[union-attr]
