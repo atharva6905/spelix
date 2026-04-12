@@ -173,11 +173,11 @@ Session-14 rewrite: IDs re-numbered to match the Phase 2 kickoff brief. Old `P2-
 rows (same content as `D-001/002/003`) are deleted to avoid collision with new
 Phase 2 Coach Brain tasks that now occupy `P2-023..P2-034`.
 
-| ID | Title | Status | Size | Notes |
-|----|-------|--------|------|-------|
-| D-001 | Replace stream-then-reparse with instructor native streaming structured extraction | open | M | `services/coaching.py::generate_coaching_streaming` currently makes two LLM calls (stream raw text → second `instructor` call to re-validate into `CoachingOutput`). Halves per-analysis token cost when fixed. Tracked in ADR-021. |
-| D-002 | Remove dead `compute_rep_confidence` from `cv/confidence.py` | open | S | No callers since B-110 superseded it with `compute_confidence_result` Tier 1-5 pipeline. Pure deletion. |
-| D-003 | ADR: Phase 1 coaching stream-then-reparse as tech debt | done | S | **Already covered by ADR-021 (`decisions.md`). Close with no new ADR — ADR-021 documents the deviation from SRS FR-AICP-07 phrasing and the migration plan that D-001 executes.** |
+| ID | Title | Status | Size | Commits | Notes |
+|----|-------|--------|------|---------|-------|
+| D-001 | Replace stream-then-reparse with instructor native streaming structured extraction | open | M | — | `services/coaching.py::generate_coaching_streaming` currently makes two LLM calls (stream raw text → second `instructor` call to re-validate into `CoachingOutput`). Halves per-analysis token cost when fixed. Tracked in ADR-021. Session 14 dispatch attempt bailed on FR-ID gate — re-dispatch next turn with explicit header. |
+| D-002 | Remove dead `compute_rep_confidence` from `cv/confidence.py` | done | S | `9d8137f` (guard test, TDD red) + `404b982` (function deletion, TDD green) | Superseded by `compute_confidence_result` Tier 1–5 pipeline (FR-CVPL-20..24, ADR-015). Deleted function body + orphaned `_SQUAT_DEADLIFT_LANDMARKS`/`_BENCH_LANDMARKS`/`_EXERCISE_LANDMARK_MAP` helpers. Guard test `TestComputeRepConfidenceIsRemoved` prevents reintroduction. |
+| D-003 | ADR: Phase 1 coaching stream-then-reparse as tech debt | done | S | — | **Already covered by ADR-021 (`decisions.md`). Closed with no new ADR — ADR-021 documents the deviation from SRS FR-AICP-07 phrasing and the migration plan that D-001 executes.** |
 
 ## Phase 1 — Session 13 Production Hardening Follow-ups (renumbered D-004..D-010)
 
@@ -213,11 +213,11 @@ Seed Coach Brain corpus only: `source=seed_manual_validated`. Distillation pipel
 
 ### Batch 1 — Infrastructure (run /parallel — fully independent)
 
-| ID | Title | Size | Deps | SRS IDs | Status |
-|----|-------|------|------|---------|--------|
-| P2-001 | Migration 004 — rag_documents + expert_annotations + coach_brain_entries + consent_records tables + retrieved_sources_json + eval_scores_json JSONB columns on analyses + RLS on consent_records | M | — | FR-AICP-11, FR-BRAIN-01, FR-BRAIN-11, NFR-PRIV-01 | open |
-| P2-002 | Qdrant Cloud cluster provisioning + dual-collection schema (`papers_rag` + `coach_brain`, both 1024 dim cosine + BM25 sparse, payload indexes on coach_brain.exercise + status) + nightly keepalive ARQ cron `ping_qdrant_health` | M | — | FR-AICP-09, FR-BRAIN-01, ADR-BRAIN-01, ADR-RAG-03, ADR-P2-001 | open |
-| P2-003 | Cohere API client wrapper — `embed-v4.0` + `rerank-v4.0-pro`, 96-batch limit, rate limit respect, explicit `output_dimension=1024`, `cohere.ClientV2` (SDK v5+), mocked in all CI tests | S | — | FR-AICP-09, ADR-RAG-01, ADR-RAG-03 | open |
+| ID | Title | Size | Deps | SRS IDs | Status | Commits |
+|----|-------|------|------|---------|--------|---------|
+| P2-001 | Migration 004 — rag_documents + expert_annotations + coach_brain_entries + consent_records tables + retrieval_context + eval_scores JSONB columns on analyses + RLS on consent_records | M | — | FR-AICP-11, FR-BRAIN-01, FR-BRAIN-11, FR-BRAIN-16, NFR-PRIV-01 | done | `608e007` (initial migration + tests) + `d2eb0a0` (drop phantom `set_updated_at()` triggers + fix `pg_class.rowsecurity` helper). Applied to live Supabase. 17/17 integration tests pass. Column names landed as `retrieval_context` + `eval_scores` (not `retrieved_sources_json` + `eval_scores_json`) — Batches 2–8 must use these names. `expert_annotations` designed as chunk-level Qdrant mirror (document_id, chunk_index, chunk_text, embedding_model, qdrant_point_id, citation_metadata), not reviewer/action/notes. `coach_brain_entries.content` not `coaching_action`. `coach_brain_entries.status` enum: `seed \| active \| deprecated`. `consent_records.consent_type` enum: `coach_brain_contribution \| health_data_processing \| analytics`. |
+| P2-002 | Qdrant Cloud cluster provisioning + dual-collection schema (`papers_rag` + `coach_brain`, both 1024 dim cosine + BM25 sparse, payload indexes on coach_brain.exercise + status) + nightly keepalive ARQ cron `ping_qdrant_health` | M | — | FR-AICP-09, FR-BRAIN-01, FR-BRAIN-13, ADR-BRAIN-01, ADR-BRAIN-03, ADR-RAG-03, ADR-032, ADR-P2-001 | done | `d54f543` — QdrantClientWrapper + module-level factory cache + deferred source-patch import + ensure_collections() idempotent + ping() never-raises + thin upsert/query passthroughs. Shared Phase 2 RAG schemas (ChunkPayload, RetrievedContext, RetrievalResult, CitationBlock) in `schemas/rag.py`. Nightly `ping_qdrant_health` cron at 02:00 UTC (offset from 03:00 cleanup). `scripts/provision_qdrant.py` one-shot. 38 new tests (18 qdrant_client + 20 rag_schemas). `CoachBrainEntry` deferred to P2-023. **Live provisioning against Qdrant Cloud not yet run — next turn task.** |
+| P2-003 | Cohere API client wrapper — `embed-v4.0` + `rerank-v4.0-pro`, 96-batch limit, rate limit respect, explicit `output_dimension=1024`, `cohere.AsyncClientV2` (SDK v6+), mocked in all CI tests | S | — | FR-AICP-09, ADR-RAG-01, ADR-RAG-03, ADR-032 | done | `12b1e46` (test) + `eeec555` (impl) + `67c7df6` (config + `.env.example`). Cherry-picked from worktree `agent-adc83ac4`, dropped stale backlog-hygiene commit `3666581`. cohere SDK 6.1.0 is async-native (no `asyncio.to_thread`). `output_dimension=1024` passed on every call, asserted by regression test. `rerank-v4.0-pro` model pinned + test-asserted. 6 new tests. `COHERE_API_KEY` in `config.py` as `SecretStr`. |
 
 ### Batch 2 — Ingestion Pipeline (gate: P2-002, P2-003 merged; /team phase2-rag)
 
