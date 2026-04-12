@@ -294,7 +294,7 @@ def _is_auth_error(exc: Exception) -> bool:
 
 
 class CoachingService:
-    """Phase 0 coaching service: structured LLM call via instructor.
+    """Phase 0/1/2 coaching service: structured LLM call via instructor.
 
     Parameters
     ----------
@@ -304,15 +304,22 @@ class CoachingService:
         never be invoked (e.g., pure unit-test mocking of the entire class).
     model:
         Anthropic model ID. Defaults to ``claude-sonnet-4-6``.
+    langfuse_client:
+        Optional ``langfuse.Langfuse`` instance for observability (P2-034).
+        Pass ``None`` (default) to disable Langfuse tracing — all pipeline
+        behaviour is unchanged. All Langfuse calls are best-effort and wrapped
+        in try/except so observability failures never break coaching.
     """
 
     def __init__(
         self,
         anthropic_client: anthropic.AsyncAnthropic | anthropic.Anthropic | None,
         model: str = MODEL,
+        langfuse_client: Any | None = None,
     ) -> None:
         self._model = model
         self._raw_client = anthropic_client
+        self._langfuse_client = langfuse_client
         if anthropic_client is None:
             # Defer instructor wrapping — will raise on use if not mocked
             self._instructor_client: Any = None

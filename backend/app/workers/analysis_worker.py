@@ -99,6 +99,12 @@ async def _run_pipeline(
     except Exception:
         logger.warning("OpenAI client unavailable — GPT-4o fallback disabled")
 
+    # Langfuse client for observability (P2-034, FR-BRAIN-13) — best-effort,
+    # None means Langfuse disabled (missing keys in dev/CI)
+    from app.services.langfuse_client import get_langfuse_client
+
+    langfuse_client = await get_langfuse_client()
+
     try:
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
@@ -203,7 +209,7 @@ async def _run_pipeline(
         ]
 
         client = anthropic.AsyncAnthropic()
-        coaching_svc = CoachingService(client)
+        coaching_svc = CoachingService(client, langfuse_client=langfuse_client)
 
         # Open dedicated Redis for pub/sub (not the ARQ ctx["redis"])
         # Opened early so phase events can be published during retrieval
@@ -273,9 +279,17 @@ async def _run_pipeline(
                     degraded_mode = True
                     logger.warning(
                         "Qdrant unavailable — coaching without RAG contexts for %s "
-                        "(degraded mode). TODO(P2-034): log to Langfuse.",
+                        "(degraded mode).",
                         analysis_id,
                     )
+                    if langfuse_client is not None:
+                        try:
+                            langfuse_client.trace(
+                                name="retrieval_degraded",
+                                input={"analysis_id": str(analysis_id), "reason": "qdrant_unavailable"},
+                            )
+                        except Exception:
+                            pass  # observability is best-effort
                     await pubsub_redis.publish(
                         f"coaching:{analysis_id}",
                         _json.dumps({"type": "phase", "phase": "degraded"}),
@@ -283,11 +297,18 @@ async def _run_pipeline(
             except Exception:
                 degraded_mode = True
                 logger.warning(
-                    "Retrieval failed for %s — coaching without contexts (degraded mode). "
-                    "TODO(P2-034): log to Langfuse.",
+                    "Retrieval failed for %s — coaching without contexts (degraded mode).",
                     analysis_id,
                     exc_info=True,
                 )
+                if langfuse_client is not None:
+                    try:
+                        langfuse_client.trace(
+                            name="retrieval_degraded",
+                            input={"analysis_id": str(analysis_id), "reason": "retrieval_exception"},
+                        )
+                    except Exception:
+                        pass  # observability is best-effort
                 try:
                     await pubsub_redis.publish(
                         f"coaching:{analysis_id}",
@@ -427,12 +448,20 @@ async def _run_pipeline(
                     fg_svc = FaithfulnessGateService(client)
                     fg_result = await fg_svc.evaluate(coaching_output, retrieved_contexts)
 
+                    # P2-033 (FR-AICP-16): standardised eval_scores including CoVe fields.
+                    # cove_verified and agent_trace are set in scope above (line ~377).
                     analysis.eval_scores = {
-                        "faithfulness_score": fg_result.score,
+                        "faithfulness": fg_result.score,
                         "faithfulness_passed": fg_result.passed,
                         "unsupported_claims": fg_result.unsupported_claims,
                         "evaluator": "claude-sonnet-4-6-llm-judge",
                         "threshold": 0.8,
+                        "cove_verified": cove_verified,
+                        "cove_iterations": (
+                            len(agent_trace.get("cove_iterations", []))
+                            if agent_trace
+                            else 0
+                        ),
                     }
 
                     if not fg_result.passed:
@@ -443,6 +472,22 @@ async def _run_pipeline(
                         analysis.flagged_for_review = True
 
                     await repo.update(analysis)
+
+                    # P2-034 (FR-BRAIN-13): log eval scores to Langfuse (best-effort)
+                    if langfuse_client is not None:
+                        try:
+                            langfuse_client.score(
+                                trace_id=str(analysis_id),
+                                name="faithfulness",
+                                value=fg_result.score,
+                            )
+                            langfuse_client.score(
+                                trace_id=str(analysis_id),
+                                name="cove_verified",
+                                value=1.0 if cove_verified else 0.0,
+                            )
+                        except Exception:
+                            pass  # observability is best-effort
                 except Exception:
                     logger.warning(
                         "Faithfulness gate failed for %s — continuing",
