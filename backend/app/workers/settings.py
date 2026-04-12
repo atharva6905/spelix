@@ -19,6 +19,7 @@ from arq.cron import cron
 
 from app.workers.analysis_worker import process_analysis
 from app.workers.cleanup import cleanup_expired_artifacts
+from app.workers.consent_cascade import cascade_consent_withdrawal
 from app.workers.keepalive import ping_qdrant_health
 
 logger = logging.getLogger(__name__)
