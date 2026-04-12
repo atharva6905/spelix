@@ -196,6 +196,18 @@ collide with the new Phase 2 Coach Brain / DPIA / eval tasks below.
 
 ---
 
+## Completed — Session 20 Production Bugfixes (2026-04-12)
+
+Three bugs discovered during E2E verification of Batch 5+6 features. All fixed, CI green, deployed.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| D-011 | Fix status page stuck on "Loading…" — add initial fetch on mount | done | S | — | FR-RESL-13 | `d768d95` (PR #24) | `frontend/src/hooks/useAnalysisStatus.ts`, `frontend/src/pages/__tests__/AnalysisStatusPage.test.tsx` |
+| D-012 | Include quality_gate_result in status endpoint response | done | S | — | FR-RESL-13 | `93620fa` (PR #25) | `backend/app/schemas/analysis.py`, `backend/tests/unit/test_analysis_api.py` |
+| D-013 | Fix framing gate rejecting well-framed portrait (9:16) videos | done | S | — | FR-CVPL-04 | `a11ff80` (PR #26) | `backend/app/cv/quality_gates.py`, `backend/tests/unit/test_quality_gates.py` |
+
+---
+
 ## Phase 2 — Active (kickoff 2026-04-11, session 14)
 
 Authoritative task list: Phase 2 kickoff brief.
