@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.schemas.coaching import CoachingOutput
+from app.schemas.rag import ChunkPayload, RetrievedContext
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +293,6 @@ async def test_coaching_failure_sets_failed_status():
 # P2-016 — Four-stage wiring tests
 # ---------------------------------------------------------------------------
 
-from app.schemas.rag import ChunkPayload, RetrievedContext
 
 
 def _make_contexts(n: int = 5) -> list[RetrievedContext]:

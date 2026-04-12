@@ -40,6 +40,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# P2-020 (FR-AICP-09): rerank timeout before falling back to RRF scores
+_RERANK_TIMEOUT_S: float = 3.0
+
 # Default collection — see ADR-BRAIN-01 for dual-collection rationale.
 _DEFAULT_COLLECTION: CollectionName = "papers_rag"
 
@@ -344,12 +347,26 @@ class RetrievalService:
             return []
 
         # Step 3: rerank the fused set with Cohere Rerank 4.0
+        # P2-020 (FR-AICP-09): 3s timeout — on timeout, return RRF-fused results
         texts = [ctx.chunk.text for ctx in fused]
-        rerank_pairs = await self._cohere.rerank(
-            query,
-            texts,
-            top_n=effective_top_n,
-        )
+        try:
+            rerank_pairs = await asyncio.wait_for(
+                self._cohere.rerank(
+                    query,
+                    texts,
+                    top_n=effective_top_n,
+                ),
+                timeout=_RERANK_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "hybrid_search: Cohere rerank timed out after %.1fs for collection=%r "
+                "— returning RRF-fused results directly. "
+                "TODO(P2-034): log this event to Langfuse.",
+                _RERANK_TIMEOUT_S,
+                collection,
+            )
+            return fused[:effective_top_n]
 
         # Step 4: build output list using reranker ordering and scores
         reranked: list[RetrievedContext] = []

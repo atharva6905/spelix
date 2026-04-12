@@ -222,6 +222,7 @@ async def _run_pipeline(
             from app.schemas.rag import RetrievedContext
 
             retrieved_contexts: list[RetrievedContext] | None = None
+            degraded_mode = False  # P2-019: tracks Qdrant unavailability
 
             try:
                 await pubsub_redis.publish(
@@ -266,16 +267,31 @@ async def _run_pipeline(
                             analysis_id, guard_result.reason,
                         )
                 else:
+                    degraded_mode = True
                     logger.warning(
-                        "Qdrant unavailable — coaching without RAG contexts for %s",
+                        "Qdrant unavailable — coaching without RAG contexts for %s "
+                        "(degraded mode). TODO(P2-034): log to Langfuse.",
                         analysis_id,
                     )
+                    await pubsub_redis.publish(
+                        f"coaching:{analysis_id}",
+                        _json.dumps({"type": "phase", "phase": "degraded"}),
+                    )
             except Exception:
+                degraded_mode = True
                 logger.warning(
-                    "Retrieval failed for %s — coaching without contexts",
+                    "Retrieval failed for %s — coaching without contexts (degraded mode). "
+                    "TODO(P2-034): log to Langfuse.",
                     analysis_id,
                     exc_info=True,
                 )
+                try:
+                    await pubsub_redis.publish(
+                        f"coaching:{analysis_id}",
+                        _json.dumps({"type": "phase", "phase": "degraded"}),
+                    )
+                except Exception:
+                    pass  # pub/sub best-effort
 
             await _write_heartbeat(redis)
 
@@ -294,6 +310,41 @@ async def _run_pipeline(
                 analysis_id=analysis_id,
                 pubsub_redis=pubsub_redis,
             )
+
+            # P2-019: stamp degraded_mode on coaching output if Qdrant was unavailable
+            if degraded_mode:
+                coaching_output = coaching_output.model_copy(
+                    update={"degraded_mode": True}
+                )
+
+            await _write_heartbeat(redis)
+
+            # -------------------------------------------------------------- #
+            # P2-017: Citation cross-reference validation (FR-AICP-10)
+            # -------------------------------------------------------------- #
+            if retrieved_contexts:
+                try:
+                    from app.services.coaching import build_citation_blocks
+                    from app.services.validate_output import ValidateOutputTool
+
+                    citation_blocks = build_citation_blocks(retrieved_contexts)
+                    validation_result = ValidateOutputTool.validate(
+                        coaching_output, citation_blocks
+                    )
+                    coaching_output = validation_result.output
+                    if validation_result.has_invalid_citations:
+                        logger.warning(
+                            "ValidateOutputTool: invalid citation indices %s for analysis %s"
+                            " — CoVe will attempt revision",
+                            validation_result.invalid_indices,
+                            analysis_id,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Citation validation failed for %s — continuing",
+                        analysis_id,
+                        exc_info=True,
+                    )
 
             await _write_heartbeat(redis)
 
@@ -334,6 +385,31 @@ async def _run_pipeline(
                         analysis_id,
                         exc_info=True,
                     )
+
+            await _write_heartbeat(redis)
+
+            # -------------------------------------------------------------- #
+            # P2-018: Safety language post-filter (FR-AICP-14)
+            # Runs on ALL coaching outputs (RAG-grounded or not)
+            # -------------------------------------------------------------- #
+            try:
+                from app.services.safety_filter import SafetyFilter
+
+                sf_result = SafetyFilter.apply(coaching_output)
+                coaching_output = sf_result.output
+                if sf_result.injected_disclaimer or sf_result.phrases_replaced > 0:
+                    logger.info(
+                        "SafetyFilter: injected_disclaimer=%s phrases_replaced=%d for %s",
+                        sf_result.injected_disclaimer,
+                        sf_result.phrases_replaced,
+                        analysis_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "SafetyFilter failed for %s — continuing",
+                    analysis_id,
+                    exc_info=True,
+                )
 
             await _write_heartbeat(redis)
 

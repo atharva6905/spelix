@@ -47,6 +47,13 @@ class Issue(BaseModel):
     severity: Literal["High", "Medium", "Low"] = Field(
         description="Triage severity. High issues must be listed first."
     )
+    citation_indices: list[int] = Field(
+        default_factory=list,
+        description=(
+            "1-based citation indices from [N] notation that support this issue. "
+            "Populated by ValidateOutputTool (P2-017). Empty when no RAG contexts."
+        ),
+    )
 
 
 class Citation(BaseModel):
@@ -146,4 +153,11 @@ class CoachingOutput(BaseModel):
     ] | None = Field(
         default=None,
         description="Primary scoring dimension this coaching addresses.",
+    )
+    degraded_mode: bool = Field(
+        default=False,
+        description=(
+            "True when Qdrant was unavailable and coaching ran without RAG contexts "
+            "(FR-AICP-15, P2-019). Frontend displays a prominent degraded banner."
+        ),
     )

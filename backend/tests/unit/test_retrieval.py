@@ -901,3 +901,91 @@ async def test_hybrid_search_no_exercise_filter_passes_none_to_legs() -> None:
 
     sparse_call_kwargs = sparse_service.sparse_search.call_args.kwargs
     assert sparse_call_kwargs.get("exercise_filter") is None
+
+
+# ---------------------------------------------------------------------------
+# P2-020 — Rerank timeout handling (FR-AICP-09)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_returns_fused_on_rerank_timeout() -> None:
+    """When Cohere rerank exceeds _RERANK_TIMEOUT_S, return RRF-fused results.
+
+    P2-020: 3-second timeout on rerank, graceful fallback to RRF scores.
+    """
+    import asyncio
+
+    from app.services.retrieval import RetrievalService
+
+    # Two fused results with known RRF scores
+    ctx_a = _make_retrieved_context(chunk_id="a" * 64, score=0.80, text="Alpha paper.")
+    ctx_b = _make_retrieved_context(chunk_id="b" * 64, score=0.60, text="Beta paper.")
+
+    cohere_client = _make_cohere_client()
+    cohere_client.rerank = AsyncMock(side_effect=asyncio.TimeoutError)
+
+    qdrant_client = _make_qdrant_client()
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+    )
+
+    # Patch dense_search to return our known results; fuse will pass them through
+    with patch.object(service, "dense_search", AsyncMock(return_value=[ctx_a, ctx_b])):
+        results = await service.hybrid_search("squat depth", top_k=5)
+
+    # Should get results back (from RRF fuse) even though rerank timed out
+    assert len(results) >= 1
+    # Scores should be RRF scores (not reranker scores)
+    for r in results:
+        assert r.score > 0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_rerank_timeout_respects_top_n() -> None:
+    """On rerank timeout, return at most effective_top_n results from fused list."""
+    import asyncio
+
+    from app.services.retrieval import RetrievalService
+
+    contexts = [
+        _make_retrieved_context(chunk_id=f"{chr(97 + i)}" * 64, score=0.9 - i * 0.1)
+        for i in range(5)
+    ]
+
+    cohere_client = _make_cohere_client()
+    cohere_client.rerank = AsyncMock(side_effect=asyncio.TimeoutError)
+
+    qdrant_client = _make_qdrant_client()
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+    )
+
+    with patch.object(service, "dense_search", AsyncMock(return_value=contexts)):
+        results = await service.hybrid_search("squat depth", top_k=10, rerank_top_n=3)
+
+    assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_normal_path_unaffected_by_timeout_wrapper() -> None:
+    """The asyncio.wait_for wrapper must not alter the normal rerank path."""
+    from app.services.retrieval import RetrievalService
+
+    ctx = _make_retrieved_context(chunk_id="a" * 64, score=0.80)
+
+    cohere_client = _make_cohere_client(rerank_results=[(0, 0.95)])
+    qdrant_client = _make_qdrant_client()
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+    )
+
+    with patch.object(service, "dense_search", AsyncMock(return_value=[ctx])):
+        results = await service.hybrid_search("squat depth", top_k=5)
+
+    assert len(results) == 1
+    # Score should be the reranker score, not the RRF score
+    assert results[0].score == pytest.approx(0.95)
