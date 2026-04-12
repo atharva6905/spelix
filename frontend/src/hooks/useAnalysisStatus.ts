@@ -141,6 +141,20 @@ export function useAnalysisStatus(
 
     channelRef.current = channel;
 
+    // Fetch current state immediately — Realtime only delivers future UPDATEs,
+    // so if the status changed before the subscription was established we'd
+    // stay on "Loading…" forever.
+    getAnalysisStatus(analysisId)
+      .then((data) => {
+        applyUpdate(data as Parameters<typeof applyUpdate>[0]);
+        if (TERMINAL_STATUSES.includes(data.status)) {
+          channel.unsubscribe();
+        }
+      })
+      .catch((err) => {
+        console.error("[useAnalysisStatus] initial fetch error:", err);
+      });
+
     return () => {
       stopPolling();
       supabase.removeChannel(channel);

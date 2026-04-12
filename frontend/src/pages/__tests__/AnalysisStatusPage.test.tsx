@@ -34,13 +34,11 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 
-// Mock the analyses API
+// Mock the analyses API — default mock never resolves so Realtime-focused tests
+// aren't affected by the initial fetch. Tests that need it can override.
+const mockGetAnalysisStatus = vi.fn();
 vi.mock("@/api/analyses", () => ({
-  getAnalysisStatus: vi.fn().mockResolvedValue({
-    id: "test-id",
-    status: "processing",
-    updated_at: new Date().toISOString(),
-  }),
+  getAnalysisStatus: (...args: unknown[]) => mockGetAnalysisStatus(...args),
 }));
 
 function renderWithRouter(analysisId = "test-id") {
@@ -61,6 +59,8 @@ describe("AnalysisStatusPage", () => {
     mockOn.mockReturnValue(channelInstance);
     mockChannel.mockReturnValue(channelInstance);
     mockSubscribe.mockReturnValue(channelInstance);
+    // Default: initial fetch never resolves so Realtime-focused tests run cleanly
+    mockGetAnalysisStatus.mockReturnValue(new Promise(() => {}));
   });
 
   afterEach(() => {
@@ -70,6 +70,33 @@ describe("AnalysisStatusPage", () => {
   it("renders loading state initially", () => {
     renderWithRouter();
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("fetches initial state on mount so page is not stuck on Loading", async () => {
+    mockGetAnalysisStatus.mockResolvedValue({
+      id: "test-id",
+      status: "quality_gate_rejected",
+      updated_at: new Date().toISOString(),
+      quality_gate_result: {
+        checks: [
+          {
+            name: "body_visibility",
+            passed: false,
+            user_message: "Full body not visible.",
+          },
+        ],
+      },
+    });
+
+    await act(async () => {
+      renderWithRouter();
+    });
+
+    expect(mockGetAnalysisStatus).toHaveBeenCalledWith("test-id");
+    expect(
+      screen.getByText("Video could not be processed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Full body not visible.")).toBeInTheDocument();
   });
 
   it("displays user-facing label for processing status — never internal status string", async () => {

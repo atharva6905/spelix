@@ -217,7 +217,7 @@ export async function startAnalysis(
 /**
  * GET /api/v1/analyses/{id}/status
  * Returns current status of an analysis.
- * NOTE: Backend endpoint (B-027) not yet implemented — used as polling fallback.
+ * Used as polling fallback when Supabase Realtime is unavailable, and for initial state fetch.
  */
 export async function getAnalysisStatus(
   id: string,
