@@ -154,6 +154,7 @@ class RetrievalService:
         collection: CollectionName = _DEFAULT_COLLECTION,
         top_k: int = 10,
         exercise_filter: str | None = None,
+        additional_filters: list | None = None,
     ) -> list[RetrievedContext]:
         """Embed ``query`` with Cohere and retrieve top-K dense matches from Qdrant.
 
@@ -197,17 +198,21 @@ class RetrievalService:
         # Step 2: build optional payload filter (FR-AICP-12).
         # Deferred import follows ADR-032 source-patch pattern.
         query_filter = None
-        if exercise_filter is not None:
+        must_conditions: list = []
+        if exercise_filter is not None or additional_filters:
             from qdrant_client import models as qdrant_models
 
-            query_filter = qdrant_models.Filter(
-                must=[
+            if exercise_filter is not None:
+                must_conditions.append(
                     qdrant_models.FieldCondition(
                         key="exercise",
                         match=qdrant_models.MatchValue(value=exercise_filter),
                     )
-                ]
-            )
+                )
+            if additional_filters:
+                must_conditions.extend(additional_filters)
+
+            query_filter = qdrant_models.Filter(must=must_conditions)
 
         # Step 3: query Qdrant dense index.
         qdrant_kwargs: dict = {
@@ -263,6 +268,8 @@ class RetrievalService:
         rrf_k: int = 60,
         rerank_top_n: int | None = None,
         exercise_filter: str | None = None,
+        additional_filters: list | None = None,
+        rerank: bool = True,
     ) -> list[RetrievedContext]:
         """Run dense + sparse retrieval, fuse via RRF, rerank with Cohere Rerank 4.0.
 
@@ -312,6 +319,7 @@ class RetrievalService:
                     collection=collection,
                     top_k=top_k,
                     exercise_filter=exercise_filter,
+                    additional_filters=additional_filters,
                 ),
                 self._sparse.sparse_search(
                     query,
@@ -329,6 +337,7 @@ class RetrievalService:
                 collection=collection,
                 top_k=top_k,
                 exercise_filter=exercise_filter,
+                additional_filters=additional_filters,
             )
             sparse_results = []
 
@@ -345,6 +354,16 @@ class RetrievalService:
         if not fused:
             logger.debug("hybrid_search: fused result is empty — returning []")
             return []
+
+        # P2-026: when rerank=False, return RRF-fused results directly.
+        # The DualCollectionOrchestrator does its own cross-collection rerank.
+        if not rerank:
+            logger.debug(
+                "hybrid_search: rerank=False — returning %d RRF-fused results from %r",
+                len(fused),
+                collection,
+            )
+            return fused[:effective_top_n]
 
         # Step 3: rerank the fused set with Cohere Rerank 4.0
         # P2-020 (FR-AICP-09): 3s timeout — on timeout, return RRF-fused results

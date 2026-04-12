@@ -143,6 +143,7 @@ def _build_user_prompt(
     body_stats: dict[str, Any] | None = None,
     keyframe_analysis_text: str | None = None,
     retrieved_contexts: list[RetrievedContext] | None = None,
+    retrieval_source: str | None = None,
 ) -> str:
     """Build the per-analysis user turn (fresh context, not cached).
 
@@ -227,8 +228,18 @@ def _build_user_prompt(
             authors_str = ", ".join(block.authors) if block.authors else "Unknown"
             year_str = str(block.year) if block.year is not None else "n.d."
             doi_str = f" DOI: {block.doi}" if block.doi else ""
+            # P2-026 (FR-BRAIN-04): tag each item with source label when
+            # retrieval_source is provided. Labels are prompt-internal markers
+            # consumed during generation and stripped before output.
+            source_label = ""
+            if retrieval_source is not None:
+                ctx = retrieved_contexts[block.index - 1]
+                if ctx.collection == "coach_brain":
+                    source_label = "[COACHING] "
+                else:
+                    source_label = "[RESEARCH] "
             lines.append(
-                f"[{block.index}] {block.title} ({authors_str}, {year_str}).{doi_str}"
+                f"{source_label}[{block.index}] {block.title} ({authors_str}, {year_str}).{doi_str}"
             )
             lines.append(f'    "{block.chunk_text_excerpt}" (relevance: {retrieved_contexts[block.index - 1].score:.2f})')
         lines += [
@@ -319,6 +330,7 @@ class CoachingService:
         body_stats: dict[str, Any] | None = None,
         keyframe_analysis_text: str | None = None,
         retrieved_contexts: list[RetrievedContext] | None = None,
+        retrieval_source: str | None = None,
     ) -> CoachingOutput:
         """Call Claude and return a validated CoachingOutput.
 
@@ -378,6 +390,7 @@ class CoachingService:
             body_stats=body_stats,
             keyframe_analysis_text=keyframe_analysis_text,
             retrieved_contexts=retrieved_contexts,
+            retrieval_source=retrieval_source,
         )
 
         messages = [{"role": "user", "content": user_prompt}]
@@ -450,6 +463,7 @@ class CoachingService:
         body_stats: dict[str, Any] | None = None,
         keyframe_analysis_text: str | None = None,
         retrieved_contexts: list[RetrievedContext] | None = None,
+        retrieval_source: str | None = None,
         analysis_id: Any = None,
         pubsub_redis: Any = None,
     ) -> CoachingOutput:
@@ -511,6 +525,7 @@ class CoachingService:
             body_stats=body_stats,
             keyframe_analysis_text=keyframe_analysis_text,
             retrieved_contexts=retrieved_contexts,
+            retrieval_source=retrieval_source,
         )
 
         channel = f"coaching:{analysis_id}" if analysis_id else None
