@@ -222,6 +222,7 @@ async def _run_pipeline(
             from app.schemas.rag import RetrievedContext
 
             retrieved_contexts: list[RetrievedContext] | None = None
+            retrieval_source: str | None = None  # P2-026: routing mode
             degraded_mode = False  # P2-019: tracks Qdrant unavailability
 
             try:
@@ -231,6 +232,7 @@ async def _run_pipeline(
                 )
 
                 from app.services.cohere_client import get_cohere_client
+                from app.services.dual_collection import DualCollectionOrchestrator
                 from app.services.qdrant import get_qdrant_client
                 from app.services.retrieval import RetrievalService
                 from app.services.retrieval_guard import RetrievalGuard
@@ -242,24 +244,25 @@ async def _run_pipeline(
                 if qdrant_wrapper is not None:
                     sparse_svc = SparseRetrievalService(qdrant_wrapper)
                     retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
+                    orchestrator = DualCollectionOrchestrator(retrieval_svc, cohere_client)
 
                     retrieval_query = (
                         f"{analysis.exercise_type} {analysis.exercise_variant} technique coaching"
                     )
-                    results = await retrieval_svc.hybrid_search(
+                    retrieval_result = await orchestrator.retrieve(
                         query=retrieval_query,
-                        collection="papers_rag",
-                        top_k=10,
-                        rerank_top_n=5,
-                        exercise_filter=analysis.exercise_type,
+                        exercise_type=analysis.exercise_type,
                     )
 
-                    guard_result = RetrievalGuard.check(results)
+                    guard_result = RetrievalGuard.check(retrieval_result.primary)
                     if guard_result.passed:
-                        retrieved_contexts = results
+                        retrieved_contexts = retrieval_result.primary
+                        retrieval_source = retrieval_result.retrieval_source
                         logger.info(
-                            "Retrieval: %d contexts for analysis %s",
-                            len(results), analysis_id,
+                            "Retrieval: %d contexts (source=%s) for analysis %s",
+                            len(retrieval_result.primary),
+                            retrieval_source,
+                            analysis_id,
                         )
                     else:
                         logger.warning(
@@ -307,6 +310,7 @@ async def _run_pipeline(
                 body_stats=body_stats,
                 keyframe_analysis_text=keyframe_analysis_text,
                 retrieved_contexts=retrieved_contexts,
+                retrieval_source=retrieval_source,
                 analysis_id=analysis_id,
                 pubsub_redis=pubsub_redis,
             )
@@ -458,7 +462,10 @@ async def _run_pipeline(
             stream_complete=True,
             cove_verified=cove_verified,
             retrieved_sources_json=(
-                [ctx.model_dump() for ctx in retrieved_contexts]
+                {
+                    "contexts": [ctx.model_dump() for ctx in retrieved_contexts],
+                    "retrieval_source": retrieval_source,
+                }
                 if retrieved_contexts
                 else None
             ),

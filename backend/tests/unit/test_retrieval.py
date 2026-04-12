@@ -989,3 +989,86 @@ async def test_hybrid_search_normal_path_unaffected_by_timeout_wrapper() -> None
     assert len(results) == 1
     # Score should be the reranker score, not the RRF score
     assert results[0].score == pytest.approx(0.95)
+
+
+# ---------------------------------------------------------------------------
+# Test — additional_filters forwarded to Qdrant alongside exercise_filter
+# (P2-026 prerequisite: status="active" filter on coach_brain queries)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dense_search_additional_filters_forwarded_to_qdrant() -> None:
+    """When additional_filters is provided alongside exercise_filter, all
+    conditions must be merged into a single Filter(must=[...])."""
+    from qdrant_client import models as qdrant_models
+
+    from app.services.retrieval import RetrievalService
+
+    cohere_client = _make_cohere_client()
+    qdrant_client = _make_qdrant_client()
+
+    service = RetrievalService(cohere_client=cohere_client, qdrant_client=qdrant_client)
+
+    status_filter = qdrant_models.FieldCondition(
+        key="status",
+        match=qdrant_models.MatchValue(value="active"),
+    )
+
+    await service.dense_search(
+        "squat depth cue",
+        collection="coach_brain",
+        exercise_filter="squat",
+        additional_filters=[status_filter],
+    )
+
+    qdrant_client.query_points.assert_called_once()
+    call_kwargs = qdrant_client.query_points.call_args.kwargs
+
+    query_filter = call_kwargs.get("query_filter")
+    assert query_filter is not None, "query_filter must be passed when filters are set"
+    assert isinstance(query_filter, qdrant_models.Filter)
+
+    must_conditions = query_filter.must
+    assert must_conditions is not None and len(must_conditions) == 2, (
+        f"Filter must contain 2 must conditions (exercise + status), got {len(must_conditions or [])}"
+    )
+
+    keys = {c.key for c in must_conditions}
+    assert keys == {"exercise", "status"}, f"Expected exercise + status filters, got {keys}"
+
+
+# ---------------------------------------------------------------------------
+# Test — hybrid_search with rerank=False returns RRF-fused results directly
+# (P2-026 prerequisite: orchestrator calls hybrid_search(rerank=False)
+#  and does its own cross-collection rerank)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_skip_rerank_returns_rrf_fused_results() -> None:
+    """When rerank=False, hybrid_search must return RRF-fused results without
+    calling cohere_client.rerank."""
+    from app.services.retrieval import RetrievalService
+
+    ctx_dense = _make_retrieved_context(chunk_id="d" * 64, score=0.90)
+    ctx_sparse = _make_retrieved_context(chunk_id="s" * 64, score=0.70, text="BM25 result")
+
+    cohere_client = _make_cohere_client()
+    qdrant_client = _make_qdrant_client()
+    sparse_svc = MagicMock()
+    sparse_svc.sparse_search = AsyncMock(return_value=[ctx_sparse])
+
+    service = RetrievalService(
+        cohere_client=cohere_client,
+        qdrant_client=qdrant_client,
+        sparse_service=sparse_svc,
+    )
+
+    with patch.object(service, "dense_search", AsyncMock(return_value=[ctx_dense])):
+        results = await service.hybrid_search("squat depth", top_k=5, rerank=False)
+
+    # Should have results from RRF fusion
+    assert len(results) >= 1
+    # Cohere rerank must NOT have been called
+    cohere_client.rerank.assert_not_called()

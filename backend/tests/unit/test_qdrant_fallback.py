@@ -277,9 +277,9 @@ async def test_no_degraded_flag_when_qdrant_available() -> None:
     # triggers degraded mode. So the correct test is: when qdrant is available
     # AND retrieval succeeds (guard passes), degraded_mode stays False.
     #
-    # Simplest approach: patch RetrievalService.hybrid_search to return results
+    # Simplest approach: patch DualCollectionOrchestrator.retrieve to return results
     # and RetrievalGuard.check to pass.
-    from app.schemas.rag import ChunkPayload, RetrievedContext
+    from app.schemas.rag import ChunkPayload, RetrievalResult, RetrievedContext
     from app.services.retrieval_guard import RetrievalGuardResult
 
     mock_ctx = RetrievedContext(
@@ -299,16 +299,21 @@ async def test_no_degraded_flag_when_qdrant_available() -> None:
         score=0.9,
         collection="papers_rag",
     )
+    mock_retrieval_result = RetrievalResult(
+        primary=[mock_ctx] * 3,
+        supplementary=[],
+        retrieval_source="papers_only_fallback",
+    )
     mock_qdrant = MagicMock()  # non-None so worker enters the retrieval path
 
     patches, mock_svc, coaching_created = _build_worker_patches(
         analysis, coaching_output, mock_pubsub_redis, qdrant_return=mock_qdrant
     )
     # Additionally patch the retrieval internals to avoid deep async mock issues
-    patches["retrieval_svc"] = patch(
-        "app.services.retrieval.RetrievalService.hybrid_search",
+    patches["orchestrator"] = patch(
+        "app.services.dual_collection.DualCollectionOrchestrator.retrieve",
         new_callable=AsyncMock,
-        return_value=[mock_ctx] * 3,
+        return_value=mock_retrieval_result,
     )
     patches["retrieval_guard"] = patch(
         "app.services.retrieval_guard.RetrievalGuard.check",
@@ -331,7 +336,7 @@ async def test_no_degraded_flag_when_qdrant_available() -> None:
         patches["pdf"],
         patches["qdrant"],
         patches["cohere"],
-        patches["retrieval_svc"],
+        patches["orchestrator"],
         patches["retrieval_guard"],
         patch.object(real_aioredis, "from_url", return_value=mock_pubsub_redis),
     ):

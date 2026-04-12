@@ -357,12 +357,20 @@ def _base_worker_patches(
         await repo_arg.update(a)
         return mock_cv_result
 
-    # Build retrieval mock
-    mock_retrieval_svc = AsyncMock()
+    # Build retrieval mock — DualCollectionOrchestrator.retrieve returns
+    # a RetrievalResult, not raw list[RetrievedContext] (P2-026)
+    from app.schemas.rag import RetrievalResult
+
+    mock_orchestrator = AsyncMock()
     if retrieval_raise:
-        mock_retrieval_svc.hybrid_search.side_effect = RuntimeError("Qdrant down")
+        mock_orchestrator.retrieve.side_effect = RuntimeError("Qdrant down")
     else:
-        mock_retrieval_svc.hybrid_search.return_value = retrieval_results or []
+        contexts = retrieval_results or []
+        mock_orchestrator.retrieve.return_value = RetrievalResult(
+            primary=contexts,
+            supplementary=[],
+            retrieval_source="papers_only_fallback",
+        )
 
     # Build CoVe mock
     mock_cove_svc = AsyncMock()
@@ -435,8 +443,11 @@ def _base_worker_patches(
             new_callable=AsyncMock,
             return_value=MagicMock(),
         ), _patch(
+            "app.services.dual_collection.DualCollectionOrchestrator",
+            return_value=mock_orchestrator,
+        ), _patch(
             "app.services.retrieval.RetrievalService",
-            return_value=mock_retrieval_svc,
+            return_value=AsyncMock(),
         ), _patch(
             "app.services.sparse_retrieval.SparseRetrievalService",
             return_value=MagicMock(),
@@ -672,8 +683,12 @@ async def test_retrieved_sources_stored():
         await process_analysis(ctx, aid)
 
     assert len(created) == 1
-    assert created[0].retrieved_sources_json is not None
-    assert len(created[0].retrieved_sources_json) == 5
+    stored = created[0].retrieved_sources_json
+    assert stored is not None
+    # P2-026: format is {"contexts": [...], "retrieval_source": str}
+    assert "contexts" in stored
+    assert len(stored["contexts"]) == 5
+    assert "retrieval_source" in stored
 
 
 @pytest.mark.asyncio

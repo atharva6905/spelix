@@ -1261,6 +1261,7 @@ def _make_retrieved_context(
     doi: str | None = "10.1016/j.jbiomech.2021.110001",
     chunk_text: str = "Excessive knee valgus is associated with altered load distribution.",
     score: float = 0.87,
+    collection: str = "papers_rag",
 ) -> object:
     """Return a minimal RetrievedContext for testing."""
     from app.schemas.rag import ChunkPayload, RetrievedContext
@@ -1281,7 +1282,7 @@ def _make_retrieved_context(
         year=year,
         doi=doi,
     )
-    return RetrievedContext(chunk=chunk, score=score, collection="papers_rag")
+    return RetrievedContext(chunk=chunk, score=score, collection=collection)  # type: ignore[arg-type]
 
 
 class TestCiteThenGenerate:
@@ -1577,3 +1578,50 @@ class TestCiteThenGenerate:
         messages = captured_kwargs.get("messages", [])
         user_content: str = messages[0]["content"]
         assert "Retrieved Evidence" not in user_content
+
+
+# ---------------------------------------------------------------------------
+# P2-026: [RESEARCH]/[COACHING] source labels in prompt (FR-BRAIN-04)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceLabelsInPrompt:
+    """FR-BRAIN-04: Retrieved Evidence items must be tagged with [RESEARCH]
+    or [COACHING] when retrieval_source is provided."""
+
+    def test_coaching_label_on_coach_brain_items(self) -> None:
+        """When retrieval_source is 'coach_brain_primary', coach_brain items
+        must be prefixed with [COACHING] and papers with [RESEARCH]."""
+        contexts = [
+            _make_retrieved_context(index=1, title="Paper One", collection="papers_rag"),
+            _make_retrieved_context(index=2, title="Brain Cue", collection="coach_brain"),
+        ]
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=contexts,
+            retrieval_source="coach_brain_primary",
+        )
+        assert "[COACHING]" in prompt, "coach_brain items must have [COACHING] label"
+        assert "[RESEARCH]" in prompt, "papers_rag items must have [RESEARCH] label"
+
+    def test_no_coaching_label_in_papers_only_fallback(self) -> None:
+        """When retrieval_source is 'papers_only_fallback', no [COACHING]
+        labels should appear (P2-027 cold-start)."""
+        contexts = [
+            _make_retrieved_context(index=1, title="Paper One", collection="papers_rag"),
+        ]
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            retrieved_contexts=contexts,
+            retrieval_source="papers_only_fallback",
+        )
+        assert "[COACHING]" not in prompt, "No [COACHING] label in papers_only_fallback"
+        assert "[RESEARCH]" in prompt, "papers_rag items must have [RESEARCH] label"
