@@ -53,6 +53,8 @@ class Analysis(TimestampMixin, Base):
     summary_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     quality_gate_result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     detection_result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    retrieval_context: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    eval_scores: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     # Metadata
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

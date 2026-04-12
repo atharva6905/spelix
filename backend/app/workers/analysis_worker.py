@@ -188,7 +188,7 @@ async def _run_pipeline(
             )
 
         # ------------------------------------------------------------------ #
-        # Coaching: Claude Sonnet streaming via CoachingService (Phase 1)
+        # Coaching: Claude Sonnet streaming via CoachingService (Phase 1/2)
         # ------------------------------------------------------------------ #
         coaching_repo = CoachingResultRepository(repo.db)
 
@@ -206,6 +206,7 @@ async def _run_pipeline(
         coaching_svc = CoachingService(client)
 
         # Open dedicated Redis for pub/sub (not the ARQ ctx["redis"])
+        # Opened early so phase events can be published during retrieval
         import redis.asyncio as aioredis
 
         pubsub_redis = aioredis.from_url(
@@ -213,6 +214,74 @@ async def _run_pipeline(
             decode_responses=True,
         )
         try:
+            # -------------------------------------------------------------- #
+            # RAG retrieval — FR-AICP-08 Stage 1 (cite-then-generate)
+            # -------------------------------------------------------------- #
+            import json as _json
+
+            from app.schemas.rag import RetrievedContext
+
+            retrieved_contexts: list[RetrievedContext] | None = None
+
+            try:
+                await pubsub_redis.publish(
+                    f"coaching:{analysis_id}",
+                    _json.dumps({"type": "phase", "phase": "retrieving"}),
+                )
+
+                from app.services.cohere_client import get_cohere_client
+                from app.services.qdrant import get_qdrant_client
+                from app.services.retrieval import RetrievalService
+                from app.services.retrieval_guard import RetrievalGuard
+                from app.services.sparse_retrieval import SparseRetrievalService
+
+                cohere_client = get_cohere_client()
+                qdrant_wrapper = await get_qdrant_client()
+
+                if qdrant_wrapper is not None:
+                    sparse_svc = SparseRetrievalService(qdrant_wrapper)
+                    retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
+
+                    retrieval_query = (
+                        f"{analysis.exercise_type} {analysis.exercise_variant} technique coaching"
+                    )
+                    results = await retrieval_svc.hybrid_search(
+                        query=retrieval_query,
+                        collection="papers_rag",
+                        top_k=10,
+                        rerank_top_n=5,
+                        exercise_filter=analysis.exercise_type,
+                    )
+
+                    guard_result = RetrievalGuard.check(results)
+                    if guard_result.passed:
+                        retrieved_contexts = results
+                        logger.info(
+                            "Retrieval: %d contexts for analysis %s",
+                            len(results), analysis_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Retrieval guard failed for %s: %s",
+                            analysis_id, guard_result.reason,
+                        )
+                else:
+                    logger.warning(
+                        "Qdrant unavailable — coaching without RAG contexts for %s",
+                        analysis_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "Retrieval failed for %s — coaching without contexts",
+                    analysis_id,
+                    exc_info=True,
+                )
+
+            await _write_heartbeat(redis)
+
+            # -------------------------------------------------------------- #
+            # Generate coaching with retrieved contexts
+            # -------------------------------------------------------------- #
             coaching_output = await coaching_svc.generate_coaching_streaming(
                 exercise_type=analysis.exercise_type,
                 exercise_variant=analysis.exercise_variant,
@@ -221,9 +290,88 @@ async def _run_pipeline(
                 thresholds=thresholds,
                 body_stats=body_stats,
                 keyframe_analysis_text=keyframe_analysis_text,
+                retrieved_contexts=retrieved_contexts,
                 analysis_id=analysis_id,
                 pubsub_redis=pubsub_redis,
             )
+
+            await _write_heartbeat(redis)
+
+            # -------------------------------------------------------------- #
+            # CoVe verification — FR-AICP-08 Stage 2 (best-effort)
+            # -------------------------------------------------------------- #
+            cove_verified = False
+            agent_trace: dict | None = None
+
+            if retrieved_contexts:
+                try:
+                    await pubsub_redis.publish(
+                        f"coaching:{analysis_id}",
+                        _json.dumps({"type": "phase", "phase": "verifying"}),
+                    )
+
+                    from app.services.cove import CoveVerificationService
+
+                    cove_svc = CoveVerificationService(client)
+                    cove_result = await cove_svc.verify(
+                        initial_output=coaching_output,
+                        retrieved_contexts=retrieved_contexts,
+                        max_iterations=2,
+                    )
+                    coaching_output = cove_result.output
+                    cove_verified = cove_result.cove_verified
+                    agent_trace = {
+                        "cove_iterations": cove_result.trace,
+                        "converged": cove_result.cove_verified,
+                    }
+                    logger.info(
+                        "CoVe: verified=%s iterations=%d for analysis %s",
+                        cove_verified, cove_result.iterations_run, analysis_id,
+                    )
+                except Exception:
+                    logger.warning(
+                        "CoVe failed for %s — continuing with unverified output",
+                        analysis_id,
+                        exc_info=True,
+                    )
+
+            await _write_heartbeat(redis)
+
+            # -------------------------------------------------------------- #
+            # Faithfulness gate — FR-AICP-08 Stage 3 (best-effort)
+            # -------------------------------------------------------------- #
+            if retrieved_contexts:
+                try:
+                    from app.services.faithfulness_gate import FaithfulnessGateService
+
+                    fg_svc = FaithfulnessGateService(client)
+                    fg_result = await fg_svc.evaluate(coaching_output, retrieved_contexts)
+
+                    analysis.eval_scores = {
+                        "faithfulness_score": fg_result.score,
+                        "faithfulness_passed": fg_result.passed,
+                        "unsupported_claims": fg_result.unsupported_claims,
+                        "evaluator": "claude-sonnet-4-6-llm-judge",
+                        "threshold": 0.8,
+                    }
+
+                    if not fg_result.passed:
+                        logger.warning(
+                            "Faithfulness gate FAILED for %s: score=%.2f — flagging",
+                            analysis_id, fg_result.score,
+                        )
+                        analysis.flagged_for_review = True
+
+                    await repo.update(analysis)
+                except Exception:
+                    logger.warning(
+                        "Faithfulness gate failed for %s — continuing",
+                        analysis_id,
+                        exc_info=True,
+                    )
+
+            await _write_heartbeat(redis)
+
         finally:
             await pubsub_redis.aclose()
 
@@ -232,7 +380,13 @@ async def _run_pipeline(
             analysis_id=analysis_id,
             structured_output_json=coaching_output.model_dump(),
             stream_complete=True,
-            cove_verified=False,
+            cove_verified=cove_verified,
+            retrieved_sources_json=(
+                [ctx.model_dump() for ctx in retrieved_contexts]
+                if retrieved_contexts
+                else None
+            ),
+            agent_trace_json=agent_trace,
         )
         await coaching_repo.create(coaching_result)
 
