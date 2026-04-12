@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from app.schemas.rag import RetrievalResult, RetrievedContext
 
 if TYPE_CHECKING:
+
     from app.services.cohere_client import CohereEmbedClient
     from app.services.retrieval import RetrievalService
 
@@ -56,9 +57,11 @@ class DualCollectionOrchestrator:
         self,
         retrieval_service: RetrievalService,
         cohere_client: CohereEmbedClient,
+        langfuse_client: object | None = None,
     ) -> None:
         self._retrieval = retrieval_service
         self._cohere = cohere_client
+        self._langfuse = langfuse_client
 
     async def retrieve(
         self,
@@ -208,8 +211,59 @@ class DualCollectionOrchestrator:
             len(supplementary),
         )
 
+        # FR-BRAIN-13 (P2-032): log retrieval metrics to Langfuse
+        self._log_retrieval_metrics(
+            query=query,
+            exercise_type=exercise_type,
+            retrieval_source=retrieval_source,
+            primary=primary,
+            supplementary=supplementary,
+            reranked=reranked,
+            top_brain_score=top_brain_score,
+        )
+
         return RetrievalResult(
             primary=primary,
             supplementary=supplementary,
             retrieval_source=retrieval_source,  # type: ignore[arg-type]
         )
+
+    def _log_retrieval_metrics(
+        self,
+        query: str,
+        exercise_type: str,
+        retrieval_source: str,
+        primary: list[RetrievedContext],
+        supplementary: list[RetrievedContext],
+        reranked: list[RetrievedContext],
+        top_brain_score: float,
+    ) -> None:
+        """Best-effort Langfuse logging of per-query retrieval metrics (FR-BRAIN-13)."""
+        if self._langfuse is None:
+            return
+
+        try:
+            all_results = primary + supplementary
+            brain_hits = [c for c in all_results if c.collection == "coach_brain"]
+            papers_hits = [c for c in all_results if c.collection == "papers_rag"]
+            total_hits = len(all_results)
+            brain_pct = (len(brain_hits) / total_hits * 100) if total_hits > 0 else 0.0
+
+            scores = [c.score for c in reranked] if reranked else []
+
+            trace = self._langfuse.trace(  # type: ignore[union-attr]
+                name="retrieval",
+                metadata={
+                    "exercise_type": exercise_type,
+                    "retrieval_source": retrieval_source,
+                    "top_brain_score": round(top_brain_score, 4),
+                    "papers_hit_count": len(papers_hits),
+                    "brain_hit_count": len(brain_hits),
+                    "brain_contribution_pct": round(brain_pct, 1),
+                    "rerank_scores": [round(s, 4) for s in scores],
+                },
+                input=query,
+            )
+            trace.score(name="brain_contribution_pct", value=brain_pct)
+        except Exception:
+            logger.debug("Failed to log retrieval metrics to Langfuse", exc_info=True)

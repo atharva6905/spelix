@@ -350,3 +350,78 @@ async def test_retrieve_rerank_timeout_falls_back_to_rrf() -> None:
     assert len(result.primary) >= 1
     # Without rerank, no coach_brain score is available → papers_only_fallback
     assert result.retrieval_source == "papers_only_fallback"
+
+
+# ---------------------------------------------------------------------------
+# FR-BRAIN-13 (P2-032): Langfuse retrieval metrics logging
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_langfuse_logging_called_on_retrieve():
+    """Langfuse trace is called with retrieval metrics after retrieve()."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    papers = [_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+    brain = [_make_ctx(chunk_id="b" * 64, score=0.70, collection="coach_brain")]
+
+    svc = _make_retrieval_service(papers_results=papers, brain_results=brain)
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80), (1, 0.70)])
+
+    mock_langfuse = MagicMock()
+    mock_trace = MagicMock()
+    mock_langfuse.trace.return_value = mock_trace
+
+    orchestrator = DualCollectionOrchestrator(svc, cohere, langfuse_client=mock_langfuse)
+    result = await orchestrator.retrieve("squat depth", exercise_type="squat")
+
+    assert result is not None
+    mock_langfuse.trace.assert_called_once()
+    call_kwargs = mock_langfuse.trace.call_args
+    metadata = call_kwargs.kwargs["metadata"]
+    assert metadata["retrieval_source"] in (
+        "coach_brain_primary",
+        "hybrid_brain_supplementary",
+        "papers_only_fallback",
+    )
+    assert "brain_hit_count" in metadata
+    assert "papers_hit_count" in metadata
+    assert "brain_contribution_pct" in metadata
+    mock_trace.score.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_langfuse_none_does_not_crash():
+    """No error when langfuse_client is None."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    papers = [_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+
+    svc = _make_retrieval_service(papers_results=papers)
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+
+    orchestrator = DualCollectionOrchestrator(svc, cohere, langfuse_client=None)
+    result = await orchestrator.retrieve("squat depth", exercise_type="squat")
+
+    assert result is not None
+    assert result.retrieval_source == "papers_only_fallback"
+
+
+@pytest.mark.asyncio
+async def test_langfuse_error_does_not_crash():
+    """Langfuse errors are swallowed — never fail the pipeline."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    papers = [_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+
+    svc = _make_retrieval_service(papers_results=papers)
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+
+    mock_langfuse = MagicMock()
+    mock_langfuse.trace.side_effect = RuntimeError("Langfuse down")
+
+    orchestrator = DualCollectionOrchestrator(svc, cohere, langfuse_client=mock_langfuse)
+    result = await orchestrator.retrieve("squat depth", exercise_type="squat")
+
+    assert result is not None
+    assert result.retrieval_source == "papers_only_fallback"
