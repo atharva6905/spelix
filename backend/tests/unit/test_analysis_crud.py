@@ -73,6 +73,7 @@ def _make_mock_analysis(
     # Relationships
     obj.coaching_result = coaching_result
     obj.rep_metrics = rep_metrics or []
+    obj.chat_messages = []
     return obj
 
 

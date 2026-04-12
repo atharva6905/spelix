@@ -55,6 +55,7 @@ def _make_mock_analysis(
     obj.exercise_variant = exercise_variant
     obj.retry_count = 0
     obj.video_path = None
+    obj.chat_messages = []
     obj.created_at = datetime.now(timezone.utc)
     obj.updated_at = datetime.now(timezone.utc)
     return obj

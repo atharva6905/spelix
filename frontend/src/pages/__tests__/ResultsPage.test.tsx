@@ -22,6 +22,13 @@ vi.mock("@/hooks/useAnalysisDetail", () => ({
   useAnalysisDetail: (...args: unknown[]) => mockUseAnalysisDetail(...args),
 }));
 
+// Mock ChatPanel to avoid useChat API setup in page-level tests
+vi.mock("@/components/ChatPanel", () => ({
+  default: ({ analysisId }: { analysisId: string }) => (
+    <div data-testid="chat-panel" data-analysis-id={analysisId} />
+  ),
+}));
+
 // ---------------------------------------------------------------------------
 // Fixture factories
 // ---------------------------------------------------------------------------
@@ -866,5 +873,31 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
     expect(
       screen.queryByTestId("degraded-mode-banner"),
     ).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 2: Follow-up chat panel (P2-022, FR-RESL-09)
+  // -------------------------------------------------------------------------
+
+  it("renders chat panel when coaching result is present", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis(),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.getByTestId("chat-panel")).toBeInTheDocument();
+  });
+
+  it("does not render chat panel when coaching result is null", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({ coaching_result: null }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+    expect(screen.queryByTestId("chat-panel")).not.toBeInTheDocument();
   });
 });

@@ -68,8 +68,10 @@ class Analysis(TimestampMixin, Base):
     # Relationships
     rep_metrics: Mapped[list["RepMetric"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     coaching_result: Mapped[Optional["CoachingResult"]] = relationship(back_populates="analysis", cascade="all, delete-orphan", uselist=False)
+    chat_messages: Mapped[list["ChatMessage"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 
 
 # Avoid circular import — these are string refs resolved by SQLAlchemy
 from app.models.rep_metric import RepMetric  # noqa: E402
 from app.models.coaching_result import CoachingResult  # noqa: E402
+from app.models.chat_message import ChatMessage  # noqa: E402

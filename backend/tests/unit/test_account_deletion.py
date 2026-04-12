@@ -38,6 +38,7 @@ def _make_mock_analysis(
     obj.annotated_video_path = annotated_video_path
     obj.plot_path = plot_path
     obj.pdf_path = pdf_path
+    obj.chat_messages = []
     return obj
 
 

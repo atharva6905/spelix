@@ -345,6 +345,7 @@ class TestGetAnalysisDetail:
         # Nested relationships — empty for simplicity
         obj.coaching_result = None
         obj.rep_metrics = []
+        obj.chat_messages = []
         return obj
 
     def test_get_detail_returns_200_with_correct_fields(self):
