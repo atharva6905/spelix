@@ -35,7 +35,7 @@ async def grant_consent(
     repo: ConsentRepository = Depends(_get_repo),
 ) -> ConsentResponse:
     """Grant consent — inserts a new row with granted=True."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     record = ConsentRecord(
         user_id=user["id"],
         consent_type=body.consent_type,
@@ -69,7 +69,7 @@ async def withdraw_consent(
 
     Append-only: the original grant row is preserved for audit purposes.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     record = ConsentRecord(
         user_id=user["id"],
         consent_type=body.consent_type,
