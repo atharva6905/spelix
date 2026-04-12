@@ -46,6 +46,9 @@ async def main() -> None:
     if not qdrant_url:
         print("[provision] ERROR: QDRANT_URL is not set. Cannot provision.", file=sys.stderr)
         sys.exit(1)
+    if not qdrant_api_key:
+        print("[provision] ERROR: QDRANT_API_KEY is not set. Cannot provision.", file=sys.stderr)
+        sys.exit(1)
 
     print(f"[provision] Connecting to Qdrant at {qdrant_url}")
 

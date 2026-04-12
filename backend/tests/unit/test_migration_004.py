@@ -1,4 +1,4 @@
-"""TDD gate for migration 004 — Phase 2 RAG + Coach Brain schema.
+"""Integration tests for migration 004 — Phase 2 RAG + Coach Brain schema.
 
 SRS requirements covered:
 - FR-AICP-11 — rag_documents + expert_annotations (citation provenance)
@@ -8,9 +8,19 @@ SRS requirements covered:
 - FR-BRAIN-16 — source_analysis_ids UUID[] on coach_brain_entries
 - NFR-PRIV-01 — no DDL FK from consent_records.user_id to auth.users
 
-Tests run against a real Postgres session (DATABASE_URL env var required).
-They are structurally identical to test_models.py patterns — async session
-fixture with rollback, raw SQL introspection via information_schema.
+Tests run against a real Supabase Postgres session with migration 004
+already applied. These are LIVE DB integration tests, not unit tests —
+skipped automatically in CI where TEST_DATABASE_URL is unset (the CI
+spelix_test Postgres instance uses SQLAlchemy metadata.create_all via
+scripts/create_test_tables.py and does not apply migration 004 or the
+auth.uid() RLS policies that depend on Supabase).
+
+To run locally:
+    TEST_DATABASE_URL='postgresql://...supabase...' uv run pytest \\
+        tests/unit/test_migration_004.py
+
+Follows the same TEST_DATABASE_URL / @pytest.mark.integration pattern as
+tests/integration/test_rls_policies.py.
 """
 
 from __future__ import annotations
@@ -24,14 +34,32 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 # ---------------------------------------------------------------------------
+# Module-level gating — skip in CI, run against live Supabase locally
+# ---------------------------------------------------------------------------
+
+TEST_DB_URL = os.environ.get("TEST_DATABASE_URL", "")
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not TEST_DB_URL,
+        reason=(
+            "TEST_DATABASE_URL not set — skipping migration 004 integration "
+            "tests. Set TEST_DATABASE_URL to a live Supabase Postgres URL to run."
+        ),
+    ),
+]
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def db_session():
-    """Fresh async session against the project DB, rolls back after each test."""
-    raw_url = os.environ["DATABASE_URL"]
+    """Fresh async session against the live Supabase DB, rolls back after each test."""
+    raw_url = TEST_DB_URL
     if raw_url.startswith("postgresql://"):
         raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
