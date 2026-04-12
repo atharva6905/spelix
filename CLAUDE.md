@@ -4,7 +4,7 @@ Science-based barbell form coaching platform. Users upload squat/bench/deadlift 
 
 **Current phase: Phase 1 COMPLETE → Phase 2 PLANNING** — Phase 0 complete (93 items, B-001–B-093). Phase 1 complete (44 items, B-094–B-137) delivered: GPT-4o keyframe analysis, 4-dimension scoring + composite, SSE streaming coaching, Tier 1–5 confidence, ThresholdConfig v1, prompt caching, exercise auto-detection with GPT-4o fallback, full Phase 1 PDF report, per-rep metrics (eccentric/lockout/phase of max dev/consistency). Phase 2 delivers: RAG (Qdrant dual-collection, Cohere embed-v4 + Rerank 4.0), document ingestion (Docling), hybrid retrieval (dense+BM25+RRF), citation-grounded coaching, CoVe verification, follow-up chat, Coach Brain foundation (seed corpus 50–100 entries, contextual embedding pipeline, cold-start fallback), GDPR Article 9 health data consent flow, consent withdrawal handling (FR-BRAIN-16), per-analysis eval scores (RAGAS/HHEM), DPIA, retrieval metrics logging. SRS v2.1 (north star — set in stone).
 
-Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`.
+Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`. **Strategy & priorities: `STRATEGY.md`** — L2 beta launch plan, internship timeline, time budgets, stop-loss triggers. Read before suggesting new features or scope changes.
 
 Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at migration 001.
 
