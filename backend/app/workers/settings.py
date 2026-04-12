@@ -66,7 +66,7 @@ class WorkerSettings:
 
     redis_settings: RedisSettings = RedisSettings.from_dsn(os.environ.get("REDIS_URL", "redis://localhost:6379"))
 
-    functions = [process_analysis]
+    functions = [process_analysis, cascade_consent_withdrawal]
     cron_jobs = [
         cron(cleanup_expired_artifacts, hour=3, minute=0),  # 03:00 UTC nightly
         cron(ping_qdrant_health, hour=2, minute=0),  # 02:00 UTC nightly (ADR-P2-001)
