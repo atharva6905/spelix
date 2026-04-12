@@ -316,6 +316,35 @@ class TestFraming:
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
         assert "framing" in result.name.lower() or "frame" in result.name.lower()
 
+    def test_portrait_video_passes_with_well_framed_subject(self):
+        """Portrait (9:16) videos have smaller landmark width fractions.
+        A body spanning 30% width × 70% height = 21% area should pass
+        because the threshold scales by aspect ratio."""
+        frames = _make_framing_frames(
+            x_min=0.35, y_min=0.10, x_max=0.65, y_max=0.80, visibility=0.9
+        )
+        # 0.30 width × 0.70 height = 0.21 area — would fail old 0.30 threshold
+        result = check_framing(frames, frame_width=1080, frame_height=1920)
+        assert result.passed is True
+
+    def test_portrait_video_still_rejects_truly_distant_subject(self):
+        """Even in portrait, a very small bounding box should still reject."""
+        frames = _make_framing_frames(
+            x_min=0.40, y_min=0.35, x_max=0.60, y_max=0.65, visibility=0.9
+        )
+        # 0.20 width × 0.30 height = 0.06 area — too small for any aspect ratio
+        result = check_framing(frames, frame_width=1080, frame_height=1920)
+        assert result.passed is False
+
+    def test_landscape_threshold_unchanged(self):
+        """Landscape (16:9) framing threshold stays at 0.30 — no regression."""
+        frames = _make_framing_frames(
+            x_min=0.35, y_min=0.10, x_max=0.65, y_max=0.80, visibility=0.9
+        )
+        # 0.30 × 0.70 = 0.21 area — should still FAIL at 0.30 for landscape
+        result = check_framing(frames, frame_width=1920, frame_height=1080)
+        assert result.passed is False
+
 
 # ---------------------------------------------------------------------------
 # run_quality_gates (combined)
