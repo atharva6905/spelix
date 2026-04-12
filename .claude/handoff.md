@@ -1,100 +1,111 @@
-# Session 21 Handoff → Session 22: P2-026 dual-collection orchestrator, backlog reconciliation, droplet OOM persists
+# Session 22 Handoff → Session 23: P2-034 Langfuse, P2-033 eval scores, P2-029 consent, P2-031 DPIA — all merged
 
 ## Completed
 
 | Task | PR | Squash SHA | Description |
 |------|----|------------|-------------|
-| P2-026 | #27 | `18c56cf` | **DualCollectionOrchestrator** — queries both `papers_rag` and `coach_brain` concurrently via `asyncio.gather`, merges results with single cross-collection Cohere Rerank 4.0, classifies `retrieval_source` per FR-BRAIN-05 thresholds (≥0.82 brain_primary, 0.65–0.82 hybrid, <0.65 papers_fallback). Worker wired to use orchestrator. Coaching prompt tags evidence with `[RESEARCH]`/`[COACHING]` labels per FR-BRAIN-04. RetrievalService extended with `additional_filters` and `rerank=False` params. |
-| P2-027 | #27 | `18c56cf` | **Cold-start fallback** — empty `coach_brain` → top_score=0.0 → `papers_only_fallback` routing. No `[COACHING]` labels in prompt. Handled automatically by P2-026 threshold logic. |
-| BACKLOG-FIX | #27 | `18c56cf` | **Backlog reconciliation** — 7 tasks were already implemented in PRs #17-#19 but never marked done: P2-008 (dense retrieval), P2-009 (BM25 sparse), P2-010 (RRF+Rerank), P2-011 (exercise filter), P2-012 (min docs guard), P2-024 (contextual embedding), P2-028 (privacy triggers). All marked done with SHAs. |
+| P2-034 | #28 | `1ef57e2` | **Langfuse Cloud integration** — two-flag async singleton in `app/services/langfuse_client.py` (ADR-036), `SecretStr` config keys in `config.py`, constructor injection into `CoachingService`, replaced 4 `TODO(P2-034)` markers with trace calls. All Langfuse calls best-effort. 7 new tests. |
+| P2-033 | #28 | `1ef57e2` | **Eval scores persistence** — extended `eval_scores` JSONB with CoVe fields (`cove_verified`, `cove_iterations`) + Langfuse score logging. Renamed `faithfulness_score` → `faithfulness` per SRS spec (ADR-036). 4 new tests. |
+| P2-029 | #28 | `1ef57e2` | **Three-tier consent UI** (FR-BRAIN-11). Backend: `ConsentRecord` model, `ConsentRepository` (append-only), consent router (`POST`/`GET`/`POST withdraw`), registered in `api/v1/__init__.py`, 17 tests. Frontend: `ConsentPage` (3 tiers with status badges, grant/withdraw), `useConsent` hook, `consent.ts` API module, `/consent` route in `routes.tsx`, 12 tests. |
+| P2-031 | #28 | `1ef57e2` | **DPIA document** (FR-BRAIN-15) — `docs/dpia.md`, 6-section GDPR Article 35(7) assessment covering processing operations, necessity/proportionality, risk assessment (9 identified risks), mitigation measures, data subject rights, review schedule. Hard privacy gate now satisfied. |
+| BACKLOG | #28 | `1ef57e2` | **D-014 tracked** in backlog (droplet OOM mitigation). ADR-036 appended. CLAUDE.md `/team` vs `/parallel` rules strengthened. |
 
 ### Files created
-- `backend/app/services/dual_collection.py` — `DualCollectionOrchestrator` class
-- `backend/tests/unit/test_dual_collection.py` — 8 TDD gate tests
+- `backend/app/services/langfuse_client.py` — Langfuse two-flag singleton factory
+- `backend/app/models/consent_record.py` — ConsentRecord SQLAlchemy model
+- `backend/app/repositories/consent.py` — ConsentRepository (append-only)
+- `backend/app/schemas/consent.py` — Consent Pydantic schemas
+- `backend/app/api/v1/consent.py` — Consent router
+- `backend/tests/unit/test_langfuse_client.py` — 7 tests
+- `backend/tests/unit/test_consent_api.py` — 17 tests (via mocked router)
+- `backend/tests/unit/test_consent_repository.py` — repository tests
+- `docs/dpia.md` — DPIA document
+- `frontend/src/api/consent.ts` — Consent API module
+- `frontend/src/hooks/useConsent.ts` — Consent state hook
+- `frontend/src/pages/ConsentPage.tsx` — Three-tier consent UI
+- `frontend/src/pages/__tests__/ConsentPage.test.tsx` — 12 tests
 
 ### Files modified
-- `backend/app/services/retrieval.py` — `additional_filters` + `rerank=False` params
-- `backend/app/services/coaching.py` — `retrieval_source` param + `[RESEARCH]`/`[COACHING]` labels
-- `backend/app/workers/analysis_worker.py` — orchestrator wiring + `retrieval_source` forwarding
-- `backend/tests/unit/test_retrieval.py` — 2 new tests
-- `backend/tests/unit/test_coaching.py` — 2 new tests + `collection` param on helper
-- `backend/tests/unit/test_coaching_worker.py` — `DualCollectionOrchestrator` mock pattern
-- `backend/tests/unit/test_qdrant_fallback.py` — `DualCollectionOrchestrator` mock pattern
-- `backlog.md` — 9 tasks marked done (P2-008..012, P2-024, P2-026..028)
+- `backend/app/config.py` — `get_langfuse_public_key()`, `get_langfuse_secret_key()`
+- `backend/app/services/coaching.py` — `langfuse_client=None` constructor param
+- `backend/app/workers/analysis_worker.py` — Langfuse client init, eval_scores extended, TODO replaced
+- `backend/app/services/dual_collection.py` — TODO(P2-034) removed
+- `backend/app/services/retrieval.py` — TODO(P2-034) removed
+- `backend/app/models/__init__.py` — ConsentRecord exported
+- `backend/app/api/v1/__init__.py` — consent router registered
+- `backend/pyproject.toml` — `langfuse>=2.0.0` added
+- `backend/tests/unit/test_coaching_worker.py` — eval_scores key rename + 4 new tests
+- `frontend/src/routes.tsx` — `/consent` route added
+- `backlog.md` — P2-029, P2-031, P2-033, P2-034 marked done; D-014 added
+- `decisions.md` — ADR-036 appended
+- `CLAUDE.md` — Parallelism rules strengthened (/team vs /parallel enforcement)
+
+### Session 23 process note
+First session using `/team` (Agent Teams) for execution. 3 Sonnet teammates (langfuse-eval, consent-backend, consent-frontend) + Opus lead. Teammates coordinated via shared task list + mailbox: consent-backend published API contract to consent-frontend; langfuse-eval completed P2-034 then continued to P2-033 sequentially. Lead wrote DPIA in parallel. Total wall time ~10 min for all 4 tasks.
 
 ## Remaining
 
-### Phase 2 Batch 7 — Coach Brain Foundation
+### Phase 2 — Unblocked by PR #28
 | ID | Status | Deps met? | Notes |
 |----|--------|-----------|-------|
-| P2-025 | open | ✅ (P2-023 + P2-024 done) | Seed corpus ingestion (≥20 entries). Data task, not code. |
-| P2-029 | open | ✅ (P2-001 done) | Three-tier consent UI (frontend) |
-| P2-030 | open | blocked on P2-029 | Consent withdrawal cascade (ARQ job) |
-| P2-031 | open | no deps | DPIA document — hard privacy gate |
+| P2-030 | open | ✅ (P2-029 done) | Consent withdrawal cascade — ARQ background job removing user analysis_ids from coach_brain_entries. FR-BRAIN-16. |
+| P2-032 | open | ✅ (P2-034 done) | Retrieval metrics logging to Langfuse — per-query retrieval_source, scores, hit counts. FR-BRAIN-13. |
 
-### Phase 2 Batch 8 — Eval Logging
+### Phase 2 — Data tasks (no code deps, need content curation)
 | ID | Status | Deps met? | Notes |
 |----|--------|-----------|-------|
-| P2-032 | open | needs P2-034 | Retrieval metrics logging to Langfuse |
-| P2-033 | open | ✅ | Per-analysis RAGAS/HHEM eval scores |
-| P2-034 | open | no deps | Langfuse Cloud integration |
+| P2-025 | open | ✅ (P2-023 + P2-024 done) | Seed corpus ingestion — ≥20 Coach Brain entries. Data task, not code. |
+| P2-007 | open | ✅ (P2-004 done) | Corpus curation — seed research papers (≥10 per exercise from PubMed/OpenAlex). |
 
 ### Other
 | ID | Status | Notes |
 |----|--------|-------|
-| P2-007 | open | Corpus curation — seed research papers (≥10 per exercise from PubMed/OpenAlex) |
 | D-004..D-010 | open | Session 13 tech debt items |
+| D-014 | open | **Droplet OOM mitigation** — add 2GB swap, deploy PR #27+#28, verify E2E. Blocked on DO dashboard reboot. 4 consecutive sessions blocked. |
 
 ## Test counts
 
-- **Backend**: 1257 passed / 19 skipped / 0 failures (+15 from session 20's 1242)
-- **Frontend**: 213 passed / 0 failures (unchanged)
-- **Coverage**: ~91% backend (CI enforces ≥90%)
-- **CI**: All 6 checks green on PR #27 (backend lint+tests, frontend lint+tests, secret scan, Vercel preview)
+- **Backend**: 1285 passed / 19 skipped / 0 failures (+28 from session 22's 1257)
+- **Frontend**: 225 passed / 0 failures (+12 from session 22's 213)
+- **CI**: All 6 checks green on PR #28 (backend lint+tests, frontend lint+tests, secret scan, Vercel preview)
 - **Known local-only failures**: 2 DB-dependent integration tests (`test_models.py::test_cascade_delete_rep_metrics`, `test_repositories.py::test_delete_removes_row`) — CI passes.
-- **Alembic head**: `005_add_chat_messages` (applied on droplet)
+- **Alembic head**: `005_add_chat_messages` (applied on droplet — when it's reachable)
 
 ## E2E verification
 
-### PR #27 — Dual-collection orchestrator ⏳ PENDING
-- Code merged to main (`18c56cf`) but **NOT deployed to droplet** — containers run old code from pre-reboot build
-- Droplet needs `cd /home/deploy/spelix && git pull && docker compose -f docker-compose.prod.yml build backend worker && docker compose -f docker-compose.prod.yml up -d backend worker` to deploy PR #27
-- Cannot verify dual-collection routing until deployed
+### PR #28 — Langfuse + consent + DPIA ⏳ PENDING
+- Code merged to main (`1ef57e2`) but **droplet is unreachable** (OOM from session 21, SSH timed out at session 23 start)
+- Cannot verify consent page (`/consent`), eval_scores persistence, or Langfuse tracing until droplet is rebooted and code deployed
+- Frontend deploy to Vercel is automatic — consent page should be accessible at spelix.app/consent but will fail API calls without backend
 
-### PR #26 — Portrait framing fix ⏳ PENDING (carried from session 20)
-- Code deployed on droplet (pre-reboot build includes PR #26)
-- Test upload of deadlift video submitted (analysis ID: `a411eddf-95a4-4c23-9478-70500db36850`)
-- **Droplet went OOM during MediaPipe processing** — SSH, API, and web all became unresponsive
-- This is the **3rd consecutive OOM** (sessions 20, 21, 22) triggered by MediaPipe Heavy on the 2GB droplet
+### Carried from previous sessions
+- PR #27 (dual-collection orchestrator) — NOT deployed to droplet
+- PR #26 (portrait framing fix) — deployed but never verified due to OOM
 
-### Upload flow verified ✅
+### Upload flow ✅ (verified session 21)
 - Upload page loads correctly, exercise type/variant selection works
 - File selection + upload progress bar + redirect to status page all functional
-- Status page shows initial state immediately (PR #24 fix confirmed working)
-- Exercise-specific filming guidance renders per variant
-
-### Droplet OOM pattern (CRITICAL)
-- **Root cause**: MediaPipe BlazePose Heavy peaks at ~350MB RAM. Combined with backend (~200MB), Redis (~50MB), and Caddy (~30MB), total exceeds 2GB during processing
-- **Trigger**: any video upload that passes quality gates and reaches MediaPipe processing
-- **Impact**: SSH, API, and web all become unresponsive. Requires hard reboot from DO dashboard
-- **Mitigation options**: (a) upgrade to 4GB droplet ($24/mo → $48/mo), (b) reduce `model_complexity` to 1 (lighter model, lower accuracy), (c) add swap space, (d) process videos on a separate worker machine
-- Three sessions in a row have been blocked by this. It's the single biggest production blocker.
+- Status page shows initial state immediately (PR #24 fix confirmed)
 
 ## Blockers
 
-1. **Droplet OOM (3rd time)** — 2GB droplet cannot run MediaPipe Heavy + backend simultaneously. Needs hard reboot from DO dashboard, then decide on mitigation (upgrade RAM or add swap). Until resolved, no video can complete processing on prod.
-2. **PR #27 not deployed to droplet** — merged to GitHub main but droplet containers run old code. After reboot, run: `cd /home/deploy/spelix && git pull && docker compose -f docker-compose.prod.yml build backend worker && docker compose -f docker-compose.prod.yml up -d backend worker`
-3. **Future deploys**: use `docker compose build` (WITH cache), never `--no-cache`, on the 2GB droplet. Better: add swap first (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`).
+1. **Droplet OOM (4th session)** — 2GB droplet cannot run MediaPipe Heavy + backend simultaneously. SSH times out. Needs hard reboot from DO dashboard, then: add 2GB swap, pull latest main, rebuild + restart containers. Until resolved, no video can complete processing on prod and no E2E verification is possible.
+2. **`.env.example` not updated** — langfuse-eval teammate couldn't write to it (permission denied). `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` need to be added manually.
 
 ## Next session start
 
 ```bash
 # 1. Hard reboot droplet from DO dashboard (if still unresponsive)
-# 2. After reboot, deploy PR #27 and add swap:
+# 2. After reboot, add swap + deploy all pending PRs:
 ssh spelix-droplet "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"
 ssh spelix-droplet "cd /home/deploy/spelix && git pull && docker compose -f docker-compose.prod.yml build backend worker && docker compose -f docker-compose.prod.yml up -d backend worker"
-# 3. Then:
+# 3. Add Langfuse env vars to droplet:
+ssh spelix-droplet "docker exec spelix-backend env | grep LANGFUSE"  # verify if set
+# 4. Update .env.example with LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
+# 5. E2E verification:
+#    - Navigate to spelix.app/consent → verify 3 tiers render
+#    - Grant/withdraw consent → verify persistence
+#    - Upload test video → verify eval_scores populated + Langfuse traces
+# 6. Continue with P2-030 (consent withdrawal) + P2-032 (retrieval metrics)
 /status
-# 4. Upload test video → verify full pipeline with dual-collection orchestrator
-# 5. Continue with P2-031 (DPIA) or P2-034 (Langfuse)
 ```
