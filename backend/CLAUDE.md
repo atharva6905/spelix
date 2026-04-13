@@ -71,9 +71,11 @@ Status transitions: use the `transition(current, target)` guard function in `app
 - **001** — `analyses`, `user_profiles`, `rep_metrics`, `coaching_results` (core tables)
 - **002** — RLS policies on all user-owned tables
 - **003** — `detection_result` JSONB column on `analyses` (FR-XDET-07)
-- **004** (Phase 2, not started) — `rag_documents` + `expert_annotations` tables (P2-001)
+- **004** — `rag_documents` + `expert_annotations` + `coach_brain_entries` + `consent_records` (Phase 2 RAG + Brain foundation)
+- **005** — `chat_messages` table (Phase 2 follow-up chat)
+- **006** — Promoted `rag_documents` metadata columns + `analysis_expert_reviews` table (Phase 2 Admin + Expert Portal, ADR-040)
 
-Current alembic head: `003_add_detection_result`. `admin_events` deferred further.
+Current alembic head: `006_admin_expert_reviews`. `admin_events` deferred further.
 
 ### Schema rules
 - Required indexes in migration 001: `(user_id, created_at DESC)` on `analyses`; `(analysis_id)` on `rep_metrics` and `coaching_results`.
