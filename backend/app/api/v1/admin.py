@@ -191,21 +191,21 @@ def _brain_entry_to_schema(entry: CoachBrainEntryModel) -> CoachBrainEntrySchema
     The ORM model uses 'extra_metadata' to avoid collision with SQLAlchemy's
     MetaData descriptor, but the Pydantic schema field is 'metadata'.
     """
-    return CoachBrainEntrySchema(
-        id=entry.id,
-        content=entry.content,
-        exercise=entry.exercise,
-        phase=entry.phase,
-        entry_type=entry.entry_type,
-        status=entry.status,
-        confirmation_count=entry.confirmation_count,
-        source_analysis_ids=entry.source_analysis_ids,
-        trigger_tags=entry.trigger_tags,
-        confidence_score=float(entry.confidence_score) if entry.confidence_score is not None else None,
-        metadata=entry.extra_metadata,
-        created_at=entry.created_at,
-        updated_at=entry.updated_at,
-    )
+    return CoachBrainEntrySchema.model_validate({
+        "id": entry.id,
+        "content": entry.content,
+        "exercise": entry.exercise,
+        "phase": entry.phase,
+        "entry_type": entry.entry_type,
+        "status": entry.status,
+        "confirmation_count": entry.confirmation_count,
+        "source_analysis_ids": entry.source_analysis_ids,
+        "trigger_tags": entry.trigger_tags,
+        "confidence_score": float(entry.confidence_score) if entry.confidence_score is not None else None,
+        "metadata": entry.extra_metadata,
+        "created_at": entry.created_at,
+        "updated_at": entry.updated_at,
+    })
 
 
 # ---------------------------------------------------------------------------

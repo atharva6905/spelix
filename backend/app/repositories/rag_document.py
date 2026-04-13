@@ -30,7 +30,7 @@ class RagDocumentRepository:
         if review_status is not None:
             stmt = stmt.where(RagDocument.review_status == review_status)
         if exercise_tag is not None:
-            stmt = stmt.where(RagDocument.exercise_tags.any(exercise_tag))
+            stmt = stmt.where(RagDocument.exercise_tags.contains([exercise_tag]))
         if quality_tier is not None:
             stmt = stmt.where(RagDocument.quality_tier == quality_tier)
         stmt = stmt.limit(limit).offset(offset)

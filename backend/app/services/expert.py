@@ -84,8 +84,8 @@ class ExpertService:
         if hasattr(analysis, "rep_metrics") and analysis.rep_metrics:
             for rm in analysis.rep_metrics:
                 rep_metrics_list.append({
-                    "rep_number": rm.rep_number,
-                    "metrics": rm.metrics,
+                    "rep_index": rm.rep_index,
+                    "metrics_json": rm.metrics_json,
                     "confidence_score": rm.confidence_score,
                 })
 
