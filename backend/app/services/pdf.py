@@ -23,14 +23,18 @@ logger = logging.getLogger(__name__)
 # Defaults
 # ---------------------------------------------------------------------------
 
-# Relative to the repo root (two levels up from backend/app/services/)
-_DEFAULT_TEMPLATE_SUBPATH = os.path.join(
-    os.path.dirname(__file__),          # backend/app/services/
-    "..", "..", "..",                    # → repo root
-    "reports", "templates",
-    "analysis_report.html",
+# Resolve PDF template path — priority list mirrors ThresholdConfig (ADR-046a).
+# 1. Relative to __file__ (works locally: backend/app/services/ → ../../.. → repo root)
+# 2. Relative to CWD (works in Docker: CWD=/app, template at /app/reports/templates/)
+_TEMPLATE_FILENAME = os.path.join("reports", "templates", "analysis_report.html")
+_CANDIDATE_PATHS = [
+    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", _TEMPLATE_FILENAME)),
+    os.path.normpath(os.path.join(os.getcwd(), _TEMPLATE_FILENAME)),
+]
+_DEFAULT_TEMPLATE_PATH = next(
+    (p for p in _CANDIDATE_PATHS if os.path.isfile(p)),
+    _CANDIDATE_PATHS[0],  # fallback — will raise FileNotFoundError in __init__
 )
-_DEFAULT_TEMPLATE_PATH = os.path.normpath(_DEFAULT_TEMPLATE_SUBPATH)
 
 MANDATORY_DISCLAIMER = (
     "This feedback is for educational purposes only and is not a substitute "
