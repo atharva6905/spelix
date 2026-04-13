@@ -324,6 +324,16 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 | P2-043 | Expert paper review workflow — approve/reject/needs-revision status transitions | M | P2-042 | FR-EXPV-06 | done | Session 26. `PATCH /expert/papers/{id}/review` with decision enum. `RagDocumentRepository.update_review_status`. |
 | P2-044 | Golden dataset workflow — label analyses as golden entries with ground-truth issues and expected coaching output | L | P2-041 | FR-EXPV-07 | done | Session 26. `PATCH /expert/analyses/{id}/golden`. `is_golden_label` on annotation form. `ExpertService.set_golden_label` propagates to `analyses.is_golden_dataset`. |
 
+### E2E Smoke Test Bug Fixes (Session 26)
+
+| ID | Title | Size | Deps | SRS IDs | Status | Commit |
+|----|-------|------|------|---------|--------|--------|
+| D-018 | Supabase Storage bucket MIME types — add image/png, image/jpeg, application/pdf, text/csv to `videos` bucket allowed types | S | — | FR-RESL-02, FR-RESL-05 | done | Supabase SQL (no code commit) |
+| D-019 | Generate signed read URLs for artifact paths in analysis detail API response | M | — | FR-RESL-02, FR-RESL-05, FR-XPRT-02 | done | `7e0b893` (PR #35) |
+| D-020 | Lower squat rep detection thresholds — depth 90°→110°, standing 160°→150° to catch parallel-depth reps | M | — | FR-CVPL-07 | done | `7e0b893` (PR #35) |
+| D-021 | Re-encode annotated video to H.264 via ffmpeg for browser playback — OpenCV mp4v codec not browser-compatible | M | — | FR-RESL-02 | done | `38e4510` (PR #36) |
+| D-022 | PDF template missing in Docker image — `reports/templates/analysis_report.html` not copied into container. Pipeline gracefully continues but pdf_path=null. | M | — | FR-XPRT-02 | pending |
+
 ### Batch 11 — Data Quality (deferred, no code deps)
 
 | ID | Title | Size | Deps | SRS IDs | Status |

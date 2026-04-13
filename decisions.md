@@ -331,3 +331,18 @@ The regression tests added in session 13 (`TestMakeStorageServiceFactory`, `Test
 **Context**: FR-EXPV-01 requires expert reviewer portal protected by role check. Admins should also be able to use the expert portal for review work without needing a separate login.
 **Decision**: `get_expert_reviewer_user` dependency accepts both `role === "expert_reviewer"` and `role === "admin"`. The role is stored in Supabase JWT `user_metadata.role`.
 **Consequences**: Admins can do review work directly. The admin expert queue view (FR-ADMN-07) can link into the expert portal detail view. No separate role switching needed.
+
+## ADR-042: Signed Read URLs for Private Storage Artifacts (Session 26)
+**Context**: Supabase Storage bucket `videos` is private. The backend stored raw storage paths (`artifacts/{id}/annotated.mp4`) in the DB and returned them in the API response. The frontend used these as `<video src>` and `<img src>`, which resolved to relative URLs on spelix.app — not valid Supabase Storage URLs.
+**Decision**: `StorageService.create_signed_read_url(path, expires_in=3600)` generates 1-hour signed read URLs. The `GET /analyses/{id}` endpoint signs `annotated_video_path`, `plot_path`, and `pdf_path` before returning `AnalysisDetail`. Graceful degradation: if signing fails, the raw path is returned (no 500). Frontend needs no changes.
+**Consequences**: Artifacts are accessible in the browser via HTTPS signed URLs. URLs expire after 1 hour — the page must be refreshed for long-lived sessions. The frontend CLAUDE.md already documented this pattern: "Use signed read URLs returned by the API. Never construct Storage URLs manually on the client."
+
+## ADR-043: H.264 Re-encoding for Browser Video Playback (Session 26)
+**Context**: `cv2.VideoWriter.fourcc(*"mp4v")` writes MPEG-4 Part 2 codec, which browsers do not support for inline `<video>` playback. The annotated video appeared as a black frame in Chrome/Firefox/Safari despite having a valid signed URL and correct file size.
+**Decision**: Write annotated frames to a `.raw.mp4` file with `mp4v` codec (universally available in opencv-python-headless), then re-encode to H.264 via `ffmpeg -c:v libx264 -preset fast -crf 23 -movflags +faststart`. ffmpeg is already in the Docker image (installed for ffprobe codec validation). Fallback: if ffmpeg is unavailable, the raw mp4v file is used as-is (downloadable but won't play inline).
+**Consequences**: Adds ~30s to pipeline time for the ffmpeg re-encode step. Video files are slightly smaller (H.264 is more efficient than mp4v). `-movflags +faststart` enables progressive download. All modern browsers can now play the annotated video inline.
+
+## ADR-044: Squat Rep Detection Threshold Adjustment (Session 26)
+**Context**: Rep detection used a squat depth threshold of 90° (effective 85° after 5° hysteresis) and standing threshold of 160° (effective 155°). Parallel-depth squats (~90–110° hip angle) were silently skipped because the smoothed signal (Savitzky-Golay window=7) never dipped below 85°. Athletes who didn't fully lock out between reps (hip angle ~150°) had reps merged.
+**Decision**: Lower squat depth threshold to 110° (effective 105°) and standing threshold to 150° (effective 145°). Added both values to `thresholds_v1.json` for future tunability. Bench and deadlift thresholds unchanged.
+**Consequences**: Parallel-depth squats are now detected. Quarter squats (>120° hip) are still correctly rejected. Rep count increased from 2 to the actual count for test videos with moderate depth. The Savitzky-Golay filter was NOT changed — only thresholds.
