@@ -157,9 +157,10 @@ Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, 
 | Comment on issues/PRs | `mcp__github__add_issue_comment` | `gh issue comment` |
 | Review PRs | `mcp__github__create_pull_request_review` | `gh pr review` |
 | View PR files/diff | `mcp__github__get_pull_request_files` | `gh pr diff` |
+| Merge PR | `mcp__github__merge_pull_request` (merge_method: "merge") | `gh pr merge` |
 | Push files | `mcp__github__push_files` | manual git add/commit/push |
 
-**Fall back to `gh` CLI only for**: `gh pr merge` (no MCP equivalent), `gh pr checks --watch` (streaming), or operations not covered by MCP tools.
+**Fall back to `gh` CLI only for**: `gh pr checks --watch` (streaming), or operations not covered by MCP tools. Merge is available via `mcp__github__merge_pull_request` — always use it with `merge_method: "merge"` (never `squash`).
 
 ## Checkpoint Workflow (branch + PR + merge — NEVER direct push to main)
 
@@ -169,20 +170,37 @@ Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, 
 
 **Not meaningful** (direct commit on current branch is fine): handoff notes, typo-only doc fixes, scratch commits during active development before the checkpoint.
 
-**Workflow**: `git checkout -b <type>/<name>` → implement → local checks (`ruff`/`pyright`/`tsc`/`vitest`) → `git push -u origin <branch>` → `gh pr create` → wait for CI → `gh pr merge --squash --delete-branch` → `git checkout main && git pull` → if user-facing, run E2E verification (next section).
+**Workflow**: `git checkout -b <type>/<name>` → implement → local checks (`ruff`/`pyright`/`tsc`/`vitest`) → `git push -u origin <branch>` → create PR via `mcp__github__create_pull_request` → wait for CI → merge via `mcp__github__merge_pull_request` (merge method: `merge`, NOT `squash`) → `git checkout main && git pull` → wait for "Deploy to Production" CI step to finish → if user-facing, run E2E verification (next section).
 
-**Never force-push to main. Never bypass CI. Never merge a PR with red CI.**
+**Merge rules**:
+- **NEVER squash merge.** Use `merge_method: "merge"` always. Squash merges lose individual commit history and cause local/remote divergence that requires `git checkout -B main origin/main` to fix.
+- **Use `mcp__github__merge_pull_request`** for all merges — not `gh pr merge` CLI.
+- Never force-push to main. Never bypass CI. Never merge a PR with red CI.
+
+## Post-Merge Deployment — WAIT for CI, NEVER SSH deploy manually
+
+After merging to `main`, **"Deploy to Production" runs automatically as a CI step**. This deploys both the frontend (Vercel) and the backend (Docker rebuild on the droplet).
+
+**STRICT RULE: Do NOT SSH into the droplet to run `docker compose up --build` or `git pull` manually after a merge.** The CI pipeline handles this. Manual deploys cause state divergence, race conditions with CI, and have burned time in session 26 when manual rebuilds used stale env vars.
+
+**Procedure after merge**:
+1. Check CI status via `mcp__github__get_pull_request_status` or `gh pr checks` — wait until ALL checks including "Deploy to Production" show `pass`
+2. Verify the droplet is running the new code: `ssh spelix-droplet "git log --oneline -1"` — must match the merge commit
+3. Verify containers are healthy: `ssh spelix-droplet "docker ps --format '{{.Names}} {{.Status}}'"` — all should show `(healthy)`
+4. Only THEN proceed to E2E verification
+
+**The only exception for SSH deploy**: when CI's "Deploy to Production" step fails and you need to debug why. In that case, check CI logs first, diagnose, fix, and re-trigger — don't work around it.
 
 ## E2E Verification via Playwright MCP
 
-After any meaningful production feature lands on `main` and auto-deploys to **spelix.app**, verify the live flow end-to-end with the Playwright MCP browser tools BEFORE moving on. "Unit tests pass" ≠ "works in production" — prod has different env vars, different Supabase project, different everything.
+After deployment completes (CI "Deploy to Production" step green), verify the live flow end-to-end with the Playwright MCP browser tools BEFORE moving on. "Unit tests pass" ≠ "works in production" — prod has different env vars, different Supabase project, different everything.
 
 **Verify on prod after merging any PR that**: touches upload/pipeline/results/coaching/PDF/auth flows, changes API response shapes, adds or modifies a Phase MUST requirement, or fixes a production bug. Also periodically at phase gates.
 
 **Skip verification for**: docs-only changes, CI fixes that don't change runtime behavior, agent prompt edits, commits not touching `backend/app/`, `frontend/src/`, or migrations.
 
 **Procedure**:
-1. Wait ~1–2 min after merge for Vercel deploy to settle
+1. Wait for "Deploy to Production" CI step to complete (check via GitHub MCP)
 2. `mcp__playwright__browser_navigate` → `https://spelix.app`
 3. `mcp__playwright__browser_snapshot` to capture accessibility tree
 4. Walk the affected flow: click/fill/type/wait through login → upload → status → results → download
