@@ -61,6 +61,18 @@
       "unit": "degrees",
       "provenance_citation": "Schoenfeld 2010 — acute knee angle caution threshold",
       "last_modified_by": "expert_reviewer"
+    },
+    "rep_detection_depth_angle_deg": {
+      "value": 110.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — hip angle below which BOTTOM state is entered (with 5° hysteresis = effective 105°). Raised from 90° to catch parallel-depth squats.",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_standing_angle_deg": {
+      "value": 150.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — hip angle above which STANDING state is re-entered (with 5° hysteresis = effective 145°). Lowered from 160° to tolerate incomplete lockout between reps.",
+      "last_modified_by": "cv_engineer"
     }
   },
 

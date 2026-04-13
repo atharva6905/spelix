@@ -290,11 +290,38 @@ async def get_analysis_detail(
     user: CurrentUser = Depends(get_current_user),
     service: AnalysisService = Depends(_get_service),
 ) -> AnalysisDetail:
-    """Return full analysis detail including nested coaching result and rep metrics."""
+    """Return full analysis detail including nested coaching result and rep metrics.
+
+    Artifact paths (annotated_video_path, plot_path, pdf_path) are converted
+    from raw Supabase Storage paths to 1-hour signed read URLs before the
+    response is returned, so the browser can fetch them directly.
+
+    Requirements: FR-RESL-02, FR-RESL-05, FR-XPRT-02
+    """
     analysis = await service.get_analysis_detail(
         analysis_id=analysis_id,
         user_id=user["id"],
     )
+
+    # Sign artifact paths so the browser can fetch from the private bucket.
+    # We operate on the ORM object's attributes directly before Pydantic
+    # serialisation — the schema fields are str | None so assignment is safe.
+    # If StorageService is unavailable (e.g. missing env vars in dev/test),
+    # we fall back to the raw path rather than crashing the endpoint.
+    try:
+        storage = await _make_storage_service()
+        _ARTIFACT_FIELDS = ("annotated_video_path", "plot_path", "pdf_path")
+        for field in _ARTIFACT_FIELDS:
+            raw_path: str | None = getattr(analysis, field, None)
+            if raw_path is not None:
+                signed = await storage.create_signed_read_url(raw_path, expires_in=3600)
+                setattr(analysis, field, signed)
+    except Exception:
+        logger.warning(
+            "Failed to generate signed read URLs for analysis %s — returning raw paths",
+            analysis_id,
+        )
+
     return AnalysisDetail.model_validate(analysis)
 
 

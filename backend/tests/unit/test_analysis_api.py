@@ -27,6 +27,11 @@ TEST_USER_ID = uuid.uuid4()
 TEST_EMAIL = "athlete@example.com"
 
 
+async def _async_return(value):
+    """Tiny coroutine helper: returns a value as an awaitable."""
+    return value
+
+
 def _make_mock_analysis(
     user_id=None,
     status="queued",
@@ -468,6 +473,73 @@ class TestGetAnalysisDetail:
 
         assert resp.status_code == 200
         assert resp.json()["rep_metrics"] == []
+
+    def test_get_detail_artifact_paths_are_signed_https_urls(self):
+        """GET /analyses/{id} returns https:// signed URLs for artifact paths (FR-RESL-02, FR-RESL-05, FR-XPRT-02)."""
+        from unittest.mock import patch
+
+        analysis = self._make_detail_analysis()
+        analysis_id = analysis.id
+
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        signed_base = "https://xyz.supabase.co/storage/v1/object/sign/videos"
+
+        mock_storage = AsyncMock()
+
+        async def _sign(path, expires_in=3600):
+            return f"{signed_base}/{path}?token=test"
+
+        mock_storage.create_signed_read_url.side_effect = _sign
+
+        async def _fake_make_storage():
+            return mock_storage
+
+        with patch("app.api.v1.analyses._make_storage_service", _fake_make_storage):
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.get(f"/api/v1/analyses/{analysis_id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["annotated_video_path"].startswith("https://"), (
+            f"annotated_video_path should be a signed https URL, got: {body['annotated_video_path']}"
+        )
+        assert body["plot_path"].startswith("https://"), (
+            f"plot_path should be a signed https URL, got: {body['plot_path']}"
+        )
+        assert body["pdf_path"].startswith("https://"), (
+            f"pdf_path should be a signed https URL, got: {body['pdf_path']}"
+        )
+
+    def test_get_detail_null_artifact_paths_remain_null(self):
+        """GET /analyses/{id} returns null for artifact paths that are not yet set."""
+        from unittest.mock import patch
+
+        analysis = self._make_detail_analysis()
+        analysis.annotated_video_path = None
+        analysis.plot_path = None
+        analysis.pdf_path = None
+
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        mock_storage = AsyncMock()
+
+        async def _fake_make_storage():
+            return mock_storage
+
+        with patch("app.api.v1.analyses._make_storage_service", _fake_make_storage):
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["annotated_video_path"] is None
+        assert body["plot_path"] is None
+        assert body["pdf_path"] is None
+        # sign should never be called for null paths
+        mock_storage.create_signed_read_url.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
