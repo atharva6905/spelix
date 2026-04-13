@@ -141,6 +141,26 @@ Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, 
 - **When to commit**: after each TDD gate passes (test green = commit point).
 - **Commit scope**: one logical change per commit. Don't bundle unrelated changes.
 
+## GitHub Operations — Use GitHub MCP First
+
+**Always prefer GitHub MCP tools over `gh` CLI or direct git commands for GitHub API operations.** The MCP tools provide structured responses and are the primary interface for GitHub interactions.
+
+| Operation | Use | Not |
+|-----------|-----|-----|
+| Check PR status/details | `mcp__github__get_pull_request` | `gh pr view` |
+| Check CI/check runs | `mcp__github__get_pull_request_status` | `gh pr checks` |
+| Create PR | `mcp__github__create_pull_request` | `gh pr create` |
+| Create branch | `mcp__github__create_branch` | `git push -u origin` |
+| Read file on GitHub | `mcp__github__get_file_contents` | `gh api` |
+| List/search issues | `mcp__github__list_issues` / `search_issues` | `gh issue list` |
+| Create/update issues | `mcp__github__create_issue` / `update_issue` | `gh issue create` |
+| Comment on issues/PRs | `mcp__github__add_issue_comment` | `gh issue comment` |
+| Review PRs | `mcp__github__create_pull_request_review` | `gh pr review` |
+| View PR files/diff | `mcp__github__get_pull_request_files` | `gh pr diff` |
+| Push files | `mcp__github__push_files` | manual git add/commit/push |
+
+**Fall back to `gh` CLI only for**: `gh pr merge` (no MCP equivalent), `gh pr checks --watch` (streaming), or operations not covered by MCP tools.
+
 ## Checkpoint Workflow (branch + PR + merge — NEVER direct push to main)
 
 `main` auto-deploys to spelix.app. A broken push breaks production. For every meaningful checkpoint, work on a branch, open a PR, let CI run, then merge via `gh pr merge --squash --delete-branch`. The main agent merges its own PR once CI is green.
