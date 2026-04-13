@@ -332,11 +332,43 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 | D-019 | Generate signed read URLs for artifact paths in analysis detail API response | M | — | FR-RESL-02, FR-RESL-05, FR-XPRT-02 | done | `7e0b893` (PR #35) |
 | D-020 | Lower squat rep detection thresholds — depth 90°→110°, standing 160°→150° to catch parallel-depth reps | M | — | FR-CVPL-07 | done | `7e0b893` (PR #35) |
 | D-021 | Re-encode annotated video to H.264 via ffmpeg for browser playback — OpenCV mp4v codec not browser-compatible | M | — | FR-RESL-02 | done | `38e4510` (PR #36) |
-| D-022 | PDF template missing in Docker image — `reports/templates/analysis_report.html` not copied into container. Pipeline gracefully continues but pdf_path=null. | M | — | FR-XPRT-02 | pending |
+| D-022 | PDF template missing in Docker image — `reports/templates/analysis_report.html` not copied into container. Pipeline gracefully continues but pdf_path=null. | M | — | FR-XPRT-02 | done | `b86d07e` (PR #37) |
 
 ### Batch 11 — Data Quality (deferred, no code deps)
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
 | D-017 | Replace AI-generated paper summaries with real full-text content from actual PDFs via Docling ingestion. Current seed papers (P2-007) have real metadata (titles, authors, DOIs, years) but AI-synthesized text, not verbatim paper content. Real PDFs would improve RAG retrieval quality. | L | P2-007 | FR-RAGK-02 | pending |
+
+---
+
+## Phase 3 — LangGraph Agent Orchestration (seeded 2026-04-13, session 27)
+
+**Phase 3 is deferred until post-Saturniq (mid-August 2026).** Per STRATEGY.md, feature work freezes after L2 beta launch (May 9, 2026). Phase 3 tasks are seeded here for reference but NOT active.
+
+Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
+
+8 Must requirements from SRS.
+
+### Batch 1 — LangGraph Agent Core
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P3-001 | LangGraph StateGraph definition — AgentState with tools: get_rep_metrics, retrieve_papers, retrieve_coach_brain, flag_form_deviation, compare_to_user_history, generate_correction_plan. Conditional edges for deterministic flow initially. | XL | — | FR-AICP-18 | pending |
+| P3-002 | Adaptive agent reasoning — agent reasons based on observations, not fixed script. Tool selection via LLM with descriptive docstrings. | L | P3-001 | FR-AICP-19 | pending |
+| P3-003 | LangSmith tracing integration — full agent reasoning trace logged per analysis | M | P3-001 | FR-AICP-20 | pending |
+
+### Batch 2 — Distillation Pipeline
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P3-004 | LangGraph distillation StateGraph — extract_insights → validate_quality → format_entry → store_entry. Quality gate: eval_scores overall ≥0.85 AND correctness ≥0.8 for approval. Runs async after analysis completion, never blocks coaching response. | XL | P3-001 | FR-BRAIN-06 | pending |
+| P3-005 | Knowledge lifecycle operations — cosine similarity dedup before creating entries. >0.92: NOOP, 0.75–0.92: UPDATE (increment confirmation_count), <0.75: ADD new candidate. Contradiction detection flags existing entries. | L | P3-004 | FR-BRAIN-17 | pending |
+
+### Batch 3 — Admin & Frontend
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | pending |
+| P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
 
