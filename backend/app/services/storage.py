@@ -89,6 +89,54 @@ class StorageService:
         return SignedUploadResult(url=signed_url, expires_at=expires_at)
 
 
+    async def create_signed_read_url(
+        self,
+        path: str,
+        expires_in: int = _TTL_SECONDS,
+    ) -> str:
+        """Return a signed read URL for a private Supabase Storage object.
+
+        Parameters
+        ----------
+        path:
+            Storage path of the artifact (e.g.
+            ``artifacts/{analysis_id}/annotated.mp4``).
+        expires_in:
+            URL lifetime in seconds.  Defaults to 3600 (1 hour) — matches
+            the TUS upload URL TTL (FR-UPLD-07).
+
+        Returns
+        -------
+        str
+            A fully-qualified signed ``https://...supabase.co/...`` URL that
+            the browser can use directly as ``<video src>`` or ``<img src>``.
+            If signing fails for any reason, the raw ``path`` is returned so
+            the endpoint does not crash (graceful degradation).
+
+        Raises
+        ------
+        RuntimeError
+            If no Supabase client has been configured.
+
+        Requirements: FR-RESL-02, FR-RESL-05, FR-XPRT-02
+        """
+        if self._client is None:
+            raise RuntimeError(
+                "StorageService has no Supabase client. "
+                "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables."
+            )
+
+        try:
+            result = await self._client.storage.from_(self._bucket).create_signed_url(
+                path, expires_in
+            )
+            # Supabase Python client returns {"signedURL": str} or {"signedUrl": str}
+            signed_url: str = result.get("signedURL") or result.get("signedUrl") or result.get("url") or path
+            return signed_url
+        except Exception:
+            # Graceful degradation — return raw path rather than crashing the endpoint
+            return path
+
     async def delete_file(self, path: str) -> None:
         """Delete a file from Supabase Storage.
 
