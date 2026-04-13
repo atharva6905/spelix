@@ -17,7 +17,7 @@ _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR.parent))
 
-from scripts.seed_research_papers import SEED_PAPERS
+from scripts.seed_research_papers import SEED_PAPERS  # noqa: E402
 
 VALID_QUALITY_TIERS = {
     "L1_systematic_review",

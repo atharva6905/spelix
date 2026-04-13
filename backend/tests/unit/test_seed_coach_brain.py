@@ -20,7 +20,7 @@ _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR.parent))
 
-from scripts.seed_coach_brain import SEED_ENTRIES
+from scripts.seed_coach_brain import SEED_ENTRIES  # noqa: E402
 
 VALID_EXERCISES = {"squat", "bench", "deadlift"}
 VALID_PHASES = {"setup", "descent", "bottom", "ascent", "lockout", "general"}
