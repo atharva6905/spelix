@@ -38,16 +38,21 @@ class DetectedRep:
 # Per-exercise thresholds
 # ---------------------------------------------------------------------------
 
-# Standing threshold: angle must be above this to be considered "standing"
+# Standing threshold: angle must be above this to be considered "standing".
+# Squat uses 150° (FR-CVPL-07): tolerates athletes who do not fully lock out
+# between reps.  Bench and deadlift keep 160° — different joint geometry.
 _STANDING_THRESHOLD: dict[str, float] = {
-    "squat": 160.0,
+    "squat": 150.0,
     "bench": 160.0,
     "deadlift": 160.0,
 }
 
-# Depth threshold: angle must be below this to register "bottom"
+# Depth threshold: angle must be below this to register "bottom".
+# Squat uses 110° (FR-CVPL-07): catches parallel-depth squats (~90–110° hip).
+# Old value was 90° (effective 85° with hysteresis), which silently skipped
+# reps where the athlete stopped at parallel rather than going below it.
 _DEPTH_THRESHOLD: dict[str, dict[str, float]] = {
-    "squat": {"default": 90.0},
+    "squat": {"default": 110.0},
     "bench": {"default": 90.0},
     "deadlift": {
         "conventional": 70.0,
