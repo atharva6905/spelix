@@ -101,3 +101,141 @@ export async function listAdminAnalyses(
 export async function getAdminHealth(): Promise<AdminHealth> {
   return adminFetch<AdminHealth>("/api/v1/admin/health");
 }
+
+// ---------------------------------------------------------------------------
+// RAG Corpus Management (P2-035, FR-ADMN-06, FR-RAGK-08/09)
+// ---------------------------------------------------------------------------
+
+export interface RagDocument {
+  id: string;
+  title: string;
+  source_url: string | null;
+  document_type: string;
+  exercise_tags: string[];
+  chunk_count: number;
+  ingested_at: string;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  study_design: string | null;
+  quality_tier: string | null;
+  quality_score: number | null;
+  review_status: string;
+  reviewer_id: string | null;
+  reviewed_at: string | null;
+  storage_path: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listRagDocuments(
+  limit = 50,
+  offset = 0,
+  filters?: { review_status?: string; exercise_tag?: string; quality_tier?: string },
+): Promise<RagDocument[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters?.review_status) params.set("review_status", filters.review_status);
+  if (filters?.exercise_tag) params.set("exercise_tag", filters.exercise_tag);
+  if (filters?.quality_tier) params.set("quality_tier", filters.quality_tier);
+  return adminFetch<RagDocument[]>(`/api/v1/admin/rag/documents?${params}`);
+}
+
+export async function deleteRagDocument(id: string): Promise<void> {
+  return adminFetch<void>(`/api/v1/admin/rag/documents/${id}`, { method: "DELETE" });
+}
+
+export async function reEmbedRagDocument(id: string): Promise<{ message: string; document_id: string }> {
+  return adminFetch(`/api/v1/admin/rag/documents/${id}/re-embed`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Expert Reviewer Queue (P2-036, FR-ADMN-07)
+// ---------------------------------------------------------------------------
+
+export interface AdminExpertQueueItem {
+  analysis_id: string;
+  exercise_type: string;
+  exercise_variant: string | null;
+  confidence_score: number | null;
+  flagged_for_review: boolean;
+  created_at: string;
+  annotation_count: number;
+  latest_annotation_at: string | null;
+}
+
+export interface AdminExpertQueueStats {
+  total_flagged: number;
+  total_annotated: number;
+  golden_dataset_count: number;
+}
+
+export async function listExpertQueue(limit = 50, offset = 0): Promise<AdminExpertQueueItem[]> {
+  return adminFetch<AdminExpertQueueItem[]>(
+    `/api/v1/admin/expert-queue?limit=${limit}&offset=${offset}`,
+  );
+}
+
+export async function getExpertQueueStats(): Promise<AdminExpertQueueStats> {
+  return adminFetch<AdminExpertQueueStats>("/api/v1/admin/expert-queue/stats");
+}
+
+// ---------------------------------------------------------------------------
+// Coach Brain Management (P2-037, FR-ADMN-10)
+// ---------------------------------------------------------------------------
+
+export interface CoachBrainEntry {
+  id: string;
+  content: string;
+  exercise: string;
+  phase: string;
+  entry_type: string;
+  status: string;
+  confirmation_count: number;
+  source_analysis_ids: string[];
+  trigger_tags: string[];
+  confidence_score: number | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoachBrainEntryCreate {
+  content: string;
+  exercise: string;
+  phase?: string;
+  entry_type: string;
+  status?: string;
+}
+
+export async function listCoachBrainEntries(
+  limit = 50,
+  offset = 0,
+  filters?: { exercise?: string; status?: string; entry_type?: string },
+): Promise<CoachBrainEntry[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (filters?.exercise) params.set("exercise", filters.exercise);
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.entry_type) params.set("entry_type", filters.entry_type);
+  return adminFetch<CoachBrainEntry[]>(`/api/v1/admin/coach-brain?${params}`);
+}
+
+export async function createCoachBrainEntry(data: CoachBrainEntryCreate): Promise<CoachBrainEntry> {
+  return adminFetch<CoachBrainEntry>("/api/v1/admin/coach-brain", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCoachBrainEntry(
+  id: string,
+  data: Partial<CoachBrainEntryCreate & { status: string }>,
+): Promise<CoachBrainEntry> {
+  return adminFetch<CoachBrainEntry>(`/api/v1/admin/coach-brain/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCoachBrainEntry(id: string): Promise<void> {
+  return adminFetch<void>(`/api/v1/admin/coach-brain/${id}`, { method: "DELETE" });
+}

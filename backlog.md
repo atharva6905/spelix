@@ -304,3 +304,29 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 | P2-033 | Per-analysis RAGAS + HHEM eval scores stored in `analyses.eval_scores`. Format: `{"faithfulness": float, "hhem": float, "cove_verified": bool, "cove_iterations": int}`. | M | P2-016 ✅, P2-001 ✅ | FR-AICP-16 | done | PR #28 (session 23). Extended faithfulness gate block to include CoVe fields + Langfuse score logging. Key renamed: `faithfulness_score` → `faithfulness` (ADR-036). |
 | P2-034 | Langfuse Cloud integration. `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY` in env. `LangfuseClient` singleton injected into coaching service. Trace: `analysis_id` as `session_id`. Mock in all CI tests. | M | — | FR-BRAIN-13 | done | PR #28 (session 23). `app/services/langfuse_client.py` two-flag singleton (ADR-036). Config keys in `config.py`. Constructor injection into CoachingService. 4 TODO(P2-034) replaced. 7 tests. |
 
+### Batch 9 — Admin UI (gate: Batch 2 merged)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-035 | Admin RAG corpus management page — list documents with title, year, exercise type, quality tier, chunk count, review status. CRUD actions (upload, delete, re-embed). | L | P2-004 | FR-ADMN-06, FR-RAGK-08, FR-RAGK-09 | done | Session 26. Migration 006, `RagDocument` model, `RagDocumentRepository`, admin routes (GET/DELETE/POST re-embed), `RagCorpusPanel` on AdminPage. 37 backend tests. |
+| P2-036 | Admin expert reviewer queue page — list analyses flagged for review, their status, and submitted annotations | M | P2-035 | FR-ADMN-07 | done | Session 26. `list_flagged_analyses`, `get_expert_queue_stats` on AdminService, `ExpertQueuePanel` on AdminPage with stats summary. |
+| P2-037 | Admin Coach Brain management page — view entries with entry_type, exercise, phase, status, confidence_score, confirmation_count. Filter by status/exercise. Approve/reject/edit actions. | L | P2-035 | FR-ADMN-10 | done | Session 26. Extended `CoachBrainRepository` with CRUD. Admin routes (GET/POST/PATCH/DELETE). `CoachBrainPanel` with filters + approve/deprecate/delete actions. |
+
+### Batch 10 — Expert Reviewer Portal (gate: Batch 9 merged)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| P2-038 | Expert Reviewer portal route with role-based access check | M | — | FR-EXPV-01 | done | Session 26. `get_expert_reviewer_user` dep in deps.py (ADR-041). `ExpertPortalPage.tsx` with role check. `/expert` route in routes.tsx. |
+| P2-039 | Expert review queue — flagged analyses, low coaching quality, first-run variants | M | P2-038 | FR-EXPV-02 | done | Session 26. `GET /expert/queue` with queue_type filter (flagged/low_quality/first_run/all). `ExpertService.get_review_queue`. ExpertPortalPage with tab UI. |
+| P2-040 | Expert review detail view — anonymized metrics, coaching output, citations, agent trace | M | P2-039 | FR-EXPV-03 | done | Session 26. `GET /expert/analyses/{id}` returns anonymized detail (no user_id). `ExpertAnalysisDetailPage.tsx`. |
+| P2-041 | Expert annotation submission form — issues_identified, coaching_quality_score, accuracy booleans, suggested_corrections, cited_sources | M | P2-040 | FR-EXPV-04 | done | Session 26. `POST /expert/analyses/{id}/annotations`. `AnalysisExpertReview` model + migration 006. Annotation form on ExpertAnalysisDetailPage. |
+| P2-042 | Expert paper upload from portal with pre-filled metadata form | M | P2-038 | FR-EXPV-05 | done | Session 26. `POST /expert/papers` with metadata. `ExpertPaperUploadPage.tsx`. |
+| P2-043 | Expert paper review workflow — approve/reject/needs-revision status transitions | M | P2-042 | FR-EXPV-06 | done | Session 26. `PATCH /expert/papers/{id}/review` with decision enum. `RagDocumentRepository.update_review_status`. |
+| P2-044 | Golden dataset workflow — label analyses as golden entries with ground-truth issues and expected coaching output | L | P2-041 | FR-EXPV-07 | done | Session 26. `PATCH /expert/analyses/{id}/golden`. `is_golden_label` on annotation form. `ExpertService.set_golden_label` propagates to `analyses.is_golden_dataset`. |
+
+### Batch 11 — Data Quality (deferred, no code deps)
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| D-017 | Replace AI-generated paper summaries with real full-text content from actual PDFs via Docling ingestion. Current seed papers (P2-007) have real metadata (titles, authors, DOIs, years) but AI-synthesized text, not verbatim paper content. Real PDFs would improve RAG retrieval quality. | L | P2-007 | FR-RAGK-02 | pending |
+

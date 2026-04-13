@@ -1,78 +1,70 @@
-# Session 23 Handoff → Session 24: D-014 OOM resolved, consent bugs fixed, P2-030 + P2-032 implemented
+# Session 25 Handoff → Session 26: Seed corpus complete, Phase 2 admin/expert UI planned
 
 ## Completed
 
 | Task | PR | Squash SHA | Description |
 |------|----|------------|-------------|
-| D-014 | — | — | **Droplet OOM resolved** — power-cycled via DO MCP, added 2GB persistent swap (`/swapfile`). Root SSH established via Docker privilege escalation (ADR-038). 5 sessions blocked (20–24). |
-| D-015 | #31 | `5af89a0` | **Consent mixed content + 422 fixes** — `--proxy-headers` on uvicorn, `redirect_slashes=False` on FastAPI, consent routes `"/"` → `""`, `ConsentCreate.granted` default True, timezone-naive datetimes. |
-| D-016 | #29 | `74429e8` | **VITE_API_URL env var mismatch** — renamed from `VITE_API_BASE_URL` on Vercel dashboard. |
-| P2-030 | #32 | (squash) | **Consent withdrawal cascade** (FR-BRAIN-16) — CoachBrainEntry model, CoachBrainRepository with `remove_analysis_ids_for_user` + `soft_delete_empty_unconfirmed`, ARQ job `cascade_consent_withdrawal`, withdrawal endpoint enqueues job for `coach_brain_contribution` type. 9 tests. |
-| P2-032 | #32 | (squash) | **Retrieval metrics logging to Langfuse** (FR-BRAIN-13) — `langfuse_client` injected into `DualCollectionOrchestrator`, best-effort trace after retrieval routing with source/scores/hit counts/brain contribution %. 3 tests. |
-
-### Files created
-- `backend/app/models/coach_brain_entry.py` — SQLAlchemy model for coach_brain_entries
-- `backend/app/repositories/coach_brain.py` — CoachBrainRepository (cascade methods)
-- `backend/app/workers/consent_cascade.py` — ARQ job for consent withdrawal cascade
-- `backend/tests/unit/test_consent_cascade.py` — 9 tests
-
-### Files modified
-- `backend/Dockerfile` — added `--proxy-headers --forwarded-allow-ips *`
-- `backend/app/main.py` — `redirect_slashes=False`
-- `backend/app/api/v1/consent.py` — routes `""` not `"/"`, ARQ cascade enqueue, timezone fix
-- `backend/app/schemas/consent.py` — `granted` default True
-- `backend/app/services/dual_collection.py` — Langfuse metrics logging
-- `backend/app/workers/analysis_worker.py` — pass langfuse_client to orchestrator
-- `backend/app/workers/settings.py` — registered cascade_consent_withdrawal
-- `backend/tests/unit/test_dual_collection.py` — 3 new Langfuse tests
-- `decisions.md` — ADR-037 (proxy-headers), ADR-038 (Docker escalation)
-- `backlog.md` — D-014/D-015/D-016 closed, P2-030/P2-032 closed
-
-### Infrastructure changes
-- **Root SSH access** — `deploy` user's key copied to root's `authorized_keys` via Docker mount. `PermitRootLogin prohibit-password` enabled (ADR-038).
-- **2GB swap** — persistent at `/swapfile`, added to `/etc/fstab`. Prevents OOM kills.
-- **DO MCP** — confirmed working. Droplet ID `563811381`, power-cycle tested.
-- **Vercel MCP** — authenticated. Team `team_2qo5Bazkw4koKrdS1SOF4c4J`, project `prj_9rdYXcUArV1spYLm6YJ4poNHfvcm`.
+| P2-025 | #33 | `f39e958` | **Seed Coach Brain corpus** — 24 entries (8/exercise) seeded to DB `coach_brain_entries` + Qdrant `coach_brain` collection. Covers squat (depth, knee cave, back rounding), bench (bar path, elbow flare, leg drive), deadlift (lumbar flexion, hip hinge, lockout). `status=seed`, `confirmation_count=1`, `source=seed_manual_validated`. `scripts/seed_coach_brain.py`. 20 validation tests. |
+| P2-007 | #33 | `f39e958` | **Seed research papers corpus** — 34 papers (12 squat, 11 bench, 11 deadlift) seeded to DB `rag_documents` + Qdrant `papers_rag`. 36 chunks. Quality tier mix: L1 SR/MA, L2 RCT, L3 observational, L4 guideline. Real metadata, AI-synthesized text (ADR-039). `scripts/seed_research_papers.py`. 13 validation tests. |
+| — | — | `b5ca6af` | **Backlog Batches 9-11 + ADR-039** — added P2-035..P2-044 (admin UI + expert reviewer portal), D-017 (replace AI-synthesized text with real PDFs). ADR-039 documents seed corpus strategy. |
 
 ## Remaining
 
-### Phase 2 — Data tasks (no code deps, need content curation)
-| ID | Status | Notes |
-|----|--------|-------|
-| P2-025 | open | Seed corpus ingestion — ≥20 Coach Brain entries. Data task. |
-| P2-007 | open | Corpus curation — seed research papers (≥10 per exercise from PubMed/OpenAlex). |
+### Phase 2 — Batch 9: Admin UI (pending)
+| ID | Status | Deps | Notes |
+|----|--------|------|-------|
+| P2-035 | pending | P2-004 ✅ | Admin RAG corpus management page (FR-ADMN-06, FR-RAGK-08, FR-RAGK-09) |
+| P2-036 | pending | P2-035 | Admin expert reviewer queue page (FR-ADMN-07) |
+| P2-037 | pending | P2-035 | Admin Coach Brain management page (FR-ADMN-10) |
 
-### Other
+### Phase 2 — Batch 10: Expert Reviewer Portal (pending)
+| ID | Status | Deps | Notes |
+|----|--------|------|-------|
+| P2-038 | pending | — | Expert Reviewer portal route + role check (FR-EXPV-01) |
+| P2-039 | pending | P2-038 | Expert review queue (FR-EXPV-02) |
+| P2-040 | pending | P2-039 | Expert review detail view (FR-EXPV-03) |
+| P2-041 | pending | P2-040 | Expert annotation submission form (FR-EXPV-04) |
+| P2-042 | pending | P2-038 | Expert paper upload (FR-EXPV-05) |
+| P2-043 | pending | P2-042 | Expert paper review workflow (FR-EXPV-06) |
+| P2-044 | pending | P2-041 | Golden dataset workflow (FR-EXPV-07) |
+
+### Phase 2 — Batch 11: Data Quality (deferred)
+| ID | Status | Deps | Notes |
+|----|--------|------|-------|
+| D-017 | pending | P2-007 ✅ | Replace AI-synthesized paper text with real full-text PDFs via Docling. Must complete before Phase 4 eval metrics are meaningful. |
+
+### Tech debt (unchanged)
 | ID | Status | Notes |
 |----|--------|-------|
 | D-004..D-010 | open | Session 13 tech debt items |
-| — | open | `.env.example` needs Langfuse vars added (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST`) |
+| — | open | `.env.example` needs Langfuse vars added |
 
 ## Test counts
 
-- **Backend**: 1297 passed / 19 skipped / 0 failures (+12 from session 23's 1285)
+- **Backend**: 1330 passed / 19 skipped / 0 failures (+33 from session 24's 1297)
 - **Frontend**: 225 passed / 0 failures (unchanged)
-- **CI**: All 6 checks green on PRs #29, #31, #32
+- **CI**: All 6 checks green on PR #33
 
 ## E2E verification
 
-### PR #31 — proxy-headers + redirect_slashes ✅
-- Consent page loads, no mixed content errors, no console errors
-- Grant consent: Tier 1 + Tier 2 granted successfully (button changes to "Withdraw")
-- Withdraw consent: Tier 1 withdrawn (button reverts to "Grant")
-- Upload page: loads clean, no errors
+Skipped — this session added seed data scripts and backlog/ADR documentation only. No user-facing features were changed. The scripts ran against live Supabase and Qdrant Cloud, and data was verified via SQL queries (24 coach_brain_entries rows, 34 rag_documents rows).
 
-### Droplet health ✅
-- Memory: 1.9GB RAM + 2.0GB swap (1.5GB swap used — working as intended)
-- All containers healthy: backend, worker, redis
-- Caddy running as systemd service with auto-TLS
+## Blockers
+
+None. All code deps for Batches 9-10 are met. The admin/expert reviewer UI work is pure frontend+API route implementation.
 
 ## Next session start
 
 ```bash
 /status
-# 1. Deploy PR #32 to droplet:
-ssh spelix-droplet "cd /home/deploy/spelix && git checkout main && git pull && docker compose -f docker-compose.prod.yml build backend worker && docker compose -f docker-compose.prod.yml up -d backend worker"
-# 2. Continue with P2-025 (seed corpus) or P2-007 (corpus curation) — data tasks
-# 3. Check Phase 2 completion status: rg "\| \*\*Must\*\*.*\| 2 \s*\|" docs/SRS.md
+# 1. Decide: implement Batches 9-10 (admin/expert UI) OR run Phase 2 transition gate
+#    to evaluate if admin/expert features can defer to Phase 3.
+#    Key question: does the SRS allow Phase 2 → 3 transition without FR-EXPV-* and FR-ADMN-06/07/10?
+#    Check: rg "Phase 2.*gate\|transition.*criteria" docs/SRS.md
+# 2. If proceeding with Batches 9-10:
+#    /plan — design admin API routes + frontend pages
+#    Start with P2-035 (admin corpus management) as it unblocks P2-036 and P2-037
+# 3. If deferring admin UI to Phase 3:
+#    Run Phase 2 transition gate (/phase)
+#    Seed Phase 3 backlog from SRS Must filter
 ```
