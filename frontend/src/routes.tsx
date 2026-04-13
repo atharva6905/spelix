@@ -3,6 +3,9 @@ import RequireAuth from "@/components/RequireAuth";
 import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AdminPage from "@/pages/AdminPage";
+import ExpertPortalPage from "@/pages/ExpertPortalPage";
+import ExpertAnalysisDetailPage from "@/pages/ExpertAnalysisDetailPage";
+import ExpertPaperUploadPage from "@/pages/ExpertPaperUploadPage";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 import ConsentPage from "@/pages/ConsentPage";
 import HistoryPage from "@/pages/HistoryPage";
@@ -45,6 +48,9 @@ const router = createBrowserRouter([
       { path: "/analysis/:id", element: <AnalysisStatusPage /> },
       { path: "/results/:id", element: <ResultsPage /> },
       { path: "/admin", element: <AdminPage /> },
+      { path: "/expert", element: <ExpertPortalPage /> },
+      { path: "/expert/analyses/:id", element: <ExpertAnalysisDetailPage /> },
+      { path: "/expert/papers/upload", element: <ExpertPaperUploadPage /> },
     ],
   },
 ]);

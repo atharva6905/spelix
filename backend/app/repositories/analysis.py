@@ -187,3 +187,38 @@ class AnalysisRepository:
             return True
         except Exception:
             return False
+
+    async def list_flagged(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[Analysis]:
+        """List analyses flagged for expert review (FR-ADMN-07)."""
+        result = await self.db.execute(
+            select(Analysis)
+            .where(Analysis.flagged_for_review == True)  # noqa: E712
+            .order_by(Analysis.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def count_flagged(self) -> int:
+        result = await self.db.execute(
+            select(func.count(Analysis.id)).where(Analysis.flagged_for_review == True)  # noqa: E712
+        )
+        return result.scalar_one()
+
+    async def count_annotated(self) -> int:
+        """Count analyses that have at least one expert annotation."""
+        from app.models.analysis_expert_review import AnalysisExpertReview
+
+        subq = select(AnalysisExpertReview.analysis_id).distinct().subquery()
+        result = await self.db.execute(
+            select(func.count()).select_from(subq)
+        )
+        return result.scalar_one()
+
+    async def count_golden(self) -> int:
+        result = await self.db.execute(
+            select(func.count(Analysis.id)).where(Analysis.is_golden_dataset == True)  # noqa: E712
+        )
+        return result.scalar_one()

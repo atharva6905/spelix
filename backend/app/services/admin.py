@@ -76,3 +76,20 @@ class AdminService:
         self, threshold: float = 0.50
     ) -> list[Analysis]:
         return await self._analysis_repo.get_below_confidence(threshold=threshold)
+
+    async def list_flagged_analyses(
+        self, limit: int = 50, offset: int = 0
+    ) -> list[Analysis]:
+        """List analyses flagged for expert review (FR-ADMN-07)."""
+        return await self._analysis_repo.list_flagged(limit=limit, offset=offset)
+
+    async def get_expert_queue_stats(self) -> dict[str, Any]:
+        """Aggregate stats for the admin expert queue view (FR-ADMN-07)."""
+        total_flagged = await self._analysis_repo.count_flagged()
+        total_annotated = await self._analysis_repo.count_annotated()
+        golden_dataset_count = await self._analysis_repo.count_golden()
+        return {
+            "total_flagged": total_flagged,
+            "total_annotated": total_annotated,
+            "golden_dataset_count": golden_dataset_count,
+        }

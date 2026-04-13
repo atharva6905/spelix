@@ -209,3 +209,25 @@ def get_admin_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser
             },
         )
     return user
+
+
+def get_expert_reviewer_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Guard dependency that passes if the user is an expert reviewer or admin.
+
+    Admins can also access the expert portal (ADR-041).
+
+    Raises:
+        HTTPException 403 — user does not have expert_reviewer or admin role.
+    """
+    if user.get("role") not in ("expert_reviewer", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Expert reviewer access required.",
+                    "detail": None,
+                }
+            },
+        )
+    return user

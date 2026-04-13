@@ -22,9 +22,21 @@ import {
   disableAdminUser,
   listAdminAnalyses,
   getAdminHealth,
+  listRagDocuments,
+  deleteRagDocument,
+  reEmbedRagDocument,
+  listExpertQueue,
+  getExpertQueueStats,
+  listCoachBrainEntries,
+  updateCoachBrainEntry,
+  deleteCoachBrainEntry,
   type AdminUser,
   type AdminAnalysis,
   type AdminHealth,
+  type RagDocument,
+  type AdminExpertQueueItem,
+  type AdminExpertQueueStats,
+  type CoachBrainEntry,
 } from "@/api/admin";
 
 // Valid status values per SRS Section 5.2a (7 total — quality_gate_passed is NOT valid)
@@ -559,6 +571,414 @@ function SystemHealthPanel() {
 // Main page
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// RAG Corpus Panel (P2-035, FR-ADMN-06)
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE_RAG = 50;
+
+function RagCorpusPanel() {
+  const [docs, setDocs] = useState<RagDocument[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [reviewFilter, setReviewFilter] = useState("");
+  const [exerciseFilter, setExerciseFilter] = useState("");
+
+  const loadDocs = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const filters: Record<string, string> = {};
+      if (reviewFilter) filters.review_status = reviewFilter;
+      if (exerciseFilter) filters.exercise_tag = exerciseFilter;
+      const data = await listRagDocuments(PAGE_SIZE_RAG, offset, filters);
+      setDocs(data);
+    } catch {
+      setError("Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, reviewFilter, exerciseFilter]);
+
+  useEffect(() => { loadDocs(); }, [loadDocs]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this document and its Qdrant points?")) return;
+    try {
+      await deleteRagDocument(id);
+      loadDocs();
+    } catch {
+      setError("Failed to delete document");
+    }
+  };
+
+  const handleReEmbed = async (id: string) => {
+    try {
+      await reEmbedRagDocument(id);
+      alert("Re-embed queued");
+    } catch {
+      setError("Failed to queue re-embed");
+    }
+  };
+
+  const statusBadge = (s: string) => {
+    const colors: Record<string, string> = {
+      pending: "bg-yellow-100 text-yellow-800",
+      needs_revision: "bg-orange-100 text-orange-800",
+      reviewed_approved: "bg-green-100 text-green-800",
+      reviewed_rejected: "bg-red-100 text-red-800",
+    };
+    return (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${colors[s] ?? "bg-gray-100 text-gray-800"}`}>
+        {s.replace(/_/g, " ")}
+      </span>
+    );
+  };
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">RAG Corpus Management</h2>
+
+      <div className="mb-4 flex gap-3">
+        <select
+          value={reviewFilter}
+          onChange={(e) => { setReviewFilter(e.target.value); setOffset(0); }}
+          className="rounded border px-2 py-1 text-sm"
+        >
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="needs_revision">Needs Revision</option>
+          <option value="reviewed_approved">Approved</option>
+          <option value="reviewed_rejected">Rejected</option>
+        </select>
+        <select
+          value={exerciseFilter}
+          onChange={(e) => { setExerciseFilter(e.target.value); setOffset(0); }}
+          className="rounded border px-2 py-1 text-sm"
+        >
+          <option value="">All exercises</option>
+          <option value="squat">Squat</option>
+          <option value="bench">Bench</option>
+          <option value="deadlift">Deadlift</option>
+        </select>
+      </div>
+
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-3 py-2">Title</th>
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Quality</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Chunks</th>
+                <th className="px-3 py-2">Year</th>
+                <th className="px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {docs.map((d) => (
+                <tr key={d.id} className="border-b hover:bg-gray-50">
+                  <td className="max-w-xs truncate px-3 py-2" title={d.title}>{d.title}</td>
+                  <td className="px-3 py-2">{d.document_type.replace(/_/g, " ")}</td>
+                  <td className="px-3 py-2">{d.quality_tier?.replace("_", " ") ?? "—"}</td>
+                  <td className="px-3 py-2">{statusBadge(d.review_status)}</td>
+                  <td className="px-3 py-2">{d.chunk_count}</td>
+                  <td className="px-3 py-2">{d.year ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-2">
+                      <button onClick={() => handleDelete(d.id)} className="text-xs text-red-600 hover:underline">Delete</button>
+                      {d.review_status === "reviewed_approved" && (
+                        <button onClick={() => handleReEmbed(d.id)} className="text-xs text-blue-600 hover:underline">Re-embed</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {docs.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">No documents found</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-between">
+        <button
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE_RAG))}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Previous</button>
+        <button
+          disabled={docs.length < PAGE_SIZE_RAG}
+          onClick={() => setOffset(offset + PAGE_SIZE_RAG)}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Next</button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expert Reviewer Queue Panel (P2-036, FR-ADMN-07)
+// ---------------------------------------------------------------------------
+
+function ExpertQueuePanel() {
+  const [items, setItems] = useState<AdminExpertQueueItem[]>([]);
+  const [stats, setStats] = useState<AdminExpertQueueStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [data, s] = await Promise.all([
+        listExpertQueue(PAGE_SIZE_RAG, offset),
+        getExpertQueueStats(),
+      ]);
+      setItems(data);
+      setStats(s);
+    } catch {
+      setError("Failed to load expert queue");
+    } finally {
+      setLoading(false);
+    }
+  }, [offset]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">Expert Reviewer Queue</h2>
+
+      {stats && (
+        <div className="mb-4 flex gap-6 text-sm">
+          <span>Flagged: <strong>{stats.total_flagged}</strong></span>
+          <span>Annotated: <strong>{stats.total_annotated}</strong></span>
+          <span>Golden Dataset: <strong>{stats.golden_dataset_count}</strong></span>
+        </div>
+      )}
+
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-3 py-2">Analysis</th>
+                <th className="px-3 py-2">Exercise</th>
+                <th className="px-3 py-2">Confidence</th>
+                <th className="px-3 py-2">Annotations</th>
+                <th className="px-3 py-2">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.analysis_id} className="border-b hover:bg-gray-50">
+                  <td className="px-3 py-2 font-mono text-xs">{item.analysis_id.slice(0, 8)}</td>
+                  <td className="px-3 py-2">{item.exercise_type}{item.exercise_variant ? ` (${item.exercise_variant})` : ""}</td>
+                  <td className="px-3 py-2">
+                    {item.confidence_score != null
+                      ? item.confidence_score >= 0.80 ? "High"
+                        : item.confidence_score >= 0.65 ? "Moderate"
+                        : item.confidence_score >= 0.50 ? "Low"
+                        : "Very Low"
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2">{item.annotation_count}</td>
+                  <td className="px-3 py-2">{formatDate(item.created_at)}</td>
+                </tr>
+              ))}
+              {items.length === 0 && (
+                <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-400">No flagged analyses</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-between">
+        <button
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE_RAG))}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Previous</button>
+        <button
+          disabled={items.length < PAGE_SIZE_RAG}
+          onClick={() => setOffset(offset + PAGE_SIZE_RAG)}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Next</button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Coach Brain Panel (P2-037, FR-ADMN-10)
+// ---------------------------------------------------------------------------
+
+function CoachBrainPanel() {
+  const [entries, setEntries] = useState<CoachBrainEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [exerciseFilter, setExerciseFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const filters: Record<string, string> = {};
+      if (exerciseFilter) filters.exercise = exerciseFilter;
+      if (statusFilter) filters.status = statusFilter;
+      if (typeFilter) filters.entry_type = typeFilter;
+      const data = await listCoachBrainEntries(PAGE_SIZE_RAG, offset, filters);
+      setEntries(data);
+    } catch {
+      setError("Failed to load Coach Brain entries");
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, exerciseFilter, statusFilter, typeFilter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    try {
+      await updateCoachBrainEntry(id, { status: newStatus });
+      load();
+    } catch {
+      setError("Failed to update status");
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this Coach Brain entry?")) return;
+    try {
+      await deleteCoachBrainEntry(id);
+      load();
+    } catch {
+      setError("Failed to delete entry");
+    }
+  };
+
+  const statusBadge = (s: string) => {
+    const colors: Record<string, string> = {
+      seed: "bg-blue-100 text-blue-800",
+      active: "bg-green-100 text-green-800",
+      deprecated: "bg-gray-100 text-gray-800",
+    };
+    return (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${colors[s] ?? "bg-gray-100 text-gray-800"}`}>
+        {s}
+      </span>
+    );
+  };
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow">
+      <h2 className="mb-4 text-lg font-semibold text-gray-900">Coach Brain Management</h2>
+
+      <div className="mb-4 flex gap-3">
+        <select value={exerciseFilter} onChange={(e) => { setExerciseFilter(e.target.value); setOffset(0); }} className="rounded border px-2 py-1 text-sm">
+          <option value="">All exercises</option>
+          <option value="squat">Squat</option>
+          <option value="bench">Bench</option>
+          <option value="deadlift">Deadlift</option>
+        </select>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }} className="rounded border px-2 py-1 text-sm">
+          <option value="">All statuses</option>
+          <option value="seed">Seed</option>
+          <option value="active">Active</option>
+          <option value="deprecated">Deprecated</option>
+        </select>
+        <select value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setOffset(0); }} className="rounded border px-2 py-1 text-sm">
+          <option value="">All types</option>
+          <option value="cue">Cue</option>
+          <option value="correction">Correction</option>
+          <option value="principle">Principle</option>
+          <option value="drill">Drill</option>
+        </select>
+      </div>
+
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-3 py-2">Content</th>
+                <th className="px-3 py-2">Exercise</th>
+                <th className="px-3 py-2">Phase</th>
+                <th className="px-3 py-2">Type</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Confirms</th>
+                <th className="px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id} className="border-b hover:bg-gray-50">
+                  <td className="max-w-xs truncate px-3 py-2" title={e.content}>{e.content.slice(0, 80)}{e.content.length > 80 ? "..." : ""}</td>
+                  <td className="px-3 py-2">{e.exercise}</td>
+                  <td className="px-3 py-2">{e.phase}</td>
+                  <td className="px-3 py-2">{e.entry_type}</td>
+                  <td className="px-3 py-2">{statusBadge(e.status)}</td>
+                  <td className="px-3 py-2">{e.confirmation_count}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-2">
+                      {e.status === "seed" && (
+                        <button onClick={() => handleStatusChange(e.id, "active")} className="text-xs text-green-600 hover:underline">Approve</button>
+                      )}
+                      {e.status !== "deprecated" && (
+                        <button onClick={() => handleStatusChange(e.id, "deprecated")} className="text-xs text-yellow-600 hover:underline">Deprecate</button>
+                      )}
+                      <button onClick={() => handleDelete(e.id)} className="text-xs text-red-600 hover:underline">Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {entries.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">No entries found</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-between">
+        <button
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE_RAG))}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Previous</button>
+        <button
+          disabled={entries.length < PAGE_SIZE_RAG}
+          onClick={() => setOffset(offset + PAGE_SIZE_RAG)}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >Next</button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
+
 export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
@@ -609,6 +1029,9 @@ export default function AdminPage() {
           <SystemHealthPanel />
           <UserManagementPanel />
           <AnalysisLogPanel />
+          <RagCorpusPanel />
+          <ExpertQueuePanel />
+          <CoachBrainPanel />
         </div>
       </div>
     </div>

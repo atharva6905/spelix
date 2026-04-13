@@ -8,6 +8,7 @@ from app.api.v1.analyses import router as analyses_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.coaching_sse import router as coaching_sse_router
 from app.api.v1.consent import router as consent_router
+from app.api.v1.expert import router as expert_router
 from app.api.v1.exports import router as exports_router
 from app.api.v1.insights import router as insights_router
 from app.api.v1.profiles import router as profiles_router
@@ -22,3 +23,4 @@ api_v1_router.include_router(insights_router, prefix="/insights")
 api_v1_router.include_router(admin_router, prefix="/admin")
 api_v1_router.include_router(account_router, prefix="/account")
 api_v1_router.include_router(consent_router, prefix="/consent")
+api_v1_router.include_router(expert_router, prefix="/expert")
