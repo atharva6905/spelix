@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -72,6 +74,13 @@ def generate_annotated_video(
     str
         The *output_path* (for chaining convenience).
     """
+
+    # Write annotated frames with mp4v codec first (universally available in
+    # opencv-python-headless), then re-encode to H.264 via ffmpeg so the
+    # resulting MP4 plays in all browsers.  mp4v (MPEG-4 Part 2) is NOT
+    # browser-compatible — browsers require H.264 (avc1).
+    raw_path = output_path + ".raw.mp4"
+
     cap = cv2.VideoCapture(video_path)
     try:
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -79,7 +88,7 @@ def generate_annotated_video(
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fourcc = cv2.VideoWriter.fourcc(*"mp4v")
 
-        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        writer = cv2.VideoWriter(raw_path, fourcc, fps, (width, height))
         try:
             total_reps = len(reps)
 
@@ -115,6 +124,33 @@ def generate_annotated_video(
             writer.release()
     finally:
         cap.release()
+
+    # Re-encode to H.264 for browser playback.  If ffmpeg is unavailable,
+    # fall back to the raw mp4v file (still downloadable, just won't play
+    # inline in most browsers).
+    if shutil.which("ffmpeg"):
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", raw_path,
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-movflags", "+faststart",
+                "-an",
+                output_path,
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+        os.remove(raw_path)
+        if result.returncode != 0:
+            # ffmpeg failed — rename raw file as fallback
+            if os.path.exists(raw_path):
+                os.rename(raw_path, output_path)
+    else:
+        # No ffmpeg — use raw mp4v file as-is
+        os.rename(raw_path, output_path)
 
     return output_path
 
