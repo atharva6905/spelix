@@ -332,13 +332,32 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 | D-019 | Generate signed read URLs for artifact paths in analysis detail API response | M | — | FR-RESL-02, FR-RESL-05, FR-XPRT-02 | done | `7e0b893` (PR #35) |
 | D-020 | Lower squat rep detection thresholds — depth 90°→110°, standing 160°→150° to catch parallel-depth reps | M | — | FR-CVPL-07 | done | `7e0b893` (PR #35) |
 | D-021 | Re-encode annotated video to H.264 via ffmpeg for browser playback — OpenCV mp4v codec not browser-compatible | M | — | FR-RESL-02 | done | `38e4510` (PR #36) |
-| D-022 | PDF template missing in Docker image — `reports/templates/analysis_report.html` not copied into container. Pipeline gracefully continues but pdf_path=null. | M | — | FR-XPRT-02 | done | `b86d07e` (PR #37) |
+| D-022 | PDF template missing in Docker image — `reports/templates/analysis_report.html` not copied into container. Pipeline gracefully continues but pdf_path=null. Fixed in two parts: PR #37 added bind mount; PR #38 added CWD-based path resolution (ADR-045). | M | — | FR-XPRT-02 | done | `b86d07e` (PR #37) + `2fbec9f` (PR #38) |
 
 ### Batch 11 — Data Quality (deferred, no code deps)
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
 | D-017 | Replace AI-generated paper summaries with real full-text content from actual PDFs via Docling ingestion. Current seed papers (P2-007) have real metadata (titles, authors, DOIs, years) but AI-synthesized text, not verbatim paper content. Real PDFs would improve RAG retrieval quality. | L | P2-007 | FR-RAGK-02 | pending |
+
+---
+
+## Completed — Session 27 Production Hardening (2026-04-13)
+
+Phase 2 transition gate passed. All 33 Must requirements implemented, E2E smoke test confirmed PDF generation works on production (analysis `5f04cca1`). Three production bugs found during E2E verification and fixed in-session.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| D-023 | PDF template path resolution — `__file__`-relative path walks to `/` in Docker | done | S | D-022 | FR-XPRT-02 | `2fbec9f` (PR #38) | `backend/app/services/pdf.py` |
+| D-024 | Qdrant `coach_brain` missing `exercise` + `status` payload indexes — 400 on filtered queries | done | M | — | FR-BRAIN-01 | `6fde5e1` (PR #39) | `backend/app/services/qdrant.py` |
+| D-025 | Supabase Realtime on `analyses` table — publication membership + REPLICA IDENTITY FULL | done | M | — | FR-RESL-13 | `b7b6b1f` (PR #39) | `backend/alembic/versions/007_enable_realtime_analyses.py` |
+
+### Known Issues Opened
+
+| ID | Title | Size | Deps | SRS IDs | Status |
+|----|-------|------|------|---------|--------|
+| D-026 | Droplet OOM during concurrent analyses — 2GB RAM + 2GB swap insufficient; worker unresponsive to SSH during session 27 test. Previously patched in session 24 (D-014) with swap; may need 4GB droplet upgrade for L2 beta. | M | — | NFR-OPER-02 | pending |
+| D-027 | Apply migration 007 to Supabase via `alembic upgrade head` — one-off SQL was used during debugging; alembic head still at 006 in the migrations table. | S | — | — | pending |
 
 ---
 
