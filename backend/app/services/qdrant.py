@@ -169,42 +169,60 @@ class QdrantClientWrapper:
     ) -> None:
         exists = await self._client.collection_exists(collection_name=name)
         if exists:
-            logger.info("ensure_collections: %r already exists — skipping", name)
-            return
+            logger.info("ensure_collections: %r already exists — ensuring indexes", name)
+        else:
+            logger.info("ensure_collections: creating collection %r", name)
+            await self._client.create_collection(
+                collection_name=name,
+                vectors_config=VectorParams(
+                    size=_VECTOR_SIZE,
+                    distance=Distance.COSINE,
+                    on_disk=False,
+                ),
+                sparse_vectors_config={
+                    _SPARSE_VECTOR_NAME: SparseVectorParams(
+                        index=SparseIndexParams(on_disk=False),
+                        modifier=Modifier.IDF,
+                    )
+                },
+            )
+            logger.info("ensure_collections: created %r", name)
 
-        logger.info("ensure_collections: creating collection %r", name)
-        await self._client.create_collection(
-            collection_name=name,
-            vectors_config=VectorParams(
-                size=_VECTOR_SIZE,
-                distance=Distance.COSINE,
-                on_disk=False,
-            ),
-            sparse_vectors_config={
-                _SPARSE_VECTOR_NAME: SparseVectorParams(
-                    index=SparseIndexParams(on_disk=False),
-                    modifier=Modifier.IDF,
-                )
-            },
-        )
-        logger.info("ensure_collections: created %r", name)
-
+        # Always ensure payload indexes exist — Qdrant ignores duplicate index
+        # creation, so this is safe to run on existing collections. This also
+        # recovers from the case where a collection was created without indexes
+        # (e.g., by a previous version of this code).
         if add_brain_indexes:
             await self._create_brain_indexes(name)
 
     async def _create_brain_indexes(self, collection_name: str) -> None:
-        """Add keyword payload indexes for coach_brain query filters."""
+        """Add keyword payload indexes for coach_brain query filters.
+
+        Idempotent: per-field try/except swallows duplicate-index errors so
+        this can safely be re-run against existing collections.
+        """
         for field in ("exercise", "status"):
-            await self._client.create_payload_index(
-                collection_name=collection_name,
-                field_name=field,
-                field_schema=PayloadSchemaType.KEYWORD,
-            )
-            logger.info(
-                "ensure_collections: created payload index on %r.%s",
-                collection_name,
-                field,
-            )
+            try:
+                await self._client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+                logger.info(
+                    "ensure_collections: created payload index on %r.%s",
+                    collection_name,
+                    field,
+                )
+            except Exception as exc:
+                # Qdrant returns 4xx when the index already exists or the
+                # field_name conflicts. Log and continue — the index we need
+                # exists, which is the desired end state.
+                logger.info(
+                    "ensure_collections: index on %r.%s already present or unchanged (%s)",
+                    collection_name,
+                    field,
+                    exc.__class__.__name__,
+                )
 
     # ------------------------------------------------------------------
     # Health
