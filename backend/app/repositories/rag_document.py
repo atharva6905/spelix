@@ -65,8 +65,13 @@ class RagDocumentRepository:
         doc_id: uuid.UUID,
         *,
         review_status: str,
-        reviewer_id: uuid.UUID,
+        reviewer_id: uuid.UUID | None = None,
     ) -> RagDocument | None:
+        """Update review_status; set reviewer_id + reviewed_at only when a
+        reviewer actually acted (review decisions). System-initiated
+        transitions (e.g. uploading→pending on upload completion per
+        ADR-EXPERT-01) pass reviewer_id=None and leave those columns null.
+        """
         result = await self._db.execute(
             select(RagDocument).where(RagDocument.id == doc_id)
         )
@@ -74,8 +79,9 @@ class RagDocumentRepository:
         if doc is None:
             return None
         doc.review_status = review_status
-        doc.reviewer_id = reviewer_id
-        doc.reviewed_at = datetime.now().astimezone()
+        if reviewer_id is not None:
+            doc.reviewer_id = reviewer_id
+            doc.reviewed_at = datetime.now().astimezone()
         await self._db.flush()
         await self._db.refresh(doc)
         return doc

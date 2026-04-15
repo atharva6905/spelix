@@ -314,10 +314,11 @@ async def complete_paper_upload(
             },
         )
 
+    # System-initiated transition (uploading → pending). reviewer_id stays
+    # NULL until an actual human reviews the paper via the review queue.
     updated = await rag_repo.update_review_status(
         paper_id,
         review_status="pending",
-        reviewer_id=uuid4(),  # system action — no human reviewer
     )
 
     pool = await get_arq_pool()
