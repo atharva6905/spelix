@@ -198,6 +198,35 @@ async def test_withdraw_coach_brain_enqueues_cascade():
 
 
 @pytest.mark.asyncio
+async def test_withdraw_coach_brain_does_not_crash_when_streaq_import_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: if the lazy `from app.workers.streaq_worker import worker`
+    inside `_get_streaq_worker` raises, the factory returns None and the
+    handler silently skips the enqueue — the HTTP request still succeeds.
+
+    Matches the Task 6 pattern in test_streaq_enqueuer.py.
+    """
+    from app.api.v1 import consent as consent_mod
+
+    consent_mod._streaq_worker_cache = None
+    consent_mod._streaq_worker_cache_initialized = False
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+
+    import sys
+
+    class _BrokenModule:
+        def __getattr__(self, name: str) -> object:
+            raise ImportError(f"simulated failure on {name}")
+
+    monkeypatch.setitem(sys.modules, "app.workers.streaq_worker", _BrokenModule())
+
+    w = await consent_mod._get_streaq_worker()
+    assert w is None
+    assert consent_mod._streaq_worker_cache_initialized is True
+
+
+@pytest.mark.asyncio
 async def test_withdraw_analytics_does_not_enqueue():
     """Withdrawing analytics consent does NOT enqueue cascade job."""
     from app.api.v1.consent import withdraw_consent
