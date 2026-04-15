@@ -4,8 +4,6 @@ No SRS FR — this is a growth/ops surface. See migration 008 docstring
 and landing-page-plan §7.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -14,7 +12,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, gen_uuid
 
 
 class BetaRequest(Base):
@@ -37,7 +35,7 @@ class BetaRequest(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         primary_key=True,
-        server_default=func.gen_random_uuid(),
+        default=gen_uuid,
     )
     email: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(String(30), nullable=False)

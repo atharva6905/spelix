@@ -24,6 +24,10 @@ def test_beta_request_status_has_check_constraint() -> None:
     # Per root CLAUDE.md: status is VARCHAR(30) with CHECK.
     status_col = BetaRequest.__table__.c.status
     assert status_col.type.length == 30
+    constraint_names = {
+        c.name for c in BetaRequest.__table__.constraints if c.name
+    }
+    assert "ck_beta_requests_status" in constraint_names
 
 
 def test_beta_request_email_nullable_false() -> None:
