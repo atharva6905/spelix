@@ -16,7 +16,7 @@ Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -406,18 +406,21 @@ class TestStartAnalysis:
         updated_analysis.id = analysis.id
         repo.update_status.return_value = updated_analysis
 
-        mock_arq = AsyncMock()
+        mock_streaq_worker = MagicMock()
         mock_storage = AsyncMock()
-        service = AnalysisService(repo=repo, storage=mock_storage, arq_pool=mock_arq)
 
-        result = await service.start_analysis(
-            analysis_id=analysis.id, user_id=user_id
-        )
+        with patch("app.workers.streaq_worker.process_analysis") as mock_task:
+            mock_task.enqueue = AsyncMock()
+            service = AnalysisService(
+                repo=repo, storage=mock_storage, streaq_worker=mock_streaq_worker
+            )
+
+            result = await service.start_analysis(
+                analysis_id=analysis.id, user_id=user_id
+            )
 
         assert result.status == "quality_gate_pending"
-        mock_arq.enqueue_job.assert_called_once_with(
-            "process_analysis", analysis_id=analysis.id
-        )
+        mock_task.enqueue.assert_awaited_once_with(analysis.id)
 
     @pytest.mark.asyncio
     async def test_start_nonexistent_raises_404(self):

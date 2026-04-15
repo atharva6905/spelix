@@ -3,8 +3,8 @@
 Two primary operations:
     create_analysis — validates request, creates DB row (status=queued),
                       generates a Supabase Storage signed upload URL.
-    start_analysis  — validates ownership and status, enqueues the ARQ
-                      worker job, transitions status to quality_gate_pending.
+    start_analysis  — validates ownership and status, enqueues the streaq
+                      task, transitions status to quality_gate_pending.
 
 Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17
 """
@@ -63,8 +63,8 @@ class AnalysisService:
         An ``AnalysisRepository`` instance (injected by FastAPI DI).
     storage:
         A ``StorageService`` instance (injected by FastAPI DI).
-    arq_pool:
-        An ARQ Redis pool used for enqueueing jobs.  May be ``None`` in
+    streaq_worker:
+        The streaq Worker used for enqueueing tasks.  May be ``None`` in
         contexts where ``start_analysis`` is not called (e.g. unit tests
         that only test ``create_analysis``).
     """
@@ -73,11 +73,11 @@ class AnalysisService:
         self,
         repo: AnalysisRepository,
         storage: StorageService,
-        arq_pool: Any | None = None,
+        streaq_worker: Any | None = None,
     ) -> None:
         self._repo = repo
         self._storage = storage
-        self._arq_pool = arq_pool
+        self._streaq_worker = streaq_worker
 
     async def create_analysis(
         self,
@@ -205,14 +205,14 @@ class AnalysisService:
         analysis_id: UUID,
         user_id: UUID,
     ) -> Analysis:
-        """Enqueue an ARQ worker job and transition the analysis to quality_gate_pending.
+        """Enqueue a streaq task and transition the analysis to quality_gate_pending.
 
         Validates:
         - analysis exists (404)
         - analysis is owned by user_id (403)
         - analysis is in status="queued" (409)
 
-        On success, enqueues ``process_analysis`` ARQ job and transitions
+        On success, enqueues ``process_analysis`` streaq task and transitions
         status to ``quality_gate_pending``.
 
         Returns the updated Analysis ORM object.
@@ -261,11 +261,12 @@ class AnalysisService:
                 },
             )
 
-        # Enqueue ARQ job before DB transition (idempotent on worker side)
-        if self._arq_pool is not None:
-            await self._arq_pool.enqueue_job(
-                "process_analysis", analysis_id=analysis_id
-            )
+        # Enqueue streaq task before DB transition (idempotent on worker side)
+        if self._streaq_worker is not None:
+            # Lazy-imported to avoid api.v1 → worker → api.v1 cycle.
+            from app.workers.streaq_worker import process_analysis
+
+            await process_analysis.enqueue(analysis_id)
 
         # Transition status in DB
         updated = await self._repo.update_status(analysis_id, "quality_gate_pending")

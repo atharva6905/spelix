@@ -2,7 +2,7 @@
 
 Routes:
     POST /api/v1/analyses                — create analysis + get signed upload URL
-    POST /api/v1/analyses/{id}/start     — enqueue ARQ job, transition to quality_gate_pending
+    POST /api/v1/analyses/{id}/start     — enqueue streaq task, transition to quality_gate_pending
     GET  /api/v1/analyses/{id}/status    — poll analysis status (fallback for Realtime)
     DELETE /api/v1/analyses/{id}         — delete analysis + Storage artifacts
     PATCH /api/v1/analyses/{id}          — update mutable fields (tags)
@@ -57,51 +57,46 @@ router = APIRouter(tags=["analyses"])
 _async_supabase_client_cache: Any | None = None
 _async_supabase_client_cache_initialized: bool = False
 
-# Module-level cache for the ARQ Redis pool used to enqueue worker jobs.
-# Same caching shape as the supabase client above — exactly one pool per
-# process, two-state cache so failed init doesn't retry forever.
-_arq_pool_cache: Any | None = None
-_arq_pool_cache_initialized: bool = False
+# Module-level cache for the streaq Worker used to enqueue background jobs.
+# Same singleton shape as the ARQ pool pattern it replaces — one Worker per
+# process, two-state cache so a failed init doesn't retry on every request.
+_streaq_worker_cache: Any | None = None
+_streaq_worker_cache_initialized: bool = False
 
 
-async def _get_arq_pool() -> Any | None:
-    """Build and cache the ARQ Redis pool for enqueueing worker jobs.
+async def _get_streaq_worker() -> Any | None:
+    """Return the cached streaq Worker, or None if Redis is unavailable.
 
-    Reads ``REDIS_URL`` from the environment and constructs an
-    ``arq.ArqRedis`` pool via ``arq.create_pool`` with the same
-    ``default_queue_name`` (``"arq:queue"``) the worker subscribes to in
-    ``app/workers/settings.py``. Cached at module level so subsequent
-    requests reuse the same Redis connection pool.
+    The web process and the worker process share the same Worker definition
+    (``app.workers.streaq_worker.worker``). Importing it here gives us the
+    task references we need to call ``.enqueue(...)`` on.
 
-    Regression coverage: this exists at all because PR #4–#7 fixed
-    everything else but every ``POST /analyses/{id}/start`` was still
-    silently no-op'ing the worker enqueue — ``AnalysisService`` was
-    constructed with ``arq_pool=None`` and the enqueue branch is gated
-    on ``if self._arq_pool is not None``. The fix is to wire it up here
-    and pass it to ``AnalysisService`` in ``_get_service``.
+    Returns None when REDIS_URL is unset (test/local contexts) or when the
+    import raises — ``AnalysisService.start_analysis`` treats None as
+    "enqueue disabled" so API requests still succeed (the job simply never
+    runs, surfaced to the user via the status poll staying at ``queued``).
     """
-    global _arq_pool_cache, _arq_pool_cache_initialized
+    global _streaq_worker_cache, _streaq_worker_cache_initialized
 
-    if _arq_pool_cache_initialized:
-        return _arq_pool_cache
+    if _streaq_worker_cache_initialized:
+        return _streaq_worker_cache
 
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
-        _arq_pool_cache = None
-        _arq_pool_cache_initialized = True
+        _streaq_worker_cache = None
+        _streaq_worker_cache_initialized = True
         return None
 
     try:
-        import arq
-        from arq.connections import RedisSettings
+        from app.workers.streaq_worker import worker
 
-        _arq_pool_cache = await arq.create_pool(RedisSettings.from_dsn(redis_url))
+        _streaq_worker_cache = worker
     except Exception as e:
-        logger.warning("Failed to create ARQ pool: %s", e)
-        _arq_pool_cache = None
+        logger.warning("Failed to import streaq worker: %s", e)
+        _streaq_worker_cache = None
 
-    _arq_pool_cache_initialized = True
-    return _arq_pool_cache
+    _streaq_worker_cache_initialized = True
+    return _streaq_worker_cache
 
 
 async def _make_storage_service() -> StorageService:
@@ -148,17 +143,17 @@ async def _make_storage_service() -> StorageService:
 
 
 async def _get_service(db: AsyncSession = Depends(get_db)) -> AnalysisService:
-    """Build AnalysisService with an AnalysisRepository, StorageService, and ARQ pool.
+    """Build AnalysisService with an AnalysisRepository, StorageService, and streaq Worker.
 
-    The ``arq_pool`` is REQUIRED for ``start_analysis`` to actually enqueue
+    The ``streaq_worker`` is REQUIRED for ``start_analysis`` to actually enqueue
     the worker job — passing ``None`` makes the enqueue silently skip and
-    the worker never runs. See ``_get_arq_pool`` and the regression test
-    in ``tests/unit/test_arq_pool_factory.py``.
+    the worker never runs. See ``_get_streaq_worker`` and the regression test
+    in ``tests/unit/test_streaq_enqueuer.py``.
     """
     repo = AnalysisRepository(db)
     storage = await _make_storage_service()
-    arq_pool = await _get_arq_pool()
-    return AnalysisService(repo=repo, storage=storage, arq_pool=arq_pool)
+    streaq_worker = await _get_streaq_worker()
+    return AnalysisService(repo=repo, storage=storage, streaq_worker=streaq_worker)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +236,7 @@ async def start_analysis(
     """Enqueue the CV pipeline job for an uploaded analysis.
 
     The analysis must be in ``queued`` status and owned by the authenticated user.
-    Transitions status to ``quality_gate_pending`` and enqueues the ARQ worker.
+    Transitions status to ``quality_gate_pending`` and enqueues the streaq task.
     """
     analysis = await service.start_analysis(
         analysis_id=analysis_id,
