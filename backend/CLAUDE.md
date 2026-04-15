@@ -1,6 +1,6 @@
 # Backend — CLAUDE.md
 
-Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, ARQ + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint, Anthropic SDK, OpenAI SDK, instructor, Pydantic v2.
+Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, streaq + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint, Anthropic SDK, OpenAI SDK, instructor, Pydantic v2.
 
 **Current phase: Phase 1 COMPLETE → Phase 2 PLANNING.** Phase 1 added: 5-tier confidence, 4-dimension scoring, SSE coaching, GPT-4o keyframe analysis, exercise auto-detection, Phase 1 PDF, per-rep metrics (FR-REPM-07/08/09/12), detection_result JSONB column (migration 003).
 
@@ -17,7 +17,7 @@ backend/
     services/         # Business logic — no DB calls
     repositories/     # DB access — all queries live here
     cv/               # MediaPipe pipeline, quality gates, scoring, detection
-    workers/          # ARQ job functions
+    workers/          # streaq job functions
     models/           # SQLAlchemy models
     schemas/          # Pydantic v2 schemas
     config.py         # ThresholdConfig loader
@@ -37,7 +37,7 @@ Auth: FastAPI dependency `get_current_user` validates Supabase JWT via `SUPABASE
 
 Error format: `{"error": {"code": str, "message": str, "detail": any}}` — never return raw exceptions.
 
-Upload flow: `POST /analyses` → create DB record (status=queued) → return signed TUS URL + analysis ID (201). `POST /analyses/{id}/start` → enqueue ARQ job → 202. TUS upload goes directly from browser to Supabase Storage — FastAPI never handles video bytes.
+Upload flow: `POST /analyses` → create DB record (status=queued) → return signed TUS URL + analysis ID (201). `POST /analyses/{id}/start` → enqueue streaq job → 202. TUS upload goes directly from browser to Supabase Storage — FastAPI never handles video bytes.
 
 Status poll: `GET /analyses/{id}/status` returns `{id, status, updated_at, detection_result}` — fallback when Realtime disconnects. `detection_result` added in Phase 1 (FR-XDET-07).
 
@@ -47,7 +47,7 @@ Admin routes: server-side role check; non-admins receive 403. Admin queries use 
 
 Request body for `POST /analyses`: `{exercise_type, exercise_variant, filename, file_size_bytes, weight_kg?}`. Response 201: `{id, upload_url, status, expires_at}`.
 
-Signed TUS URL TTL: 1 hour. Video validation (FFprobe codec check) runs in ARQ worker, not in the upload endpoint.
+Signed TUS URL TTL: 1 hour. Video validation (FFprobe codec check) runs in the streaq worker, not in the upload endpoint.
 
 Rate limit: `POST /api/v1/analyses` limited to 10/user/day via slowapi + Redis counter.
 
@@ -85,7 +85,7 @@ Current alembic head: `006_admin_expert_reviews`. `admin_events` deferred furthe
 
 ### Artifact retention
 - 7 days default (cost constraint — keeps active Storage at ~413 MB within Supabase free 1 GB tier).
-- Scheduled ARQ cron job deletes annotated MP4, PDF, plot PNG nightly.
+- Scheduled streaq cron job deletes annotated MP4, PDF, plot PNG nightly.
 - Sets paths to NULL in analyses row after deletion.
 - History and scores are preserved — only artifact bytes are removed.
 - Users see a 7-day download banner on results page.
@@ -100,7 +100,7 @@ All CV functions are pure — stateless, injectable, independently testable. The
 1. **Download** video from Supabase Storage to `/tmp/spelix/{analysis_id}.mp4`
 2. **Pose extraction** (`extract_landmarks`) → `list[np.ndarray]` of (33, 5) frames
 3. **Step 2b: Exercise auto-detection** (Phase 1, FR-XDET-03/04) — heuristic first, GPT-4o vision fallback if `confidence < 0.7` and `openai_client` available. Stores on `analysis.detection_result` JSONB but NEVER overrides user-selected `exercise_type` (ADR-023). Fallback threshold is `_FALLBACK_CONFIDENCE_THRESHOLD = 0.7` (ADR-017).
-4. **Quality gates** (`run_quality_gates`) — body visibility, framing, lighting, stability. Runs in ARQ worker, not FastAPI. Reject predicate: `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`.
+4. **Quality gates** (`run_quality_gates`) — body visibility, framing, lighting, stability. Runs in streaq worker, not FastAPI. Reject predicate: `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`.
 5. **Angle time-series** (`compute_angle_timeseries`)
 6. **Rep detection** (`detect_reps`) — threshold-crossing state machine (`STANDING → DESCENDING → BOTTOM → ASCENDING → STANDING`), min rep duration 0.5s, hysteresis ±5°. Thresholds: squat hip 160°/90°, deadlift hip 160°/70° (70° RDL 90°), bench elbow 160°/90°.
 7. **Per-rep metrics** (`extract_rep_metrics`) — see "Per-Rep Metrics Schema" below.
@@ -170,28 +170,24 @@ Phase 0 path: `config/thresholds_v0.json` with hardcoded named constants (FR-SCO
 
 **Rep-to-rep consistency** (FR-REPM-12): std devs of all numeric metric keys stored in `analyses.summary_json.consistency_metrics` by `SummaryService._compute_consistency_metrics`. Sheiko consistency-under-load principle.
 
-## ARQ Worker
+## streaq Worker
 
-Entry point: `app/workers/analysis_worker.py::process_analysis(ctx, analysis_id: UUID) -> None`.
+Entry point: `app/workers/streaq_worker.py::worker` (a `streaq.Worker` instance). Launch with `streaq app.workers.streaq_worker:worker`.
 
-WorkerSettings: `queue_name="arq:queue"`, `job_timeout=300`, `max_jobs=1`, `keep_result=0`, `redis_settings=RedisSettings.from_url(os.environ["REDIS_URL"])`.
+Config:
+- `queue_name="spelix"`, `concurrency=1` (MediaPipe peak ~350 MB on 2 GB droplet; same shape as ARQ's `max_jobs=1`), per-task `timeout=300s`.
+- `lifespan()` context manager opens a dedicated `redis.asyncio` client, launches the heartbeat loop, yields a `WorkerContext` with `redis`, `paper_storage`, `db_session_maker`. FastAPI-style DI via `WorkerDepends()` injects this into every task.
+- Heartbeat: key `spelix:worker:heartbeat`, TTL 90s, refreshed every 30s (NFR-OPER-02). Preserved from ARQ.
+- Task bodies in `analysis_worker.py`, `consent_cascade.py`, `paper_ingestion.py`, `cleanup.py`, `keepalive.py` keep their ARQ-style `ctx: dict` signatures — `_adapt_ctx()` in `streaq_worker.py` converts `WorkerContext` to the dict shape.
 
-`max_jobs=1` on 2GB droplet (MediaPipe peak ~350MB RAM).
+Status transition sequence (unchanged from ARQ era): `queued → quality_gate_pending → (quality_gate_rejected | processing) → coaching → completed`.
 
-Heartbeat: write Redis key `spelix:worker:heartbeat` with 90s TTL every 30s.
-
-Status transition sequence: `queued → quality_gate_pending → (quality_gate_rejected | processing) → coaching → completed`.
-
-On any exception: catch, write `error_message` to DB, set `status=failed`, increment `retry_count`. If `retry_count >= 3`, terminal.
-
-Idempotent: check status at job start; return immediately if already in terminal state (`completed`, `quality_gate_rejected`, or `failed` with `retry_count=3`).
-
-Video download: fetch from Supabase Storage to `/tmp/spelix/{analysis_id}.mp4` at job start. Delete local temp on job exit regardless of outcome. Delete Storage copy after CV pipeline completes (not after quality gate).
+Idempotency, retry, error handling: unchanged — see NFR-RELI-01 through NFR-RELI-04 and existing task body docstrings.
 
 **All CPU-bound work must go through `await loop.run_in_executor(None, fn)`** — never block the async event loop.
 
 ### Artifact cleanup cron
-Separate ARQ periodic job runs nightly. Deletes `annotated_video_path`, `plot_path`, `pdf_path` from Supabase Storage for analyses older than 7 days. Sets columns to NULL after deletion. The analyses row and all metrics are retained indefinitely.
+Separate streaq periodic job runs nightly. Deletes `annotated_video_path`, `plot_path`, `pdf_path` from Supabase Storage for analyses older than 7 days. Sets columns to NULL after deletion. The analyses row and all metrics are retained indefinitely.
 
 ### Single OpenAI client pattern (ADR-024)
 Worker creates a single `openai.AsyncOpenAI()` at start, wrapped in try/except (missing `OPENAI_API_KEY` → `None`, GPT-4o features no-op gracefully). Pass the same instance to `run_cv_pipeline(openai_client=...)` and reuse for `KeyframeAnalysisService`. **Do NOT instantiate per-feature.**
@@ -231,7 +227,7 @@ Worker and FastAPI web process are separate. Coaching runs in the worker; stream
 ```python
 pubsub_redis = aioredis.from_url(os.environ["REDIS_URL"], decode_responses=True)
 ```
-**Critical**: this is NOT `ctx["redis"]`. ARQ's Redis client blocks on pub/sub — use a dedicated client and close it in `finally:`.
+**Critical**: this is NOT the streaq worker's Redis client (owned by the lifespan context). Use a dedicated client for pub/sub and close it in `finally:`.
 
 Sends `{"type": "chunk", "text": "..."}` messages per chunk, then `{"type": "done"}` sentinel.
 
@@ -278,7 +274,7 @@ Coverage target: 90% minimum, enforced in CI. Current: **91%** (Phase 1 gate).
 ## Dependencies
 
 Managed by `uv`, pinned in `requirements.txt` (or `pyproject.toml`). Key packages:
-`fastapi`, `uvicorn`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `arq`, `redis`, `mediapipe`, `opencv-python-headless`, `instructor`, `anthropic`, `openai`, `weasyprint`, `matplotlib`, `slowapi`, `pydantic>=2.0`, `httpx`, `pytest`, `pytest-asyncio`, `pytest-cov`.
+`fastapi`, `uvicorn`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `streaq`, `redis`, `mediapipe`, `opencv-python-headless`, `instructor`, `anthropic`, `openai`, `weasyprint`, `matplotlib`, `slowapi`, `pydantic>=2.0`, `httpx`, `pytest`, `pytest-asyncio`, `pytest-cov`.
 
 ## Backend Gotchas
 
@@ -299,12 +295,15 @@ Always add imports inline with the code that uses them in the same edit operatio
 - Connect via PgBouncer pooler at port **6543**, not direct Postgres 5432.
 - Set `DATABASE_URL` env var. PgBouncer transaction mode requires `statement_cache_size=0` in asyncpg `connect_args`.
 
-### ARQ
-- `max_jobs=1` on 2GB droplet (MediaPipe peak ~350MB RAM).
-- `job_timeout=300`, `queue_name="arq:queue"`, `keep_result=0`.
+### streaq
+- `concurrency=1` on 2GB droplet (MediaPipe peak ~350MB RAM). Same semantics as the old ARQ `max_jobs=1`.
+- Per-task `timeout=300s` applied via `@worker.task(timeout=300)` decorator (matches ARQ's former global `job_timeout=300`).
+- CLI: `streaq app.workers.streaq_worker:worker` (note the colon between module and attr — streaq convention).
+- Queue stored as Redis **stream** at `streaq:spelix:queues:` — query via `XLEN`, NOT `LLEN`. `LLEN` on the key silently returns 0 because streaq doesn't store a list there (see ADR-BRAIN-04-reversal post-fix).
+- `WorkerContext.heartbeat_task` is intentionally NOT exposed via `WorkerDepends()` — it's a lifecycle detail kept in lifespan-local scope so task bodies can't cancel it.
 
 ### SSE coaching Redis
-The SSE pub/sub client is NOT `ctx["redis"]` (that one blocks on pub/sub). Open a dedicated `redis.asyncio.from_url(...)` with `decode_responses=True` and close it in `finally:` (ADR-019).
+The SSE pub/sub client is NOT the streaq worker's Redis client (that one is owned by the lifespan context and must not be shared with pub/sub consumers). Open a dedicated `redis.asyncio.from_url(...)` with `decode_responses=True` and close it in `finally:` (ADR-019).
 
 ### Worker OpenAI client
 Create ONE `openai.AsyncOpenAI()` at worker start, wrapped in try/except. Pass the same instance to `run_cv_pipeline(openai_client=...)` and reuse for `KeyframeAnalysisService`. Never instantiate per-feature (ADR-024).
@@ -322,7 +321,7 @@ When extending a response schema (e.g., adding `detection_result`, `form_score_*
 If a function does `from X import Y` inline (not at module top), patch at `X.Y`, not at the module that defers-imports it. `patch("app.services.pipeline.detect_exercise_heuristic")` raises `AttributeError` because the name doesn't exist on that module until runtime — patch `app.cv.exercise_detection.detect_exercise_heuristic` instead.
 
 ### Quality gate predicate
-Runs in ARQ worker (not FastAPI). Reject: `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`. Gate results stored in `analyses.quality_gate_result` as JSONB.
+Runs in streaq worker (not FastAPI). Reject: `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`. Gate results stored in `analyses.quality_gate_result` as JSONB.
 
 ### Exercise detection does NOT override
 `analyses.detection_result` is informational only for FR-XDET-07 display. User's `exercise_type` drives quality gates, rep detection, scoring. Never confuse the two (ADR-023).
