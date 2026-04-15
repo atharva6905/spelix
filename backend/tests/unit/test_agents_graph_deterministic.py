@@ -120,3 +120,35 @@ async def test_deterministic_graph_marks_degraded_when_retrieval_returns_empty()
     assert final_state["coaching_output"] is not None
     # CoVe + faithfulness were skipped (no contexts).
     assert "faithfulness" not in final_state["eval_scores"]
+
+
+from app.agents.graph import run_coaching_graph
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_returns_enriched_trace_payload():
+    deps = _make_deps()
+
+    final = await run_coaching_graph(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        body_stats={"height_cm": 180},
+        keyframe_analysis_text="kf notes",
+        mode="deterministic",
+        **deps,
+    )
+
+    # Returns (state, trace_for_storage, coaching_output).
+    state, trace_payload, coaching_output = final
+
+    assert state["coaching_output"] is coaching_output
+    assert coaching_output is not None
+    assert trace_payload["mode"] == "deterministic"
+    assert trace_payload["converged"] is True
+    assert len(trace_payload["nodes_executed"]) >= 7
+    # All required fields present.
+    assert "cove_iterations" in trace_payload
+    assert "eval_scores" in trace_payload

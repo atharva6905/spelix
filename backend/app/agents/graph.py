@@ -385,6 +385,101 @@ def build_adaptive_graph(
     return builder.compile()
 
 
+async def run_coaching_graph(
+    *,
+    analysis_id: Any,
+    user_id: Any,
+    exercise_type: str,
+    exercise_variant: str,
+    confidence_score: float,
+    body_stats: dict[str, Any] | None,
+    keyframe_analysis_text: str | None,
+    mode: str,
+    rep_metric_repo: Any,
+    retrieval_svc: Any,
+    thresholds: Any,
+    analysis_repo: Any,
+    coaching_svc: Any,
+    cove_svc: Any,
+    fg_svc: Any,
+    pubsub_redis: Any,
+    reasoner_llm: Any | None = None,
+) -> tuple[AgentState, dict[str, Any], Any]:
+    """Entry-point called from the worker.
+
+    Builds the requested graph mode (``deterministic`` or ``adaptive``),
+    invokes it with an initial state, and returns
+    ``(final_state, trace_payload_for_jsonb, coaching_output)`` where
+    ``trace_payload_for_jsonb`` is the shape persisted to
+    ``coaching_results.agent_trace_json``.
+    """
+    from app.agents.state import make_initial_state
+    from app.agents.tracing import run_config_for_analysis, serialize_trace_for_storage
+
+    initial = make_initial_state(
+        analysis_id=analysis_id,
+        user_id=user_id,
+        exercise_type=exercise_type,
+        exercise_variant=exercise_variant,
+        confidence_score=confidence_score,
+        mode=mode,  # type: ignore[arg-type]
+        body_stats=body_stats,
+        keyframe_analysis_text=keyframe_analysis_text,
+    )
+
+    if mode == "adaptive":
+        if reasoner_llm is None:
+            raise ValueError("adaptive mode requires reasoner_llm")
+        graph = build_adaptive_graph(
+            rep_metric_repo=rep_metric_repo,
+            retrieval_svc=retrieval_svc,
+            thresholds=thresholds,
+            analysis_repo=analysis_repo,
+            coaching_svc=coaching_svc,
+            cove_svc=cove_svc,
+            fg_svc=fg_svc,
+            pubsub_redis=pubsub_redis,
+            reasoner_llm=reasoner_llm,
+        )
+    else:
+        graph = build_deterministic_graph(
+            rep_metric_repo=rep_metric_repo,
+            retrieval_svc=retrieval_svc,
+            thresholds=thresholds,
+            analysis_repo=analysis_repo,
+            coaching_svc=coaching_svc,
+            cove_svc=cove_svc,
+            fg_svc=fg_svc,
+            pubsub_redis=pubsub_redis,
+        )
+
+    config = run_config_for_analysis(
+        analysis_id=str(analysis_id),
+        user_id=str(user_id),
+        mode=mode,
+    )
+    # recursion_limit prevents runaway loops in adaptive mode.
+    config["recursion_limit"] = 25
+
+    final_state = await graph.ainvoke(initial, config)
+
+    serialized_nodes = serialize_trace_for_storage(final_state.get("trace") or [])
+
+    trace_payload: dict[str, Any] = {
+        "mode": mode,
+        "nodes_executed": serialized_nodes,
+        "eval_scores": final_state.get("eval_scores") or {},
+        "cove_iterations": (final_state.get("eval_scores") or {}).get(
+            "cove_trace", []
+        ),
+        "converged": bool(final_state.get("cove_verified")),
+        "retrieval_source": final_state.get("retrieval_source"),
+        "degraded_mode": bool(final_state.get("degraded_mode")),
+    }
+
+    return final_state, trace_payload, final_state.get("coaching_output")
+
+
 def _build_adaptive_task_prompt(state: AgentState) -> str:
     """Return the seed instruction for the adaptive reasoner."""
     return (
