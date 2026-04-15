@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "@/lib/supabase";
+import { capture } from "@/lib/posthog";
 import NavBar from "@/components/landing/NavBar";
 import Hero from "@/components/landing/Hero";
 import ProblemSection from "@/components/landing/ProblemSection";
@@ -20,6 +21,9 @@ export default function LandingPage() {
         void navigate("/upload", { replace: true });
       } else {
         setChecking(false);
+        capture("landing_view", {
+          referrer: document.referrer || null,
+        });
       }
     });
   }, [navigate]);

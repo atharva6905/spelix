@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import FinalCtaSection from "../FinalCtaSection";
 
 vi.mock("@/api/beta", () => ({ requestBetaAccess: vi.fn() }));
+vi.mock("@/lib/posthog", () => ({ capture: vi.fn() }));
 
 describe("FinalCtaSection", () => {
   test("renders emotional section heading + 'Join the private beta' button", () => {

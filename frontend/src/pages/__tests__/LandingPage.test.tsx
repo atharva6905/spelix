@@ -14,6 +14,8 @@ vi.mock("@/api/beta", () => ({
   submitBetaRequest: vi.fn(),
 }));
 
+vi.mock("@/lib/posthog", () => ({ capture: vi.fn() }));
+
 const mockNavigate = vi.fn();
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");

@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import Hero from "../Hero";
 
 vi.mock("@/api/beta", () => ({ requestBetaAccess: vi.fn() }));
+vi.mock("@/lib/posthog", () => ({ capture: vi.fn() }));
 
 describe("Hero", () => {
   test("renders Option A headline and sub-headline verbatim", () => {

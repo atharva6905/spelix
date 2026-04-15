@@ -151,6 +151,9 @@ celerybeat.pid
 .env.local
 .env.*.local
 .envrc
+# Allow example env files (no secrets, documentation only)
+!.env.example
+!**/.env.example
 .venv
 env/
 venv/

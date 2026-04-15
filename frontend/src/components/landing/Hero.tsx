@@ -1,6 +1,7 @@
 import BetaDisclaimer from "./BetaDisclaimer";
 import EmailCaptureForm from "./EmailCaptureForm";
 import SectionHeading from "./SectionHeading";
+import { capture } from "@/lib/posthog";
 
 export default function Hero() {
   return (
@@ -27,7 +28,22 @@ export default function Hero() {
             biomechanics literature. Every claim is traceable to the study behind it.
           </p>
           <div className="mt-8 max-w-xl">
-            <EmailCaptureForm source="hero" />
+            <EmailCaptureForm
+              source="hero"
+              onAttempt={() => capture("landing_email_submit_attempt", { cta_location: "hero" })}
+              onSuccess={(email) =>
+                capture("landing_email_submit_success", {
+                  cta_location: "hero",
+                  email_domain: email.split("@")[1] ?? null,
+                })
+              }
+              onError={(status) =>
+                capture("landing_email_submit_error", {
+                  cta_location: "hero",
+                  error_code: status,
+                })
+              }
+            />
           </div>
           <div className="mt-6 max-w-xl">
             <BetaDisclaimer variant="dark" />

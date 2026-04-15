@@ -2,6 +2,7 @@ import BetaDisclaimer from "./BetaDisclaimer";
 import EmailCaptureForm from "./EmailCaptureForm";
 import SectionHeading from "./SectionHeading";
 import SectionLabel from "./SectionLabel";
+import { capture } from "@/lib/posthog";
 
 const BETA_USER_GETS = [
   "Full access to all current features, completely free",
@@ -44,6 +45,19 @@ export default function FinalCtaSection() {
               source="final_cta"
               buttonLabel="Join the private beta"
               microCopy="Free during beta · No credit card · You'll receive an invite link within a few days of signing up."
+              onAttempt={() => capture("landing_email_submit_attempt", { cta_location: "final" })}
+              onSuccess={(email) =>
+                capture("landing_email_submit_success", {
+                  cta_location: "final",
+                  email_domain: email.split("@")[1] ?? null,
+                })
+              }
+              onError={(status) =>
+                capture("landing_email_submit_error", {
+                  cta_location: "final",
+                  error_code: status,
+                })
+              }
             />
           </div>
           <div className="mt-8 max-w-xl">
