@@ -97,7 +97,6 @@ async def test_coaching_wired_produces_completed_status():
     mock_repo._db = MagicMock()
 
     statuses_seen: list[str] = []
-    coaching_created: list[Any] = []
 
     async def capture_update(a: Any) -> Any:
         statuses_seen.append(a.status)
@@ -105,23 +104,7 @@ async def test_coaching_wired_produces_completed_status():
 
     mock_repo.update.side_effect = capture_update
 
-    # Mock coaching repo
-    mock_coaching_repo = AsyncMock()
-
-    async def capture_coaching_create(cr: Any) -> Any:
-        coaching_created.append(cr)
-        return cr
-
-    mock_coaching_repo.create.side_effect = capture_coaching_create
-
-    # Mock rep metric repo
-    mock_rep_metric_repo = AsyncMock()
-    mock_rep_metric = MagicMock()
-    mock_rep_metric.rep_index = 0
-    mock_rep_metric.metrics_json = {"depth_angle": 85.0, "knee_angle_at_depth": 90.0}
-    mock_rep_metric_repo.get_by_analysis.return_value = [mock_rep_metric]
-
-    # Mock coaching service
+    # Mock coaching output (returned by the mocked _dispatch_coaching)
     mock_coaching_output = _mock_coaching_output()
 
     async def mock_cv_pipeline(**kwargs: Any) -> MagicMock:
@@ -140,6 +123,15 @@ async def test_coaching_wired_produces_completed_status():
         result.keyframes = []
         return result
 
+    # _dispatch_coaching now owns all coaching logic; return the tuple that
+    # _run_pipeline unpacks for the PDF step.
+    rep_metrics_dicts = [
+        {"rep_number": 1, "depth_angle": 85.0, "knee_angle_at_depth": 90.0}
+    ]
+
+    async def mock_dispatch_coaching(**_kwargs: Any) -> tuple:
+        return (mock_coaching_output, rep_metrics_dicts, None)
+
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
         return_value=mock_repo,
@@ -149,15 +141,8 @@ async def test_coaching_wired_produces_completed_status():
         "app.workers.analysis_worker.run_cv_pipeline",
         side_effect=mock_cv_pipeline,
     ), patch(
-        "app.workers.analysis_worker.CoachingResultRepository",
-        return_value=mock_coaching_repo,
-    ), patch(
-        "app.workers.analysis_worker.RepMetricRepository",
-        return_value=mock_rep_metric_repo,
-    ), patch(
-        "app.workers.analysis_worker.CoachingService",
-    ) as MockCoachingSvc, patch(
-        "app.workers.analysis_worker.anthropic",
+        "app.workers.analysis_worker._dispatch_coaching",
+        side_effect=mock_dispatch_coaching,
     ), patch(
         "app.workers.analysis_worker.ThresholdConfig",
     ), patch(
@@ -169,45 +154,19 @@ async def test_coaching_wired_produces_completed_status():
         "app.workers.analysis_worker._generate_and_upload_pdf",
         new_callable=AsyncMock,
     ):
-        # Configure coaching service mock — Phase 1 uses generate_coaching_streaming
-        mock_svc_instance = AsyncMock()
-        mock_svc_instance.generate_coaching_streaming.return_value = mock_coaching_output
-        mock_svc_instance.generate_coaching.return_value = mock_coaching_output
-        MockCoachingSvc.return_value = mock_svc_instance
-
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session_factory.return_value = mock_session
 
-        # Patch redis.asyncio for pub/sub (worker opens dedicated connection)
-        mock_pubsub_redis = AsyncMock()
-        mock_pubsub_redis.aclose = AsyncMock()
+        from app.workers.analysis_worker import process_analysis
 
-        import redis.asyncio as real_aioredis
-
-        with patch.object(
-            real_aioredis, "from_url", return_value=mock_pubsub_redis,
-        ):
-            from app.workers.analysis_worker import process_analysis
-
-            await process_analysis(ctx, analysis_id)
+        await process_analysis(ctx, analysis_id)
 
     # Verify status transitions include coaching → completed
     assert "coaching" in statuses_seen
     assert "completed" in statuses_seen
     assert statuses_seen[-1] == "completed"
-
-    # Verify coaching service was called
-    mock_svc_instance.generate_coaching_streaming.assert_called_once()
-
-    # Verify coaching result was persisted
-    assert len(coaching_created) == 1
-    cr = coaching_created[0]
-    assert cr.analysis_id == analysis_id
-    assert cr.structured_output_json is not None
-    assert cr.structured_output_json["summary"] == mock_coaching_output.summary
-    assert cr.stream_complete is True
 
 
 @pytest.mark.asyncio
@@ -237,6 +196,9 @@ async def test_coaching_failure_sets_failed_status():
         result.keyframes = []
         return result
 
+    async def dispatch_raises(**_kwargs: Any) -> None:
+        raise RuntimeError("LLM exploded")
+
     with patch(
         "app.workers.analysis_worker.AnalysisRepository",
         return_value=mock_repo,
@@ -246,43 +208,21 @@ async def test_coaching_failure_sets_failed_status():
         "app.workers.analysis_worker.run_cv_pipeline",
         side_effect=mock_cv_pipeline2,
     ), patch(
-        "app.workers.analysis_worker.CoachingResultRepository",
-    ), patch(
-        "app.workers.analysis_worker.RepMetricRepository",
-    ) as MockRepMetricRepo, patch(
-        "app.workers.analysis_worker.CoachingService",
-    ) as MockCoachingSvc, patch(
-        "app.workers.analysis_worker.anthropic",
+        "app.workers.analysis_worker._dispatch_coaching",
+        side_effect=dispatch_raises,
     ), patch(
         "app.workers.analysis_worker.ThresholdConfig",
     ), patch(
         "app.workers.analysis_worker.cleanup_temp_files",
     ):
-        mock_rep_repo = AsyncMock()
-        mock_rep_repo.get_by_analysis.return_value = []
-        MockRepMetricRepo.return_value = mock_rep_repo
-
-        mock_svc = AsyncMock()
-        mock_svc.generate_coaching_streaming.side_effect = RuntimeError("LLM exploded")
-        MockCoachingSvc.return_value = mock_svc
-
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         mock_session_factory.return_value = mock_session
 
-        # Patch redis.asyncio for pub/sub
-        mock_pubsub_redis = AsyncMock()
-        mock_pubsub_redis.aclose = AsyncMock()
+        from app.workers.analysis_worker import process_analysis
 
-        import redis.asyncio as real_aioredis
-
-        with patch.object(
-            real_aioredis, "from_url", return_value=mock_pubsub_redis,
-        ):
-            from app.workers.analysis_worker import process_analysis
-
-            await process_analysis(ctx, analysis_id)
+        await process_analysis(ctx, analysis_id)
 
     assert analysis.status == "failed"
     assert "LLM exploded" in analysis.error_message
@@ -415,16 +355,22 @@ def _base_worker_patches(
             "app.workers.analysis_worker.run_cv_pipeline",
             side_effect=mock_cv_pipeline,
         ), _patch(
-            "app.workers.analysis_worker.CoachingResultRepository",
+            # CoachingResultRepository is now a local import inside
+            # _run_coaching_imperative — patch the source module so the
+            # local `from ... import` picks up the mock.
+            "app.repositories.coaching_result.CoachingResultRepository",
             return_value=mock_coaching_repo,
         ), _patch(
             "app.workers.analysis_worker.RepMetricRepository",
             return_value=mock_rep_metric_repo,
         ), _patch(
-            "app.workers.analysis_worker.CoachingService",
+            # CoachingService is now a local import — patch source module.
+            "app.services.coaching.CoachingService",
             return_value=mock_coaching_svc_instance,
         ), _patch(
-            "app.workers.analysis_worker.anthropic",
+            # anthropic is a local import — patch AsyncAnthropic directly.
+            "anthropic.AsyncAnthropic",
+            return_value=MagicMock(),
         ), _patch(
             "app.workers.analysis_worker.ThresholdConfig",
         ), _patch(
