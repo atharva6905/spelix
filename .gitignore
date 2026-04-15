@@ -151,6 +151,9 @@ celerybeat.pid
 .env.local
 .env.*.local
 .envrc
+# Allow example env files (no secrets, documentation only)
+!.env.example
+!**/.env.example
 .venv
 env/
 venv/
@@ -219,3 +222,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.gstack/
+
+# Landing page analysis artefacts (feat/landing-v1 branch, L2 sprint)
+# Screenshots are bulky reference captures of the Framer template and
+# dev-time verification; template-export is a 435 KB Framer HTML export
+# of uncertain licence. Both live on disk for the branch but must not
+# ship on main. See landing-page/landing-page-plan.md §16.10.
+landing-page/screenshots/
+landing-page/template-export/

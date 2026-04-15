@@ -1,6 +1,7 @@
 from app.models.base import Base
 from app.models.analysis import Analysis, VALID_STATUSES
 from app.models.analysis_expert_review import AnalysisExpertReview
+from app.models.beta_request import BetaRequest
 from app.models.chat_message import ChatMessage
 from app.models.coach_brain_entry import CoachBrainEntry
 from app.models.coaching_result import CoachingResult
@@ -13,6 +14,7 @@ __all__ = [
     "Base",
     "Analysis",
     "AnalysisExpertReview",
+    "BetaRequest",
     "ChatMessage",
     "CoachBrainEntry",
     "CoachingResult",
