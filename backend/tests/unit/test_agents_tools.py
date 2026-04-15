@@ -138,6 +138,7 @@ async def test_retrieve_coach_brain_applies_status_active_filter():
     update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
 
     assert update["brain_contexts"] == [fake_ctx]
+    assert update["retrieval_source"] == "coach_brain_primary"
     call = retrieval_svc.hybrid_search.await_args
     assert call.kwargs["collection"] == "coach_brain"
     # Ensure the status=active filter is applied via additional_filters.
@@ -158,9 +159,42 @@ async def test_retrieve_coach_brain_empty_result_cold_start():
 
     update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
 
-    assert update == {"brain_contexts": []}
+    assert update == {"brain_contexts": [], "retrieval_source": "papers_only_fallback"}
 
 
+@pytest.mark.asyncio
+async def test_retrieve_coach_brain_hybrid_threshold_routing():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+
+    # Score 0.75 → hybrid_brain_supplementary (between 0.65 and 0.82).
+    mid_ctx = SimpleNamespace(
+        collection="coach_brain",
+        score=0.75,
+        chunk=SimpleNamespace(id="b-mid", text="cue", title="T"),
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[mid_ctx]))
+
+    update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    assert update["retrieval_source"] == "hybrid_brain_supplementary"
+
+    # Score 0.5 → papers_only_fallback.
+    low_ctx = SimpleNamespace(
+        collection="coach_brain",
+        score=0.5,
+        chunk=SimpleNamespace(id="b-low", text="cue", title="T"),
+    )
+    retrieval_svc2 = SimpleNamespace(hybrid_search=AsyncMock(return_value=[low_ctx]))
+
+    update2 = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc2)
+
+    assert update2["retrieval_source"] == "papers_only_fallback"
 
 
 class _FakeThresholds:

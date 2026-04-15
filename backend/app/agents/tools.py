@@ -22,6 +22,12 @@ from app.agents.state import AgentState
 
 logger = logging.getLogger(__name__)
 
+# FR-BRAIN-05 thresholds for retrieval-source classification. Mirrors
+# DualCollectionOrchestrator (Phase 2) so graph-path ordering matches
+# imperative-path ordering.
+_COACH_BRAIN_PRIMARY_THRESHOLD: float = 0.82
+_HYBRID_FLOOR_THRESHOLD: float = 0.65
+
 
 async def get_rep_metrics(
     state: AgentState,
@@ -139,13 +145,26 @@ async def retrieve_coach_brain(
             additional_filters=[status_filter],
             rerank=True,
         )
-        return {"brain_contexts": contexts}
+        top_brain_score = max(
+            (ctx.score for ctx in contexts),
+            default=0.0,
+        )
+        if top_brain_score >= _COACH_BRAIN_PRIMARY_THRESHOLD:
+            retrieval_source = "coach_brain_primary"
+        elif top_brain_score >= _HYBRID_FLOOR_THRESHOLD:
+            retrieval_source = "hybrid_brain_supplementary"
+        else:
+            retrieval_source = "papers_only_fallback"
+        return {
+            "brain_contexts": contexts,
+            "retrieval_source": retrieval_source,
+        }
     except Exception:
         logger.warning(
             "retrieve_coach_brain: error retrieving — returning empty",
             exc_info=True,
         )
-        return {"brain_contexts": []}
+        return {"brain_contexts": [], "retrieval_source": "papers_only_fallback"}
 
 
 # Mapping from threshold-config key suffix → rep-metric field to compare.

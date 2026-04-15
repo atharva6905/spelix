@@ -151,3 +151,32 @@ async def test_run_coaching_graph_returns_enriched_trace_payload():
     # All required fields present.
     assert "cove_iterations" in trace_payload
     assert "eval_scores" in trace_payload
+
+
+@pytest.mark.asyncio
+async def test_wrap_trace_records_failed_node_in_state_trace():
+    """A failing node must leave its error event in state['trace']."""
+    from app.agents.graph import _wrap_trace
+    from app.agents.state import make_initial_state
+
+    async def _failing_node(state):
+        raise RuntimeError("synthetic failure")
+
+    wrapped = _wrap_trace("failing_node", _failing_node)
+
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        await wrapped(state)
+
+    # Trace must contain exactly one event — for the failed node.
+    assert len(state["trace"]) == 1
+    assert state["trace"][0]["node"] == "failing_node"
+    assert state["trace"][0]["error"] == "synthetic failure"
+    assert state["trace"][0]["output_keys"] == []

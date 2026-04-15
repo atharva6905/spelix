@@ -67,10 +67,14 @@ def _wrap_trace(
                 output_keys=[],
                 error=str(exc),
             )
-            logger.exception("node %s raised", node_name)
-            # Append event + re-raise — graph catches at ainvoke level.
-            trace = list(state.get("trace") or [])
-            trace.append(event.model_dump())
+            logger.exception(
+                "node %s raised after %.1fms: %s",
+                node_name, duration_ms, exc,
+            )
+            # Mutate the state dict in-place so LangGraph's post-exception
+            # state reflects the failed-node record. State is a plain dict —
+            # mutation survives the raise.
+            state["trace"] = [*(state.get("trace") or []), event.model_dump()]
             raise
         duration_ms = (time.monotonic() - t0) * 1000.0
         event = NodeEvent(
