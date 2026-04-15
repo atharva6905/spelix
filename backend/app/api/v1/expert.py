@@ -297,11 +297,28 @@ async def complete_paper_upload(
             },
         )
 
+    # An 'uploading' row is always created with a non-null storage_path in
+    # request_paper_upload; assert for the type-checker so the downstream
+    # storage_path arguments narrow to str. A None here indicates corrupt
+    # state and should be treated as a server error.
+    storage_path = doc.storage_path
+    if storage_path is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "CORRUPT_STATE",
+                    "message": "uploading row has no storage_path",
+                    "detail": None,
+                }
+            },
+        )
+
     storage = PaperStorageService(client=await get_service_role_client())
-    head = await storage.download_head_bytes(doc.storage_path, n=8)
+    head = await storage.download_head_bytes(storage_path, n=8)
 
     if not head.startswith(PDF_MAGIC_BYTES):
-        await storage.delete_object(doc.storage_path)
+        await storage.delete_object(storage_path)
         await rag_repo.delete(paper_id)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -336,13 +353,27 @@ async def complete_paper_upload(
         paper_id,
         review_status="pending",
     )
+    # update_review_status is typed Optional (returns None if the row vanished
+    # between the earlier get_by_id and now). A concurrent delete on an
+    # 'uploading' row is not expected, but narrow for the type-checker.
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": {
+                    "code": "CORRUPT_STATE",
+                    "message": "paper row vanished during complete",
+                    "detail": None,
+                }
+            },
+        )
 
     await pool.enqueue_job("ingest_paper", str(paper_id))
 
     return RagDocumentCompleteResponse(
         id=updated.id,
         review_status="pending",
-        storage_path=updated.storage_path,
+        storage_path=storage_path,
     )
 
 
