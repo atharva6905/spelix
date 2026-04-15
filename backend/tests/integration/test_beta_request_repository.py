@@ -108,4 +108,3 @@ async def test_create_duplicate_email_raises_integrity_error(
             source="final_cta",
             consented=True,
         )
-        await db_session.commit()
