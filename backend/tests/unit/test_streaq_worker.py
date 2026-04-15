@@ -24,7 +24,7 @@ def test_worker_instance_exists() -> None:
 
 
 def test_worker_context_dataclass_has_correct_fields() -> None:
-    """WorkerContext must be a dataclass carrying the 4 drop-in fields.
+    """WorkerContext must be a dataclass carrying the 3 drop-in fields.
 
     `redis` is required so tasks can do mid-pipeline heartbeat writes
     (existing analysis_worker.py pattern). `paper_storage` and
@@ -40,7 +40,6 @@ def test_worker_context_dataclass_has_correct_fields() -> None:
         "redis",
         "paper_storage",
         "db_session_maker",
-        "heartbeat_task",
     }
 
 
