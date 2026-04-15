@@ -46,7 +46,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: ["uv", "run", "--no-dev", "streaq", "app.workers.streaq_worker:worker"]
+    command: ["uv", "run", "--no-dev", "streaq", "run", "app.workers.streaq_worker:worker"]
     env_file:
       - .env.prod
     volumes:
