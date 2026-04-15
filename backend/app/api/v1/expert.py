@@ -4,6 +4,8 @@ All routes require expert_reviewer or admin role via get_expert_reviewer_user.
 Requirements: FR-EXPV-01 through FR-EXPV-07
 """
 
+import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -25,6 +27,7 @@ from app.schemas.expert_review import (
     GoldenLabelAction,
 )
 from app.schemas.rag_document import (
+    RagDocumentCompleteResponse,
     RagDocumentReviewAction,
     RagDocumentReviewResponse,
     RagDocumentUploadRequest,
@@ -33,7 +36,47 @@ from app.schemas.rag_document import (
 from app.services.expert import ExpertService
 from app.services.paper_storage import PaperStorageService
 from app.services.supabase_client import get_service_role_client
-from app.utils.pdf_upload import FilenameValidationError, sanitize_pdf_filename
+from app.utils.pdf_upload import PDF_MAGIC_BYTES, FilenameValidationError, sanitize_pdf_filename
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level ARQ pool cache (same pattern as analyses.py / consent.py).
+# Exactly one pool per process; two-state cache so a failed init doesn't retry.
+# ---------------------------------------------------------------------------
+_arq_pool_cache: Any | None = None
+_arq_pool_cache_initialized: bool = False
+
+
+async def get_arq_pool() -> Any | None:
+    """Build and cache the ARQ Redis pool for enqueueing ingest_paper jobs.
+
+    Named ``get_arq_pool`` (not ``_get_arq_pool``) so that unit tests can
+    patch it at ``app.api.v1.expert.get_arq_pool``.
+    """
+    global _arq_pool_cache, _arq_pool_cache_initialized
+
+    if _arq_pool_cache_initialized:
+        return _arq_pool_cache
+
+    redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        _arq_pool_cache = None
+        _arq_pool_cache_initialized = True
+        return None
+
+    try:
+        import arq
+        from arq.connections import RedisSettings
+
+        _arq_pool_cache = await arq.create_pool(RedisSettings.from_dsn(redis_url))
+    except Exception as exc:
+        logger.warning("Failed to create ARQ pool in expert router: %s", exc)
+        _arq_pool_cache = None
+
+    _arq_pool_cache_initialized = True
+    return _arq_pool_cache
+
 
 router = APIRouter(tags=["expert"])
 
@@ -199,6 +242,91 @@ async def request_paper_upload(
         upload_url=signed.url,
         storage_path=storage_path,
         expires_at=signed.expires_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Paper Upload Complete (FR-EXPV-02, ADR-EXPERT-01 phase 3)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/papers/{paper_id}/complete",
+    response_model=RagDocumentCompleteResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def complete_paper_upload(
+    paper_id: UUID,
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
+) -> Any:
+    """Phase 3 of expert PDF upload (ADR-EXPERT-01).
+
+    Called by the client after the direct Supabase Storage PUT succeeds.
+    Downloads the first 8 bytes of the stored object via service-role
+    client to verify the PDF magic-byte prefix (b"%PDF-"). On failure
+    the storage object and DB row are deleted and 422 INVALID_PDF is
+    returned. On success the DB row flips from review_status='uploading'
+    to 'pending' and an ingest_paper ARQ job is enqueued.
+    """
+    doc = await rag_repo.get_by_id(paper_id)
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "paper not found",
+                    "detail": None,
+                }
+            },
+        )
+
+    if doc.review_status != "uploading":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "INVALID_STATE",
+                    "message": (
+                        f"paper is not in 'uploading' state"
+                        f" (current: {doc.review_status!r})"
+                    ),
+                    "detail": None,
+                }
+            },
+        )
+
+    storage = PaperStorageService(client=get_service_role_client())
+    head = await storage.download_head_bytes(doc.storage_path, n=8)
+
+    if not head.startswith(PDF_MAGIC_BYTES):
+        await storage.delete_object(doc.storage_path)
+        await rag_repo.delete(paper_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "INVALID_PDF",
+                    "message": "uploaded bytes are not a PDF",
+                    "detail": None,
+                }
+            },
+        )
+
+    updated = await rag_repo.update_review_status(
+        paper_id,
+        review_status="pending",
+        reviewer_id=uuid4(),  # system action — no human reviewer
+    )
+
+    pool = await get_arq_pool()
+    await pool.enqueue_job("ingest_paper", str(paper_id))
+
+    return RagDocumentCompleteResponse(
+        id=updated.id,
+        review_status="pending",
+        storage_path=updated.storage_path,
     )
 
 
