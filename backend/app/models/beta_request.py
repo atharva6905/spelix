@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, String, Text, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,11 @@ class BetaRequest(Base):
             "consented_to_beta_terms = TRUE",
             name="ck_beta_requests_consent_required",
         ),
+        # Unique on email — mirrors migration 008 DDL (`uq_beta_requests_email`)
+        # so CI's `scripts/create_test_tables.py` (Base.metadata.create_all) also
+        # gets the index. Without it, the integrity-error test passes locally
+        # (post-migration) but fails in CI.
+        Index("uq_beta_requests_email", "email", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
