@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.agents.state import make_initial_state
-from app.agents.tools import get_rep_metrics, retrieve_coach_brain, retrieve_papers
+from app.agents.tools import (
+    compare_to_user_history,
+    get_rep_metrics,
+    retrieve_coach_brain,
+    retrieve_papers,
+)
 
 
 @pytest.mark.asyncio
@@ -208,3 +213,65 @@ async def test_flag_form_deviation_no_flags_when_clean():
     update = await flag_form_deviation(state, thresholds=_FakeThresholds())
 
     assert update == {"flagged_deviations": []}
+
+
+@pytest.mark.asyncio
+async def test_compare_to_user_history_summarizes_recent_analyses():
+    user_id = uuid.uuid4()
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=user_id,
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+
+    recent = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            form_score_overall=6.5,
+            form_score_safety=7.0,
+            created_at="2026-04-10T12:00:00Z",
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            form_score_overall=5.8,
+            form_score_safety=6.2,
+            created_at="2026-04-08T12:00:00Z",
+        ),
+    ]
+    analysis_repo = SimpleNamespace(list_recent_by_user=AsyncMock(return_value=recent))
+
+    update = await compare_to_user_history(state, analysis_repo=analysis_repo, limit=5)
+
+    summary = update["user_history_summary"]
+    assert summary is not None
+    assert "2 recent" in summary
+    assert "squat" in summary
+    # Aggregate scores (mean 6.15 overall, 6.6 movement quality) surface in summary.
+    assert "6.1" in summary or "6.2" in summary
+    analysis_repo.list_recent_by_user.assert_awaited_once_with(
+        user_id,
+        limit=5,
+        exercise_type="squat",
+    )
+
+
+@pytest.mark.asyncio
+async def test_compare_to_user_history_no_history():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+    analysis_repo = SimpleNamespace(list_recent_by_user=AsyncMock(return_value=[]))
+
+    update = await compare_to_user_history(state, analysis_repo=analysis_repo, limit=5)
+
+    assert update == {"user_history_summary": None}

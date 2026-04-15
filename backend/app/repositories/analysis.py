@@ -77,6 +77,33 @@ class AnalysisRepository:
             await self.db.flush()
 
     # ------------------------------------------------------------------
+    # Agent / longitudinal queries
+    # ------------------------------------------------------------------
+
+    async def list_recent_by_user(
+        self,
+        user_id: UUID,
+        *,
+        limit: int = 5,
+        exercise_type: str | None = None,
+    ) -> list[Analysis]:
+        """Return the user's most-recent completed analyses, most recent first.
+
+        When ``exercise_type`` is not None, filters to that exercise.
+        """
+        stmt = (
+            select(Analysis)
+            .where(Analysis.user_id == user_id)
+            .where(Analysis.status == "completed")
+        )
+        if exercise_type is not None:
+            stmt = stmt.where(Analysis.exercise_type == exercise_type)
+        stmt = stmt.order_by(Analysis.created_at.desc()).limit(limit)
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    # ------------------------------------------------------------------
     # Insights queries
     # ------------------------------------------------------------------
 

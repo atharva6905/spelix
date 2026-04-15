@@ -221,3 +221,68 @@ async def flag_form_deviation(
                 })
 
     return {"flagged_deviations": flagged}
+
+
+async def compare_to_user_history(
+    state: AgentState,
+    *,
+    analysis_repo: Any,
+    limit: int = 5,
+) -> dict[str, str | None]:
+    """Summarize the user's recent analyses for trend-aware coaching.
+
+    Queries the user's last ``limit`` completed analyses of the SAME
+    exercise type (``state['exercise_type']``) and returns a plain-English
+    summary string describing: count, date range, mean overall score,
+    mean Movement Quality score, and a simple trend label
+    ("improving" / "steady" / "declining").
+
+    Use this to add longitudinal context to coaching feedback — e.g.
+    "this is your fifth squat session in two weeks; Movement Quality has
+    climbed from 5.2 to 7.1, nice progression on braced-torso cue". When
+    the user has no history, returns ``None`` and coaching proceeds
+    session-only.
+    """
+    rows = await analysis_repo.list_recent_by_user(
+        state["user_id"],
+        limit=limit,
+        exercise_type=state["exercise_type"],
+    )
+    if not rows:
+        return {"user_history_summary": None}
+
+    overall_scores = [
+        float(r.form_score_overall)
+        for r in rows
+        if getattr(r, "form_score_overall", None) is not None
+    ]
+    safety_scores = [
+        float(r.form_score_safety)
+        for r in rows
+        if getattr(r, "form_score_safety", None) is not None
+    ]
+
+    def _mean(xs: list[float]) -> float | None:
+        return sum(xs) / len(xs) if xs else None
+
+    mean_overall = _mean(overall_scores)
+    mean_safety = _mean(safety_scores)
+
+    trend = "steady"
+    if len(overall_scores) >= 2:
+        delta = overall_scores[0] - overall_scores[-1]
+        if delta >= 0.5:
+            trend = "improving"
+        elif delta <= -0.5:
+            trend = "declining"
+
+    parts = [
+        f"{len(rows)} recent {state['exercise_type']} sessions",
+    ]
+    if mean_overall is not None:
+        parts.append(f"mean overall score {mean_overall:.1f}")
+    if mean_safety is not None:
+        parts.append(f"mean Movement Quality {mean_safety:.1f}")
+    parts.append(f"trend: {trend}")
+
+    return {"user_history_summary": "; ".join(parts)}
