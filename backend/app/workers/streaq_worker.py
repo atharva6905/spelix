@@ -47,6 +47,13 @@ _HEARTBEAT_INTERVAL = 30  # seconds
 
 _REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
+# When the FastAPI web process enters `async with worker:` to enable
+# enqueueing, streaq still runs this lifespan. The heartbeat must NOT
+# duplicate from both processes — an always-fresh heartbeat from the web
+# process would mask a dead worker container. Set SPELIX_WEB_PROCESS=1 on
+# the web container only; the worker container leaves it unset.
+_IS_WEB_PROCESS = os.environ.get("SPELIX_WEB_PROCESS") == "1"
+
 
 @dataclass
 class WorkerContext:
@@ -75,26 +82,39 @@ async def _heartbeat_loop(redis: Any) -> None:
 
 @asynccontextmanager
 async def lifespan() -> AsyncIterator[WorkerContext]:
-    """Startup/teardown: open redis, launch heartbeat loop, expose deps.
+    """Startup/teardown: open redis, launch heartbeat loop (worker process
+    only), expose deps.
 
     streaq 6.4.0 expects a zero-arg async context manager that yields the
     deps dataclass. The Worker uses the yielded value as the injection
     target for every parameter defaulting to `WorkerDepends()`.
+
+    When the FastAPI web process enters `async with worker:` to enable
+    enqueue-side functionality, this lifespan ALSO runs there. The web
+    process must NOT start a competing heartbeat — a worker-dead but
+    web-alive scenario would otherwise show a fresh heartbeat and mask the
+    failure. Gated by the `SPELIX_WEB_PROCESS` env var (set on the web
+    container only).
     """
     redis_client = aioredis.from_url(_REDIS_URL, decode_responses=False)
-    heartbeat = asyncio.create_task(_heartbeat_loop(redis_client))
+    heartbeat: asyncio.Task | None = None
+    if not _IS_WEB_PROCESS:
+        heartbeat = asyncio.create_task(_heartbeat_loop(redis_client))
+        logger.info("streaq worker started — heartbeat loop active")
+    else:
+        logger.info("streaq worker context entered on web process — heartbeat suppressed")
     ctx = WorkerContext(redis=redis_client)
-    logger.info("streaq worker started — heartbeat loop active")
     try:
         yield ctx
     finally:
-        heartbeat.cancel()
-        try:
-            await heartbeat
-        except asyncio.CancelledError:
-            pass
+        if heartbeat is not None:
+            heartbeat.cancel()
+            try:
+                await heartbeat
+            except asyncio.CancelledError:
+                pass
         await redis_client.aclose()
-        logger.info("streaq worker shutdown — heartbeat loop stopped")
+        logger.info("streaq worker shutdown — context closed")
 
 
 worker: Worker = Worker(
