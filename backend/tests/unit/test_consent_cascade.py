@@ -170,8 +170,9 @@ async def test_cascade_job_with_analyses(mock_engine_cls, mock_repo_cls):
 
 @pytest.mark.asyncio
 async def test_withdraw_coach_brain_enqueues_cascade():
-    """Withdrawing coach_brain_contribution consent enqueues ARQ cascade job."""
+    """Withdrawing coach_brain_contribution consent enqueues streaq cascade job."""
     from app.api.v1.consent import withdraw_consent
+    from app.workers.streaq_worker import cascade_consent_withdrawal as _cascade_task
 
     mock_repo = AsyncMock()
     mock_record = MagicMock()
@@ -188,15 +189,12 @@ async def test_withdraw_coach_brain_enqueues_cascade():
     body = MagicMock()
     body.consent_type = "coach_brain_contribution"
 
-    mock_pool = AsyncMock()
+    mock_worker = MagicMock()
 
-    with patch("app.api.v1.consent._get_arq_pool", return_value=mock_pool):
-        await withdraw_consent(body=body, user=user, repo=mock_repo)
-
-    mock_pool.enqueue_job.assert_awaited_once_with(
-        "cascade_consent_withdrawal",
-        user_id=str(user["id"]),
-    )
+    with patch("app.api.v1.consent._get_streaq_worker", return_value=mock_worker):
+        with patch.object(_cascade_task, "enqueue", new_callable=AsyncMock) as mock_enqueue:
+            await withdraw_consent(body=body, user=user, repo=mock_repo)
+            mock_enqueue.assert_awaited_once_with(str(user["id"]))
 
 
 @pytest.mark.asyncio
@@ -219,6 +217,6 @@ async def test_withdraw_analytics_does_not_enqueue():
     body = MagicMock()
     body.consent_type = "analytics"
 
-    with patch("app.api.v1.consent._get_arq_pool") as mock_get_pool:
+    with patch("app.api.v1.consent._get_streaq_worker") as mock_get_worker:
         await withdraw_consent(body=body, user=user, repo=mock_repo)
-        mock_get_pool.assert_not_called()
+        mock_get_worker.assert_not_called()

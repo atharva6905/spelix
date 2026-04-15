@@ -6,7 +6,7 @@ Routes:
     POST /api/v1/consent/withdraw — withdraw consent (inserts new row, granted=False)
 
 Append-only: withdrawals insert NEW rows — existing rows are never updated.
-FR-BRAIN-16: withdrawing coach_brain_contribution enqueues an ARQ cascade job.
+FR-BRAIN-16: withdrawing coach_brain_contribution enqueues a streaq cascade job.
 
 Requirements: FR-BRAIN-11, FR-BRAIN-16, NFR-PRIV-01
 """
@@ -29,35 +29,40 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["consent"])
 
-# Module-level ARQ pool cache (same pattern as analyses.py)
-_arq_pool_cache: Any | None = None
-_arq_pool_cache_initialized: bool = False
+# Module-level streaq worker cache (same pattern as analyses.py)
+_streaq_worker_cache: Any | None = None
+_streaq_worker_cache_initialized: bool = False
 
 
-async def _get_arq_pool() -> Any | None:
-    """Build and cache the ARQ Redis pool for enqueueing cascade jobs."""
-    global _arq_pool_cache, _arq_pool_cache_initialized
+async def _get_streaq_worker() -> Any | None:
+    """Return the cached streaq Worker for enqueueing cascade jobs.
 
-    if _arq_pool_cache_initialized:
-        return _arq_pool_cache
+    Same two-state cache shape as `analyses.py::_get_streaq_worker`.
+    Returns None when REDIS_URL is unset or when the lazy import raises;
+    the enqueue site treats None as "skip enqueue silently" (the cascade
+    won't run, but the HTTP request still succeeds).
+    """
+    global _streaq_worker_cache, _streaq_worker_cache_initialized
+
+    if _streaq_worker_cache_initialized:
+        return _streaq_worker_cache
 
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
-        _arq_pool_cache = None
-        _arq_pool_cache_initialized = True
+        _streaq_worker_cache = None
+        _streaq_worker_cache_initialized = True
         return None
 
     try:
-        import arq
-        from arq.connections import RedisSettings
+        from app.workers.streaq_worker import worker
 
-        _arq_pool_cache = await arq.create_pool(RedisSettings.from_dsn(redis_url))
-    except Exception:
-        logger.warning("Failed to create ARQ pool for consent cascade", exc_info=True)
-        _arq_pool_cache = None
+        _streaq_worker_cache = worker
+    except Exception as e:
+        logger.warning("Failed to import streaq worker: %s", e)
+        _streaq_worker_cache = None
 
-    _arq_pool_cache_initialized = True
-    return _arq_pool_cache
+    _streaq_worker_cache_initialized = True
+    return _streaq_worker_cache
 
 
 def _get_repo(db: AsyncSession = Depends(get_db)) -> ConsentRepository:
@@ -105,7 +110,7 @@ async def withdraw_consent(
 
     Append-only: the original grant row is preserved for audit purposes.
     FR-BRAIN-16: if consent_type is coach_brain_contribution, enqueues
-    an ARQ cascade job to remove the user's analysis contributions.
+    a streaq cascade job to remove the user's analysis contributions.
     """
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     record = ConsentRecord(
@@ -121,15 +126,20 @@ async def withdraw_consent(
 
     # FR-BRAIN-16: enqueue cascade job for coach_brain_contribution withdrawal
     if body.consent_type == "coach_brain_contribution":
-        pool = await _get_arq_pool()
-        if pool is not None:
+        streaq_worker = await _get_streaq_worker()
+        if streaq_worker is not None:
             try:
-                await pool.enqueue_job(
-                    "cascade_consent_withdrawal",
-                    user_id=str(user["id"]),
+                # Lazy-imported to avoid api.v1 → worker → api.v1 cycle.
+                from app.workers.streaq_worker import cascade_consent_withdrawal
+
+                await cascade_consent_withdrawal.enqueue(str(user["id"]))
+                logger.info(
+                    "Enqueued consent withdrawal cascade for user %s", user["id"]
                 )
-                logger.info("Enqueued consent withdrawal cascade for user %s", user["id"])
             except Exception:
-                logger.warning("Failed to enqueue consent cascade", exc_info=True)
+                logger.exception(
+                    "Failed to enqueue consent withdrawal cascade for user %s",
+                    user["id"],
+                )
 
     return ConsentResponse.model_validate(saved)
