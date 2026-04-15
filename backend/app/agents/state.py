@@ -66,6 +66,9 @@ class AgentState(TypedDict, total=False):
     eval_scores: dict[str, Any]
     degraded_mode: bool
 
+    # --- Adaptive-mode scratch ------------------------------------------
+    messages: list[Any]           # HumanMessage/AIMessage/ToolMessage history
+
     # --- Observability --------------------------------------------------
     trace: list[dict[str, Any]]          # NodeEvent.model_dump() entries
 
@@ -101,5 +104,6 @@ def make_initial_state(
         cove_verified=False,
         eval_scores={},
         degraded_mode=False,
+        messages=[],
         trace=[],
     )

@@ -187,10 +187,217 @@ def build_deterministic_graph(
 
 
 # ---------------------------------------------------------------------------
-# Adaptive graph — placeholder; implemented in Task 13.
+# Adaptive graph (FR-AICP-19)
 # ---------------------------------------------------------------------------
 
 
-def build_adaptive_graph(**kwargs: Any) -> Any:
-    """Adaptive graph (FR-AICP-19) — implemented in Task 13."""
-    raise NotImplementedError("adaptive graph — see Task 13")
+def build_adaptive_graph(
+    *,
+    rep_metric_repo: Any,
+    retrieval_svc: Any,
+    thresholds: Any,
+    analysis_repo: Any,
+    coaching_svc: Any,
+    cove_svc: Any,
+    fg_svc: Any,
+    pubsub_redis: Any,
+    reasoner_llm: Any,
+) -> Any:
+    """Build + compile the adaptive-reasoning graph (FR-AICP-19).
+
+    A single ``reasoner`` node calls an LLM (Claude Sonnet 4.6 bound to the
+    six composable tools) in a loop. The LLM reads tool docstrings to
+    decide which tool to invoke next; when it emits a response with no
+    tool calls, the graph exits. Post-generation nodes (validate, cove,
+    safety, faithfulness) run unconditionally after the reasoner loop.
+
+    ``reasoner_llm`` is injected for testability — production callers
+    pass ``ChatAnthropic(model="claude-sonnet-4-6", temperature=0)``.
+    """
+    from langchain_core.messages import HumanMessage, ToolMessage
+    from langchain_core.tools import StructuredTool
+    from pydantic import BaseModel
+
+    # Per-tool arg schemas: no LLM-facing args — the state is the
+    # Blackboard. Tools read from state, write partial updates.
+    class _NoArgs(BaseModel):
+        pass
+
+    # Shared mutable handle so the tool closures see the latest state.
+    state_box: dict[str, Any] = {"state": None}
+
+    async def _tool_get_rep_metrics() -> str:
+        update = await get_rep_metrics(state_box["state"], rep_metric_repo=rep_metric_repo)
+        state_box["state"] = {**state_box["state"], **update}
+        return f"rep_metrics populated: {len(update['rep_metrics'])} reps"
+
+    async def _tool_retrieve_papers() -> str:
+        update = await retrieve_papers(state_box["state"], retrieval_svc=retrieval_svc)
+        state_box["state"] = {**state_box["state"], **update}
+        return f"papers_contexts populated: {len(update['papers_contexts'])} passages"
+
+    async def _tool_retrieve_coach_brain() -> str:
+        update = await retrieve_coach_brain(state_box["state"], retrieval_svc=retrieval_svc)
+        state_box["state"] = {**state_box["state"], **update}
+        return f"brain_contexts populated: {len(update['brain_contexts'])} entries"
+
+    async def _tool_flag_form_deviation() -> str:
+        update = await flag_form_deviation(state_box["state"], thresholds=thresholds)
+        state_box["state"] = {**state_box["state"], **update}
+        return f"flagged_deviations: {len(update['flagged_deviations'])} flags"
+
+    async def _tool_compare_to_user_history() -> str:
+        update = await compare_to_user_history(state_box["state"], analysis_repo=analysis_repo)
+        state_box["state"] = {**state_box["state"], **update}
+        return f"user_history_summary: {update['user_history_summary'] or 'none'}"
+
+    async def _tool_generate_correction_plan() -> str:
+        update = await generate_correction_plan(
+            state_box["state"],
+            coaching_svc=coaching_svc,
+            thresholds=thresholds,
+            pubsub_redis=pubsub_redis,
+        )
+        state_box["state"] = {**state_box["state"], **update}
+        return "coaching_output populated"
+
+    tools_for_llm = [
+        StructuredTool.from_function(
+            coroutine=_tool_get_rep_metrics,
+            name="get_rep_metrics",
+            description=(get_rep_metrics.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_tool_retrieve_papers,
+            name="retrieve_papers",
+            description=(retrieve_papers.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_tool_retrieve_coach_brain,
+            name="retrieve_coach_brain",
+            description=(retrieve_coach_brain.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_tool_flag_form_deviation,
+            name="flag_form_deviation",
+            description=(flag_form_deviation.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_tool_compare_to_user_history,
+            name="compare_to_user_history",
+            description=(compare_to_user_history.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+        StructuredTool.from_function(
+            coroutine=_tool_generate_correction_plan,
+            name="generate_correction_plan",
+            description=(generate_correction_plan.__doc__ or "").strip(),
+            args_schema=_NoArgs,
+        ),
+    ]
+
+    llm_bound = reasoner_llm.bind_tools(tools_for_llm)
+
+    async def reasoner(state: AgentState) -> dict[str, Any]:
+        state_box["state"] = dict(state)  # snapshot for tools
+
+        messages = list(state.get("messages") or [])
+        if not messages:
+            # Seed conversation with the task description.
+            task_prompt = _build_adaptive_task_prompt(state)
+            messages = [HumanMessage(content=task_prompt)]
+
+        response = await llm_bound.ainvoke(messages)
+        messages.append(response)
+
+        # If the LLM chose tools, invoke them in order, append ToolMessages.
+        tool_calls = getattr(response, "tool_calls", None) or []
+        for tc in tool_calls:
+            tool_name = tc["name"] if isinstance(tc, dict) else tc.name
+            tool_fn = next((t for t in tools_for_llm if t.name == tool_name), None)
+            if tool_fn is None:
+                messages.append(
+                    ToolMessage(
+                        content=f"unknown tool: {tool_name}",
+                        tool_call_id=tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", ""),
+                    )
+                )
+                continue
+            try:
+                result = await tool_fn.coroutine()
+            except Exception as exc:
+                result = f"tool error: {exc}"
+            messages.append(
+                ToolMessage(
+                    content=str(result),
+                    tool_call_id=tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", ""),
+                )
+            )
+
+        # Merge any state updates produced by tools back into return.
+        return {
+            "messages": messages,
+            **{k: v for k, v in state_box["state"].items() if k not in state},
+        }
+
+    def _router(state: AgentState) -> str:
+        """If the last AI message has no tool calls OR we have a coaching_output, proceed to post-gen. Else loop."""
+        if state.get("coaching_output") is not None:
+            return "validate_output"
+        messages = state.get("messages") or []
+        if messages:
+            last = messages[-1]
+            tool_calls = getattr(last, "tool_calls", None)
+            if not tool_calls:
+                # LLM emitted a plain response — coaching_output was not set,
+                # treat as end. Guard against infinite loop.
+                return "validate_output"
+        return "reasoner"
+
+    async def _node_cove(state: AgentState) -> dict[str, Any]:
+        return await node_cove_verify(state, cove_svc=cove_svc)
+
+    async def _node_fg(state: AgentState) -> dict[str, Any]:
+        return await node_faithfulness_gate(state, fg_svc=fg_svc)
+
+    builder = StateGraph(AgentState)
+    builder.add_node("reasoner", _wrap_trace("reasoner", reasoner))
+    builder.add_node("validate_output", _wrap_trace("validate_output", node_validate_output))
+    builder.add_node("cove_verify", _wrap_trace("cove_verify", _node_cove))
+    builder.add_node("safety_filter", _wrap_trace("safety_filter", node_safety_filter))
+    builder.add_node("faithfulness_gate", _wrap_trace("faithfulness_gate", _node_fg))
+
+    builder.add_edge(START, "reasoner")
+    builder.add_conditional_edges(
+        "reasoner",
+        _router,
+        {"reasoner": "reasoner", "validate_output": "validate_output"},
+    )
+    builder.add_edge("validate_output", "cove_verify")
+    builder.add_edge("cove_verify", "safety_filter")
+    builder.add_edge("safety_filter", "faithfulness_gate")
+    builder.add_edge("faithfulness_gate", END)
+
+    return builder.compile()
+
+
+def _build_adaptive_task_prompt(state: AgentState) -> str:
+    """Return the seed instruction for the adaptive reasoner."""
+    return (
+        "You are the Spelix coaching agent. Your task: produce a complete "
+        "coaching analysis for the user's barbell session.\n\n"
+        f"Exercise: {state['exercise_type']} — {state['exercise_variant']}\n"
+        f"Confidence: {state['confidence_score']:.2f}\n\n"
+        "You have access to six tools. Call them in the order you judge "
+        "most useful given the data you have seen. You MUST call "
+        "generate_correction_plan exactly once as your final step. When "
+        "coaching_output is populated, stop calling tools and respond "
+        "with a brief plain-text acknowledgement.\n\n"
+        "Priority order for coaching focus (Movement Quality → Technique "
+        "→ Path & Balance → Control) is enforced inside "
+        "generate_correction_plan."
+    )
