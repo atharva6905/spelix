@@ -23,7 +23,7 @@ def test_worker_instance_exists() -> None:
     assert isinstance(worker, Worker)
 
 
-def test_worker_context_dataclass_is_frozen_or_plain() -> None:
+def test_worker_context_dataclass_has_correct_fields() -> None:
     """WorkerContext must be a dataclass carrying the 4 drop-in fields.
 
     `redis` is required so tasks can do mid-pipeline heartbeat writes
