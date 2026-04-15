@@ -146,3 +146,78 @@ async def retrieve_coach_brain(
             exc_info=True,
         )
         return {"brain_contexts": []}
+
+
+# Mapping from threshold-config key suffix → rep-metric field to compare.
+# Each entry: (threshold_suffix, rep_metric_key, comparison, label)
+# comparison: "max" means observed > threshold is a violation;
+#             "min" means observed < threshold is a violation.
+_DEVIATION_CHECKS: list[tuple[str, str, str]] = [
+    ("depth_angle_max", "depth_angle", "max"),
+    ("lockout_hip_knee_min", "hip_plus_knee_at_lockout", "min"),
+    ("elbow_angle_at_bottom_max", "elbow_angle_at_bottom", "max"),
+    ("torso_lean_max", "torso_lean", "max"),
+]
+
+
+async def flag_form_deviation(
+    state: AgentState,
+    *,
+    thresholds: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """Flag reps whose observed metrics violate ThresholdConfig references.
+
+    Iterates ``state['rep_metrics']`` against the exercise-specific
+    thresholds loaded from ``config/thresholds_v1.json``. For each
+    violating rep, emits a flag dict with ``rep_number``, ``metric``,
+    ``observed``, ``threshold``, ``threshold_key``, and
+    ``comparison`` ("max" = observed exceeded threshold; "min" =
+    observed fell short of threshold).
+
+    Use this to anchor coaching feedback in versioned biomechanics
+    constants rather than the LLM's free judgement. Flagged deviations
+    inform which reps + joints the correction plan must address.
+    """
+    exercise_type = state["exercise_type"]
+    try:
+        exercise_thresholds = thresholds.all_for_exercise(exercise_type)
+    except KeyError:
+        logger.warning(
+            "flag_form_deviation: no thresholds for exercise=%s", exercise_type,
+        )
+        return {"flagged_deviations": []}
+
+    flagged: list[dict[str, Any]] = []
+
+    for suffix, metric_key, comparison in _DEVIATION_CHECKS:
+        threshold_key = f"{exercise_type}.{suffix}"
+        entry = exercise_thresholds.get(threshold_key)
+        if entry is None:
+            continue
+
+        threshold_value = float(entry["value"])
+
+        for rep in state["rep_metrics"]:
+            observed = rep.get(metric_key)
+            if observed is None:
+                continue
+            try:
+                observed_f = float(observed)
+            except (TypeError, ValueError):
+                continue
+
+            violated = (
+                (comparison == "max" and observed_f > threshold_value)
+                or (comparison == "min" and observed_f < threshold_value)
+            )
+            if violated:
+                flagged.append({
+                    "rep_number": rep["rep_number"],
+                    "metric": metric_key,
+                    "observed": observed_f,
+                    "threshold": threshold_value,
+                    "threshold_key": threshold_key,
+                    "comparison": comparison,
+                })
+
+    return {"flagged_deviations": flagged}

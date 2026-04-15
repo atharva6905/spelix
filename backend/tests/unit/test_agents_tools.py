@@ -151,3 +151,60 @@ async def test_retrieve_coach_brain_empty_result_cold_start():
     update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
 
     assert update == {"brain_contexts": []}
+
+
+from app.agents.tools import flag_form_deviation
+
+
+class _FakeThresholds:
+    """Minimal stand-in for ThresholdConfig used by flag_form_deviation."""
+
+    def all_for_exercise(self, exercise_type: str) -> dict[str, dict[str, float]]:
+        # Return squat depth + lockout angle thresholds.
+        return {
+            "squat.depth_angle_max": {"value": 95.0, "unit": "deg"},
+            "squat.lockout_hip_knee_min": {"value": 165.0, "unit": "deg"},
+        }
+
+
+@pytest.mark.asyncio
+async def test_flag_form_deviation_emits_reps_past_depth_threshold():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+    # rep 1 has depth_angle 98 (past 95 threshold → flagged)
+    # rep 2 has depth_angle 92 (within threshold → not flagged)
+    state["rep_metrics"] = [
+        {"rep_number": 1, "depth_angle": 98.0},
+        {"rep_number": 2, "depth_angle": 92.0},
+    ]
+
+    update = await flag_form_deviation(state, thresholds=_FakeThresholds())
+
+    flagged = update["flagged_deviations"]
+    assert len(flagged) == 1
+    assert flagged[0]["rep_number"] == 1
+    assert flagged[0]["metric"] == "depth_angle"
+    assert flagged[0]["observed"] == 98.0
+    assert flagged[0]["threshold"] == 95.0
+    assert flagged[0]["threshold_key"] == "squat.depth_angle_max"
+
+
+@pytest.mark.asyncio
+async def test_flag_form_deviation_no_flags_when_clean():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+    state["rep_metrics"] = [{"rep_number": 1, "depth_angle": 92.0}]
+
+    update = await flag_form_deviation(state, thresholds=_FakeThresholds())
+
+    assert update == {"flagged_deviations": []}
