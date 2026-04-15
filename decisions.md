@@ -463,7 +463,7 @@ P2-005 is open. The `ingest_paper` task in this scope downloads the PDF and logs
 **Decision:** Migrate from ARQ ≥0.27.0 to streaq ≥6.4.0 within the 7-day window Apr 16-22, 2026. All 5 current job types (`process_analysis`, `cascade_consent_withdrawal`, `ingest_paper`, `cleanup_expired_artifacts`, `ping_qdrant_health`) move to streaq. ARQ dependency drops entirely at end of sprint.
 
 **Justification:**
-- ARQ is in maintenance-only mode (GitHub python-arq/arq#510; v0.27.0 Feb 2026 was the last release).
+- ARQ is in maintenance-only mode (tracking issue: https://github.com/python-arq/arq/issues/510; v0.27.0 Feb 2026 was the last release).
 - streaq v6.4.0 shipped 2026-04-10 with anyio structured concurrency and self-reports 5× ARQ throughput.
 - Being on an unmaintained queue weakens the interview-narrative "production-grade infrastructure" signal.
 - Original ADR-BRAIN-04 budgeted 2 weeks; the L2 sprint compresses this to 7 days by limiting scope to drop-in replacement.
