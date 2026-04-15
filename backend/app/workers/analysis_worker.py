@@ -737,9 +737,11 @@ async def _run_coaching_graph(
         from langchain_anthropic import ChatAnthropic
 
         reasoner_llm = ChatAnthropic(
-            model="claude-sonnet-4-6",
+            model_name="claude-sonnet-4-6",
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens_to_sample=2048,
+            timeout=60.0,
+            stop=None,
         )
 
     try:

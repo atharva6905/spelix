@@ -37,11 +37,14 @@ class NodeEvent(BaseModel):
     )
 
 
-class AgentState(TypedDict, total=False):
+class AgentState(TypedDict):
     """Shared state passed between graph nodes.
 
-    ``total=False`` means individual updates can set a subset of keys; LangGraph
-    merges them into the running state via shallow dict update.
+    ``total=True`` (default) — all keys required so pyright can type-check
+    every ``state["key"]`` access without reportTypedDictNotRequiredAccess
+    errors. LangGraph merges node return dicts (plain ``dict[str, Any]``) into
+    the running state via shallow update; those partial dicts do not need to
+    satisfy the TypedDict constraint.
     """
 
     # --- Inputs (populated by make_initial_state) -------------------------
