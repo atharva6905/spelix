@@ -338,7 +338,7 @@ P2-029 consent UI, P2-030 withdrawal cascade, and P2-031 DPIA.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| D-017 | Replace AI-generated paper summaries with real full-text content from actual PDFs via Docling ingestion. Current seed papers (P2-007) have real metadata (titles, authors, DOIs, years) but AI-synthesized text, not verbatim paper content. Real PDFs would improve RAG retrieval quality. | L | P2-007 | FR-RAGK-02 | pending |
+| D-017 | Replace AI-generated paper summaries with real full-text content from actual PDFs via Docling ingestion. Current seed papers (P2-007) have real metadata (titles, authors, DOIs, years) but AI-synthesized text, not verbatim paper content. Real PDFs would improve RAG retrieval quality. | L | P2-007 | FR-RAGK-02 | superseded | L2-EXPERT-UPLOAD unblocks real-PDF ingestion via the expert portal (end-to-end upload live on prod). Docling parsing itself remains open as P2-005 — `ingest_paper` is a stub until it ships. Re-scope once the first kin-expert PDF goes through the real pipeline. |
 
 ---
 
@@ -394,6 +394,26 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 |----|-------|------|------|---------|--------|
 | P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | pending |
 | P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
+
+---
+
+## Completed — L2 Sprint Day 3 — Expert PDF Upload Wiring (2026-04-15, session 30)
+
+Two-phase signed-URL PDF upload end-to-end on the expert reviewer portal (ADR-EXPERT-01). Phase 1: `POST /api/v1/expert/papers` issues a signed Supabase Storage upload URL after filename sanitisation + 50 MB size guard + `uploading` row creation. Phase 2: browser `PUT`s the PDF directly to the `papers` bucket (FastAPI never touches bytes). Phase 3: `POST /api/v1/expert/papers/{id}/complete` does a magic-byte check via service-role download, flips `review_status` from `'uploading'` to `'pending'` and enqueues `ingest_paper`. Docling parsing itself is a stub (P2-005 open). Backend 1479 tests passing (+36 new), frontend 266 tests passing (+10 new). Security review (C-1, H-1..H-4) addressed; C-2 opened as D-029.
+
+| ID | Title | Size | Deps | Refs | Status | Commit |
+|----|-------|------|------|------|--------|--------|
+| L2-EXPERT-01 | Migration 009 — `papers` Supabase Storage bucket (50 MB, PDF-only), `storage.objects` RLS (INSERT for expert_reviewer+admin, SELECT/DELETE for service_role), `rag_documents.review_status` CHECK widened with `'uploading'` | S | — | migration 009 | done | `732f157` |
+| L2-EXPERT-02 | `app/utils/pdf_upload.py` — `sanitize_pdf_filename` (path-traversal, null-byte, control-char rejection; 255-char truncation), `MAX_PDF_BYTES=52_428_800`, `PDF_MAGIC_BYTES=b"%PDF-"` + 16 tests | S | — | ADR-EXPERT-01 | done | `54c7ddd`, `18acd67` |
+| L2-EXPERT-03 | `PaperStorageService` — bucket-scoped signed-URL issuer, `download_head_bytes` (magic-byte helper), `delete_object` cleanup + 5 tests | S | — | ADR-EXPERT-01 | done | `0e5ded1` |
+| L2-EXPERT-04 | `RagDocumentUploadRequest` / `RagDocumentUploadResponse` / `RagDocumentCompleteResponse` Pydantic schemas + 9 tests | S | — | FR-EXPV-02 | done | `973b180` |
+| L2-EXPERT-05 | `POST /api/v1/expert/papers` phase 1 — signed URL; creates `rag_documents` row with `review_status='uploading'`. `app/services/supabase_client.py::get_service_role_client()` async singleton. + 5 tests | M | L2-EXPERT-01..04 | ADR-EXPERT-01 | done | `0d5e705`, `18acd67` |
+| L2-EXPERT-06 | `POST /api/v1/expert/papers/:id/complete` phase 3 — magic-byte check + cleanup on failure + `ingest_paper` enqueue on success + QUEUE_UNAVAILABLE 503 when pool missing + 5 tests. `RagDocumentRepository.get_by_id`, `update_review_status`, `delete` helpers added. | M | L2-EXPERT-05 | ADR-EXPERT-01 | done | `ae1a71b`, `18acd67` |
+| L2-EXPERT-07 | `ingest_paper` ARQ task stub (downloads head bytes to prove read path, logs `docling_pending`) — registered in `WorkerSettings.functions`. Full Docling parsing deferred to P2-005. + 3 tests | S | L2-EXPERT-06 | FR-EXPV-02 | done | `6b2d514` |
+| L2-EXPERT-08 | Integration test — full phase 1 → 3 walk through FastAPI TestClient with dict-backed in-memory repo. Happy path + invalid-PDF cleanup. + cleanup: `update_review_status.reviewer_id` now optional so system transitions don't fabricate a UUID. | S | L2-EXPERT-05, L2-EXPERT-06 | — | done | `0ae6a8c` |
+| L2-EXPERT-09 | Frontend API client — `requestPaperUploadUrl`, `uploadPaperFile` (XHR PUT + progress), `completePaperUpload`. Deprecated `uploadPaper` + `PaperUploadData` deleted. + 5 vitest cases | S | — | ADR-EXPERT-01 | done | `af8bbee`, `86a1670` |
+| L2-EXPERT-10 | `ExpertPaperUploadPage.tsx` — file input + client-side PDF/size guards + 3-phase orchestration + progress bar + success/error banners. + 5 vitest cases | M | L2-EXPERT-09 | ADR-EXPERT-01 | done | `86a1670` |
+| L2-EXPERT-11 | `spelix-security-reviewer` pre-merge pass → fixed C-1 (QUEUE_UNAVAILABLE guard before status flip), H-1 (empty-stem truncation reject), H-2 (control-char reject), H-3 (`datetime.now(timezone.utc)`), H-4 (`get_service_role_client` awaits `acreate_client`). C-2 (pre-existing `injury_advice_accurate` SaMD violation) opened as D-029 out of scope. | S | all above | ADR-EXPERT-01 | done | `18acd67` |
 
 ---
 
