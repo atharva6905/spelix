@@ -3,13 +3,14 @@ import RequireAuth from "@/components/RequireAuth";
 import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AdminPage from "@/pages/AdminPage";
-import ExpertPortalPage from "@/pages/ExpertPortalPage";
+import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
+import BetaTermsPage from "@/pages/BetaTermsPage";
+import ConsentPage from "@/pages/ConsentPage";
 import ExpertAnalysisDetailPage from "@/pages/ExpertAnalysisDetailPage";
 import ExpertPaperUploadPage from "@/pages/ExpertPaperUploadPage";
-import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
-import ConsentPage from "@/pages/ConsentPage";
+import ExpertPortalPage from "@/pages/ExpertPortalPage";
 import HistoryPage from "@/pages/HistoryPage";
-import HomePage from "@/pages/HomePage";
+import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
 import ProfilePage from "@/pages/ProfilePage";
 import ResultsPage from "@/pages/ResultsPage";
@@ -20,7 +21,11 @@ const router = createBrowserRouter([
   // Public routes
   {
     path: "/",
-    element: <HomePage />,
+    element: <LandingPage />,
+  },
+  {
+    path: "/beta-terms",
+    element: <BetaTermsPage />,
   },
   {
     path: "/login",
