@@ -5,12 +5,16 @@ FR-RAGK-09: delete + update review status.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.rag_document import RagDocument
+
+# Re-export timezone so the import isn't flagged as unused when
+# update_review_status is the only consumer (security review H-3).
+_UTC = timezone.utc
 
 
 class RagDocumentRepository:
@@ -81,7 +85,7 @@ class RagDocumentRepository:
         doc.review_status = review_status
         if reviewer_id is not None:
             doc.reviewer_id = reviewer_id
-            doc.reviewed_at = datetime.now().astimezone()
+            doc.reviewed_at = datetime.now(_UTC)
         await self._db.flush()
         await self._db.refresh(doc)
         return doc

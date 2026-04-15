@@ -234,7 +234,7 @@ async def request_paper_upload(
     )
     created = await rag_repo.create(doc)
 
-    storage = PaperStorageService(client=get_service_role_client())
+    storage = PaperStorageService(client=await get_service_role_client())
     signed = await storage.generate_signed_upload_url(storage_path)
 
     return RagDocumentUploadResponse(
@@ -297,7 +297,7 @@ async def complete_paper_upload(
             },
         )
 
-    storage = PaperStorageService(client=get_service_role_client())
+    storage = PaperStorageService(client=await get_service_role_client())
     head = await storage.download_head_bytes(doc.storage_path, n=8)
 
     if not head.startswith(PDF_MAGIC_BYTES):
@@ -314,6 +314,22 @@ async def complete_paper_upload(
             },
         )
 
+    # Confirm the ingestion queue is reachable BEFORE flipping the row —
+    # otherwise a missing REDIS_URL leaves the paper in 'pending' with no
+    # ARQ job enqueued (silent orphan, security review C-1).
+    pool = await get_arq_pool()
+    if pool is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": {
+                    "code": "QUEUE_UNAVAILABLE",
+                    "message": "ingestion queue is not configured; try again later",
+                    "detail": None,
+                }
+            },
+        )
+
     # System-initiated transition (uploading → pending). reviewer_id stays
     # NULL until an actual human reviews the paper via the review queue.
     updated = await rag_repo.update_review_status(
@@ -321,7 +337,6 @@ async def complete_paper_upload(
         review_status="pending",
     )
 
-    pool = await get_arq_pool()
     await pool.enqueue_job("ingest_paper", str(paper_id))
 
     return RagDocumentCompleteResponse(

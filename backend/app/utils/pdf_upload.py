@@ -33,6 +33,12 @@ def sanitize_pdf_filename(raw: str) -> str:
     if "/" in raw or "\\" in raw:
         raise FilenameValidationError("filename contains path separators")
 
+    # Reject null bytes and other control characters before path parsing —
+    # POSIX filesystems silently truncate at \x00 which would bypass the
+    # extension check downstream (security review H-2).
+    if any(ord(c) < 32 for c in raw):
+        raise FilenameValidationError("filename contains control characters")
+
     name = PurePosixPath(raw).name
     if name in ("", ".", ".."):
         raise FilenameValidationError("filename resolves to a directory reference")
@@ -51,6 +57,12 @@ def sanitize_pdf_filename(raw: str) -> str:
     safe = f"{stem}.pdf"
     if len(safe) > _MAX_FILENAME_CHARS:
         overflow = len(safe) - _MAX_FILENAME_CHARS
-        safe = f"{stem[:-overflow]}.pdf"
+        truncated_stem = stem[:-overflow]
+        # Edge case: if the stem is shorter than the overflow, truncation
+        # would leave us with just ".pdf" (security review H-1). Reject
+        # rather than silently produce a degenerate filename.
+        if not truncated_stem:
+            raise FilenameValidationError("filename too long to truncate safely")
+        safe = f"{truncated_stem}.pdf"
 
     return safe

@@ -142,3 +142,34 @@ class TestCompletePaperUpload:
 
         resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
         assert resp.status_code == 404
+
+    @patch("app.api.v1.expert.get_arq_pool")
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_returns_503_when_arq_pool_is_none_and_does_not_flip_status(
+        self, MockRepo, MockStorage, mock_svc, MockPool, client
+    ):
+        """Security review C-1: if get_arq_pool() returns None (REDIS_URL
+        missing or pool creation failed), the DB row must NOT be flipped
+        to 'pending'; otherwise we'd have a silent orphan with no
+        ingestion job enqueued."""
+        doc_id = uuid4()
+        path = f"papers/{doc_id}/paper.pdf"
+        uploading = _make_uploading_doc(doc_id, path)
+
+        repo_instance = MockRepo.return_value
+        repo_instance.get_by_id = AsyncMock(return_value=uploading)
+        repo_instance.update_review_status = AsyncMock()
+
+        storage_instance = MockStorage.return_value
+        storage_instance.download_head_bytes = AsyncMock(return_value=b"%PDF-1.4")
+
+        mock_svc.return_value = MagicMock()
+        MockPool.return_value = None  # missing REDIS_URL path
+
+        resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"]["error"]["code"] == "QUEUE_UNAVAILABLE"
+        repo_instance.update_review_status.assert_not_awaited()
