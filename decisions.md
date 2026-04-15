@@ -486,3 +486,54 @@ P2-005 is open. The `ingest_paper` task in this scope downloads the PDF and logs
 - `docker-compose.prod.yml` — CLI command change
 - `backend/CLAUDE.md` — docs update
 - `backend/app/workers/settings.py` — deleted at end
+
+## ADR-LANGGRAPH-01 — LangGraph as agent orchestration framework (Phase 3)
+
+**Date:** 2026-04-15 (Day 5 of 19-day L2 sprint)
+**Status:** Accepted
+**Supersedes:** Imperative coaching orchestration in `analysis_worker.py::_run_pipeline` (lines ~194–500)
+
+### Context
+
+Phase 3 requires an agent that (a) exposes composable tools per FR-AICP-18, (b) reasons adaptively over tool outputs per FR-AICP-19, (c) emits a plain-English trace for the Batch 3 reasoning sidebar per FR-AICP-20 + FR-RESL-07. The Phase 2 coaching pipeline is 300+ lines of imperative orchestration (retrieve → validate_output → CoVe → safety_filter → faithfulness_gate) wired directly inside `analysis_worker.py`. Adding branching, conditional verification, and adaptive tool selection to this imperative code would be error-prone and untestable.
+
+### Decision
+
+Adopt LangGraph 0.2+ as the agent orchestration framework. Six composable tools are pure async functions returning partial `AgentState` updates. Two graph modes ship together in Batch 1:
+
+- **Deterministic mode** (default, per FR-AICP-18's "Phase 3 initial" clause) — conditional edges enforce `retrieve → flag → compare → generate → validate → cove → safety → faithfulness → END`. No LLM-driven tool choice; the flow is a state machine.
+- **Adaptive mode** (per FR-AICP-19) — a single "reasoner" node with `ChatAnthropic.bind_tools([...])` picks tools by docstring. Reserved for observability-rich scenarios once the deterministic path is validated on prod traffic.
+
+Mode is selected via env `SPELIX_AGENT_MODE=deterministic|adaptive` (default `deterministic`). The entire agent path is gated by `SPELIX_PHASE3_AGENT_ENABLED=0|1` (default `0` at first deploy; flip to `1` after smoke test).
+
+### Alternatives considered
+
+- **Custom orchestrator** — rejected: reinvents LangGraph's checkpointing, tracing, and branching primitives. Harder interview narrative.
+- **LlamaIndex agent framework** — rejected: Phase 2 RAG already uses Qdrant + Cohere directly; LlamaIndex adds a second retrieval abstraction layer.
+- **OpenAI assistants API** — rejected: vendor lock-in on a non-Anthropic model path; the coaching model IS Sonnet 4.6 per FR-AICP, and mixing vendors at the orchestration layer is architectural debt.
+
+### Consequences
+
+- Adds 4 dependencies (`langgraph`, `langchain-anthropic`, `langchain-core`, `langsmith`); footprint ~12 MB wheel-installed. Acceptable given the 4 GB droplet.
+- `agent_trace_json` column shape changes from `{cove_iterations, converged}` to include `nodes_executed[]`, `tool_calls[]`, `mode`. Schema column is untyped `JSONB`, so no migration — consumers must tolerate both old and new shapes.
+- The imperative path stays as a fallback; remove in a follow-up PR after 7+ days of stable agent traffic.
+- LangSmith observability adds a recurring cost (~$40/mo free tier covers beta volume; budget for paid tier if beta exceeds 10k agent runs/month).
+
+## ADR-TIMELINE-01 — Phase 3 pulled forward into the May 3 L2 sprint
+
+**Date:** 2026-04-15
+**Status:** Accepted
+
+### Context
+
+Original roadmap (STRATEGY.md v1, 2026-04-11) deferred Phase 3 to post-Saturniq. STRATEGY.md v3 (2026-04-14) pulled Phase 3 forward to a compressed 19-day sprint ending 2026-05-03, driven by mid-May AI-lab internship application deadlines and July interview start dates. The ARQ→streaq migration (Day 3-9) shipped on Day 4 via PR #48 + hotfix #49, freeing a 5-day buffer (Apr 16–22).
+
+### Decision
+
+Use the buffer to pull Phase 3 Batch 1 (P3-001/002/003) forward from the scheduled Day 10-13 window into Day 5-9. If Batch 1 ships cleanly by Day 9, Batches 2 + 3 proceed on the original cadence with additional buffer. If Batch 1 slips past Day 9, Batch 2 absorbs the remaining buffer and Batch 3 triggers the stop-loss in STRATEGY.md §Stop-Loss (re-scope to drop distillation, retain agent core + sidebar).
+
+### Consequences
+
+- Landing V1 (Day 1-2) + Expert PDF upload (Day 3) + streaq migration (Day 4) + Phase 3 Batch 1 (Day 5-9) + Phase 3 Batch 2 (Day 10-13) + Phase 3 Batch 3 (Day 14-19) + Smoke test (Day 19) + Gate audit (Day 20 = May 3).
+- The `spelix-langgraph-engineer` agent activates today (Day 5) instead of Day 10.
+- No change to the May 3 hard gate; buffer re-allocation only.
