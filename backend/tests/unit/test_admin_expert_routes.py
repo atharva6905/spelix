@@ -599,32 +599,12 @@ class TestExpertAnnotation:
 
 
 # ---------------------------------------------------------------------------
-# Expert Paper Upload (P2-042, FR-EXPV-05)
+# Expert Paper Upload (P2-042, FR-EXPV-05, FR-EXPV-02 + ADR-EXPERT-01)
+# The legacy metadata-only test was replaced when POST /expert/papers became
+# a two-phase signed-URL flow. The 3-phase flow is covered end-to-end by
+# tests/unit/test_expert_paper_upload.py (phase 1) and
+# tests/unit/test_expert_paper_complete.py (phase 3).
 # ---------------------------------------------------------------------------
-
-
-class TestExpertPaperUpload:
-    @patch("app.api.v1.expert.RagDocumentRepository")
-    def test_upload_paper(self, MockRepo, expert_client):
-        doc = _make_rag_document()
-        instance = MockRepo.return_value
-        instance.create = AsyncMock(return_value=doc)
-
-        resp = expert_client.post(
-            "/api/v1/expert/papers",
-            json={
-                "title": "Test Paper",
-                "authors": ["Smith J"],
-                "year": 2023,
-                "exercise_tags": ["squat"],
-                "quality_tier": "L2_rct",
-                "study_design": "rct",
-            },
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["title"] == "Test Paper"
-        assert data["review_status"] == "pending"
 
 
 # ---------------------------------------------------------------------------

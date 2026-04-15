@@ -4,8 +4,9 @@ All routes require expert_reviewer or admin role via get_expert_reviewer_user.
 Requirements: FR-EXPV-01 through FR-EXPV-07
 """
 
+from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,12 +25,15 @@ from app.schemas.expert_review import (
     GoldenLabelAction,
 )
 from app.schemas.rag_document import (
-    RagDocumentResponse,
     RagDocumentReviewAction,
     RagDocumentReviewResponse,
-    RagDocumentUpload,
+    RagDocumentUploadRequest,
+    RagDocumentUploadResponse,
 )
 from app.services.expert import ExpertService
+from app.services.paper_storage import PaperStorageService
+from app.services.supabase_client import get_service_role_client
+from app.utils.pdf_upload import FilenameValidationError, sanitize_pdf_filename
 
 router = APIRouter(tags=["expert"])
 
@@ -133,21 +137,43 @@ async def list_annotations(
 
 
 # ---------------------------------------------------------------------------
-# Paper Upload (P2-042, FR-EXPV-05)
+# Paper Upload (P2-042, FR-EXPV-02)
 # ---------------------------------------------------------------------------
 
 
 @router.post(
     "/papers",
-    response_model=RagDocumentResponse,
+    response_model=RagDocumentUploadResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_paper(
-    body: RagDocumentUpload,
+async def request_paper_upload(
+    body: RagDocumentUploadRequest,
     user: CurrentUser = Depends(get_expert_reviewer_user),
     rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
 ) -> Any:
+    """Phase 1 of expert PDF upload (ADR-EXPERT-01).
+
+    Validates the proposed filename + size, generates a UUID, creates
+    a rag_documents row with review_status='uploading', and returns a
+    signed Supabase Storage upload URL that the browser PUTs the file
+    to directly (FastAPI never sees the bytes).
+
+    The client must call POST /papers/{id}/complete after the PUT to
+    trigger the magic-byte check + ingestion enqueue (Task 6).
+    """
+    try:
+        safe_name = sanitize_pdf_filename(body.filename)
+    except FilenameValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"code": "INVALID_FILENAME", "message": str(err), "detail": None}},
+        ) from err
+
+    paper_id = uuid4()
+    storage_path = f"papers/{paper_id}/{safe_name}"
+
     doc = RagDocument(
+        id=paper_id,
         title=body.title,
         document_type=body.document_type,
         exercise_tags=body.exercise_tags,
@@ -158,11 +184,22 @@ async def upload_paper(
         population=body.population,
         measurement_method=body.measurement_method,
         quality_tier=body.quality_tier,
-        review_status="pending",
-        extra_metadata={},
+        review_status="uploading",
+        storage_path=storage_path,
+        extra_metadata={"uploaded_by": str(user["id"])},
+        ingested_at=datetime.now(timezone.utc),
     )
     created = await rag_repo.create(doc)
-    return RagDocumentResponse.model_validate(created, from_attributes=True)
+
+    storage = PaperStorageService(client=get_service_role_client())
+    signed = await storage.generate_signed_upload_url(storage_path)
+
+    return RagDocumentUploadResponse(
+        id=created.id,
+        upload_url=signed.url,
+        storage_path=storage_path,
+        expires_at=signed.expires_at,
+    )
 
 
 # ---------------------------------------------------------------------------
