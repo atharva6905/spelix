@@ -2,6 +2,27 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Revision note — 2026-04-15 (post-Task-2)
+
+The initial draft referenced an obsolete streaq API (`WrappedContext[C]` + `lifespan(worker)` + `ctx.redis`). The installed **streaq 6.4.0** uses a different API, verified by reading the package source:
+
+- Public exports: `Worker, TaskContext, WorkerDepends, TaskDepends, StreaqError, StreaqRetry, TaskStatus`. There is **no `WrappedContext`**.
+- `TaskContext` is a frozen dataclass with metadata (`fn_name, task_id, timeout, tries, ttl`). It does NOT carry `.redis` or `.deps`.
+- `lifespan` signature is `Callable[[], AbstractAsyncContextManager[C]]` — **zero args**, yields the deps dataclass.
+- Deps are injected FastAPI-style via markers in the task signature:
+  ```python
+  @worker.task(timeout=300)
+  async def my_task(
+      arg: UUID,
+      context: MyContext = WorkerDepends(),
+  ) -> None: ...
+  ```
+- The Redis client must be created inside `lifespan()` and stashed on the deps dataclass — tasks cannot access `worker.redis` implicitly.
+
+All code blocks in Tasks 3 and 4 below reflect the real 6.4.0 API. Tasks 5-13 are unchanged (they only touch the enqueue-site `.enqueue()` API, which is consistent across versions).
+
+---
+
 **Goal:** Replace ARQ with streaq v6.4.0 as the Redis-backed async job queue, preserving every current behavior (idempotency, heartbeat, terminal-state guards, cron schedules, enqueue semantics) while dropping ARQ entirely by end of Day 7.
 
 **Architecture:** Drop-in replacement only — no streaq task graphs, middleware, or priority tiers in this window. A single `Worker` instance lives in `backend/app/workers/streaq_worker.py`, defines a typed `WorkerContext` dataclass carrying deps (paper_storage, db_session_maker), exposes decorated task references (`process_analysis`, `cascade_consent_withdrawal`, `ingest_paper`) and cron jobs (`cleanup_expired_artifacts`, `ping_qdrant_health`). Existing task bodies in `analysis_worker.py`, `consent_cascade.py`, `paper_ingestion.py`, `cleanup.py`, `keepalive.py` stay put and keep their ARQ-style `ctx: dict` signature; thin decorator wrappers in `streaq_worker.py` adapt streaq's `WrappedContext` to the dict so internals don't drift. FastAPI web process holds a cached module-level `Worker` instance for enqueueing (same singleton pattern as today's `_arq_pool_cache`). Coaching SSE pub/sub is unaffected — it opens its own `redis.asyncio` client independent of the queue.
@@ -216,13 +237,20 @@ def test_worker_instance_exists() -> None:
 
 
 def test_worker_context_dataclass_is_frozen_or_plain() -> None:
-    """WorkerContext must be a dataclass carrying the 3 drop-in fields."""
+    """WorkerContext must be a dataclass carrying the 4 drop-in fields.
+
+    `redis` is required so tasks can do mid-pipeline heartbeat writes
+    (existing analysis_worker.py pattern). `paper_storage` and
+    `db_session_maker` default to None and stay None in this drop-in
+    migration — P2-005 will wire real values.
+    """
     from dataclasses import fields
 
     from app.workers.streaq_worker import WorkerContext
 
     field_names = {f.name for f in fields(WorkerContext)}
     assert field_names == {
+        "redis",
         "paper_storage",
         "db_session_maker",
         "heartbeat_task",
@@ -281,11 +309,20 @@ Shape:
   - `worker`: the streaq.Worker instance. `streaq app.workers.streaq_worker:worker`
     launches the worker process.
   - `WorkerContext`: deps dataclass supplied via the lifespan context manager.
-    Fields mirror the ARQ ctx dict keys the task bodies already read.
+    Fields mirror the ARQ ctx dict keys the task bodies already read, plus a
+    redis client (streaq 6.4.0 does NOT expose redis via task context; it
+    must be carried on the deps dataclass).
   - Task wrappers: `process_analysis`, `cascade_consent_withdrawal`,
     `ingest_paper` — thin decorators around the existing task functions
     (which still accept the ARQ-style `ctx: dict`).
   - Cron wrappers: `cleanup_expired_artifacts_cron`, `ping_qdrant_health_cron`.
+
+streaq 6.4.0 DI pattern (verified from installed source):
+  - Task signature uses `WorkerDepends()` marker as a parameter default:
+      `async def my_task(arg: T, context: WorkerContext = WorkerDepends()) -> R:`
+  - `lifespan()` takes zero args and yields the deps dataclass.
+  - `TaskContext` is separate metadata (fn_name, task_id, tries) injected via
+    `TaskDepends()` — we don't use it in this drop-in.
 
 The FastAPI web process imports the task references (e.g. `process_analysis`)
 to call `.enqueue()` on them. See `backend/app/api/v1/analyses.py::_get_streaq_worker`.
@@ -301,7 +338,8 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 from uuid import UUID
 
-from streaq import Worker, WrappedContext
+import redis.asyncio as aioredis
+from streaq import Worker, WorkerDepends
 
 logger = logging.getLogger(__name__)
 
@@ -314,14 +352,15 @@ _REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 @dataclass
 class WorkerContext:
-    """Deps injected into every task via the lifespan ctx.
+    """Deps injected into every task via `WorkerDepends()`.
 
-    Fields are **optional/None by default** so that module import does not
-    require wiring — the real wiring happens inside `lifespan()` at worker
-    startup. Task bodies that read these via the adapter MUST handle None
-    gracefully (current bodies already do — see paper_ingestion.py).
+    `redis` is the live async redis client created in `lifespan()` — task
+    bodies read it via the adapter for mid-pipeline heartbeat writes.
+    `paper_storage` and `db_session_maker` stay None in this migration —
+    P2-005 will wire them when Docling ingestion lands.
     """
 
+    redis: Any
     paper_storage: Any = None
     db_session_maker: Any = None
     heartbeat_task: asyncio.Task | None = field(default=None, repr=False)
@@ -338,32 +377,39 @@ async def _heartbeat_loop(redis: Any) -> None:
 
 
 @asynccontextmanager
-async def lifespan(w: Worker) -> AsyncIterator[WorkerContext]:
-    """Startup/teardown: launch heartbeat loop, expose deps."""
-    ctx = WorkerContext()
-    ctx.heartbeat_task = asyncio.create_task(_heartbeat_loop(w.redis))
+async def lifespan() -> AsyncIterator[WorkerContext]:
+    """Startup/teardown: open redis, launch heartbeat loop, expose deps.
+
+    streaq 6.4.0 expects a zero-arg async context manager that yields the
+    deps dataclass. The Worker uses the yielded value as the injection
+    target for every parameter defaulting to `WorkerDepends()`.
+    """
+    redis_client = aioredis.from_url(_REDIS_URL, decode_responses=False)
+    heartbeat = asyncio.create_task(_heartbeat_loop(redis_client))
+    ctx = WorkerContext(redis=redis_client, heartbeat_task=heartbeat)
     logger.info("streaq worker started — heartbeat loop active")
     try:
         yield ctx
     finally:
-        if ctx.heartbeat_task is not None:
-            ctx.heartbeat_task.cancel()
-            try:
-                await ctx.heartbeat_task
-            except asyncio.CancelledError:
-                pass
+        heartbeat.cancel()
+        try:
+            await heartbeat
+        except asyncio.CancelledError:
+            pass
+        await redis_client.aclose()
         logger.info("streaq worker shutdown — heartbeat loop stopped")
 
 
 worker: Worker = Worker(
     redis_url=_REDIS_URL,
+    queue_name="spelix",
     lifespan=lifespan,
     concurrency=1,  # MediaPipe peak ~350MB on 2GB droplet (same as ARQ max_jobs=1)
 )
 
 
-def _adapt_ctx(wrapped: WrappedContext[WorkerContext]) -> dict[str, Any]:
-    """Convert streaq `WrappedContext` to the ARQ-style `ctx: dict` that
+def _adapt_ctx(context: WorkerContext) -> dict[str, Any]:
+    """Convert the streaq `WorkerContext` to the ARQ-style `ctx: dict` that
     existing task bodies in analysis_worker.py / consent_cascade.py /
     paper_ingestion.py / cleanup.py / keepalive.py still expect.
 
@@ -371,60 +417,65 @@ def _adapt_ctx(wrapped: WrappedContext[WorkerContext]) -> dict[str, Any]:
     migration — smaller diff, lower regression risk.
     """
     return {
-        "redis": wrapped.redis,
-        "paper_storage": wrapped.deps.paper_storage,
-        "db_session_maker": wrapped.deps.db_session_maker,
+        "redis": context.redis,
+        "paper_storage": context.paper_storage,
+        "db_session_maker": context.db_session_maker,
     }
 
 
 @worker.task(timeout=300)
 async def process_analysis(
-    ctx: WrappedContext[WorkerContext], analysis_id: UUID
+    analysis_id: UUID,
+    context: WorkerContext = WorkerDepends(),
 ) -> None:
     """Main analysis pipeline entry point. See analysis_worker.py for body."""
     from app.workers.analysis_worker import process_analysis as _run
 
-    await _run(_adapt_ctx(ctx), analysis_id)
+    await _run(_adapt_ctx(context), analysis_id)
 
 
 @worker.task(timeout=120)
 async def cascade_consent_withdrawal(
-    ctx: WrappedContext[WorkerContext], user_id: str
+    user_id: str,
+    context: WorkerContext = WorkerDepends(),
 ) -> dict[str, int]:
     """Consent withdrawal cascade (FR-BRAIN-16). See consent_cascade.py."""
     from app.workers.consent_cascade import (
         cascade_consent_withdrawal as _cascade,
     )
 
-    return await _cascade(_adapt_ctx(ctx), user_id)
+    return await _cascade(_adapt_ctx(context), user_id)
 
 
 @worker.task(timeout=60)
 async def ingest_paper(
-    ctx: WrappedContext[WorkerContext], paper_id: str
+    paper_id: str,
+    context: WorkerContext = WorkerDepends(),
 ) -> dict[str, Any]:
     """Expert PDF ingestion stub (ADR-EXPERT-01). See paper_ingestion.py."""
     from app.workers.paper_ingestion import ingest_paper as _ingest
 
-    return await _ingest(_adapt_ctx(ctx), paper_id)
+    return await _ingest(_adapt_ctx(context), paper_id)
 
 
 @worker.cron("0 3 * * *")  # 03:00 UTC nightly
 async def cleanup_expired_artifacts_cron(
-    ctx: WrappedContext[WorkerContext],
+    context: WorkerContext = WorkerDepends(),
 ) -> int:
     """Nightly artifact cleanup. See cleanup.py."""
     from app.workers.cleanup import cleanup_expired_artifacts as _cleanup
 
-    return await _cleanup(_adapt_ctx(ctx))
+    return await _cleanup(_adapt_ctx(context))
 
 
 @worker.cron("0 2 * * *")  # 02:00 UTC nightly (ADR-P2-001)
-async def ping_qdrant_health_cron(ctx: WrappedContext[WorkerContext]) -> None:
+async def ping_qdrant_health_cron(
+    context: WorkerContext = WorkerDepends(),
+) -> None:
     """Qdrant keepalive. See keepalive.py."""
     from app.workers.keepalive import ping_qdrant_health as _ping
 
-    await _ping(_adapt_ctx(ctx))
+    await _ping(_adapt_ctx(context))
 ```
 
 - [ ] **Step 2: Run the test — expect PASS**
