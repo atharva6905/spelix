@@ -52,3 +52,9 @@ def test_whitespace_stripped_and_lowercased() -> None:
         consented_to_beta_terms=True,
     )
     assert payload.email == "user@example.com"
+
+
+def test_consent_omitted_rejected() -> None:
+    # Field(...) makes it required — omission raises just like a False value.
+    with pytest.raises(ValidationError):
+        BetaRequestCreate(email="a@b.com", source="hero")  # type: ignore[call-arg]
