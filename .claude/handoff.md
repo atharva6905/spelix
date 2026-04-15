@@ -1,3 +1,83 @@
+# Session 31 Handoff → Session 32: L2 Sprint Day 4 — ARQ → streaq migration live on prod
+
+**Context refresh:** Session 31 shipped the ARQ → streaq drop-in migration on 2026-04-15 (Day 4 of the 19-day L2 sprint) per ADR-BRAIN-04-reversal. STRATEGY.md v3 Day 3-9 scope complete 5 days ahead of the Apr 22 target. Phase 3 LangGraph pull-forward (Day 10-16) is now unblocked. Production worker is running streaq 6.4.0 on queue `spelix` with heartbeat at `spelix:worker:heartbeat` TTL 61s observed post-hotfix-deploy.
+
+## L2-STREAQ-MIGRATION shipped via PR #48 + hotfix PR #49 (2026-04-15)
+
+**Main migration:** PR #48 merge commit `2870c6a`. 19 commits on `feat/streaq-migration`. Backend 1475 tests passing (net +8 new, -11 deleted), ruff + pyright clean, coverage preserved.
+
+**Hotfix:** PR #49 merge commit `e35826b`. Single-line `docker-compose.prod.yml` fix — streaq 6.4.0 CLI uses `streaq run <worker_path>`, not bare `streaq <worker_path>` (CLI was restructured into `run`/`web` subcommands). Worker container went from `Restarting (2)` back to `Up` after the hotfix deploy.
+
+Droplet state after hotfix (2026-04-15 ~12:28 UTC):
+- `git log -1`: `e35826b Merge pull request #49 from atharva6905/fix/streaq-cli-run-subcommand`
+- `docker ps`: `spelix-worker-1 Up About a minute`, `spelix-backend-1 Up (healthy)`, `spelix-redis-1 Up 11 hours (healthy)`
+- Heartbeat: `alive`, TTL **61s** (NFR-OPER-02 confirmed)
+- Worker logs: `[INFO] 2026-04-15 12:28:18: starting worker 886e2c68 for queue spelix`
+
+E2E verify on `https://spelix.app` via Playwright MCP after hotfix: landing loaded clean, **0 console errors, 0 4xx/5xx network requests**.
+
+## Commits on `main` from this session
+
+**PR #48 (19 commits)** — `94126b6..67e1a51`, merged as `2870c6a`:
+- `94126b6` implementation plan committed to branch
+- `9145b6a`, `9f9caeb` ADR-BRAIN-04-reversal + URL for arq tracking issue
+- `9fae77e` streaq dep added alongside arq
+- `6c3dbe0` plan revised for actual streaq 6.4.0 API (`TaskContext` + `WorkerDepends`)
+- `8b279e3`, `ccff88d` failing test + rename
+- `71f082d`, `97d4c4a` streaq_worker.py skeleton + heartbeat/timeout fixup
+- `9a6248d` Redis roundtrip integration test
+- `125900a`, `d801591` analyses.py enqueue migration + import-failure coverage
+- `1c85c21`, `5d60208` consent.py migration + import-failure regression test
+- `5da091f` expert.py migration (includes test_expert_paper_complete.py sweep)
+- `5118eb4`, `43c9176` worker-body test retarget + admin.py llen→xlen fix
+- `4831528` docker-compose worker command swap
+- `67e1a51` drop arq dep, delete settings.py, CLAUDE.md rewrite
+
+**PR #49 (1 commit)** — merged as `e35826b`:
+- `0e5e350` add streaq `run` subcommand to worker start command
+
+## Key learnings from this session (write to memory / CLAUDE.md if useful)
+
+1. **streaq 6.4.0 API ≠ Context7 docs.** Context7 showed `WrappedContext[C]` and `lifespan(worker)`; actual 6.4.0 exports `TaskContext` + `WorkerDepends()` + zero-arg `lifespan()`. Always verify library API against installed source when the plan depends on it.
+2. **streaq 6.4.0 CLI uses subcommands.** `streaq run <path>` and `streaq web <path>`, not bare `streaq <path>`. Cost: 1 prod deploy cycle + hotfix PR. Documenting in `backend/CLAUDE.md` streaq Gotchas subsection so next time we see the error in logs we know to reach for `run`.
+3. **streaq uses Redis streams, not lists.** Queue depth must be queried with `XLEN streaq:<queue_name>:queues:`, NOT `LLEN`. Bare `LLEN` on the queue name silently returns 0 (key is nonexistent) — this was a latent bug in `app/services/admin.py` left over from the ARQ era and caught during Task 9 code review.
+4. **Subagent-driven development caught every real bug.** Over 13 tasks, code-quality reviewers found: 1 Critical (weak cache assertion → missed import-failure regression across 3 enqueue sites), 1 Critical (llen→xlen wrong key), plus Important issues on every task except the smallest. The review loop is expensive in tokens but catches things the implementer misses. Pattern worth keeping.
+
+## Next session start (Session 32)
+
+**Day 5 of L2 sprint (Apr 16).** STRATEGY.md v3 §Day 10-16 starts Apr 23 (Phase 3 Batch 1), so Days 5-9 (Apr 16-22) are a buffer window. Priority ordering:
+
+1. **Kin expert onboarding call** — still pending from Session 30 handoff. Walk the portal end-to-end with real expert, upload first real PDF end-to-end. Log cadence + paper priority list to `docs/expert-cadence.md` (to be created).
+2. **Decide the Day 5-9 buffer work** — options:
+   - Pull Phase 3 Batch 1 forward (LangGraph StateGraph + composable tools). streaq done early leaves 5 days of bonus time before Batch 1's scheduled start.
+   - Use the buffer for Sprint BETA prep (blog post drafting, application-materials work per STRATEGY §Sprint BETA).
+   - Close the parked `/retrieval failed/` Cohere probe (session 28 §2 parked).
+   - Ship one of the deferred V2 landing items if time.
+3. **P2-005 still open** — `ingest_paper` is a stub downloading head bytes only. Real Docling parsing remains for Phase 2 backfill; kin expert's first uploaded PDF will exercise the stub path and surface any cleanup needed.
+
+## Parked / opportunistic (unchanged from session 30, still deferred)
+
+- **D-029** — Rename `injury_advice_accurate` → `movement_advice_accurate` (pre-existing SaMD violation; 6 files)
+- **D-030** — Nightly cron to sweep abandoned `rag_documents.review_status='uploading'` rows older than 2 hours
+- **D-031** — Admin `GET /rag/documents` query type-safety
+- **D-028** — Cosmetic "Connection lost" banner in `useAnalysisStatus`
+- **D-004..D-010** — Session 13 tech debt
+
+## Test counts on `main` after hotfix
+
+- **Backend**: 1475 passing (on `--ignore=tests/e2e` due to rate-limit noise from repeated local runs; CI runs full suite). 25 skipped, 0 failing.
+- **Frontend**: 266 passing (unchanged — no frontend touches this session).
+- **Coverage**: 91% preserved (not re-measured; CI coverage gate not failing).
+
+## Test artifacts
+
+- `docs/superpowers/plans/2026-04-15-arq-to-streaq-migration.md` — full task-by-task plan (13 tasks, 1281 lines on branch, merged via PR #48)
+- `.playwright-mcp/page-2026-04-15T12-29-40-032Z.yml` — Playwright snapshot of post-hotfix landing page on prod
+
+## Prior session continues below
+
+---
+
 # Session 30 Handoff → Session 31: L2 Sprint Day 3 — Expert PDF Upload live on prod
 
 **Context refresh:** Session 30 shipped end-to-end expert PDF upload on 2026-04-15 (Day 3 of the 19-day L2 sprint). STRATEGY.md v3 Day 1-2 Track B hard gate now met — the kin expert onboarding can proceed with a working upload portal. Phase 3 LangGraph pull-forward is now unblocked for Day 10-16. The Day 3-9 ARQ→streaq migration is the next scheduled sprint item.
