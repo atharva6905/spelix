@@ -53,3 +53,45 @@ async def get_rep_metrics(
         len(rep_metrics),
     )
     return {"rep_metrics": rep_metrics}
+
+
+async def retrieve_papers(
+    state: AgentState,
+    *,
+    retrieval_svc: Any,
+    top_k: int = 10,
+    rerank_top_n: int = 5,
+) -> dict[str, Any]:
+    """Retrieve biomechanics research passages from the ``papers_rag`` Qdrant collection.
+
+    Builds a natural-language query from ``state['exercise_type']`` +
+    ``state['exercise_variant']`` + common technique language, then runs
+    dense+BM25+RRF hybrid retrieval, Cohere reranking, and returns the
+    top-``rerank_top_n`` passages as ``RetrievedContext`` objects.
+
+    Use this to ground coaching feedback in peer-reviewed biomechanics
+    literature. Every coaching claim that cites [N] must trace to a
+    passage returned here or by ``retrieve_coach_brain``. Falls back to
+    empty list + ``degraded_mode=True`` if Qdrant is unavailable
+    (FR-AICP-15).
+    """
+    query = (
+        f"{state['exercise_type']} {state['exercise_variant']} "
+        "technique coaching biomechanics"
+    )
+    try:
+        contexts = await retrieval_svc.hybrid_search(
+            query,
+            collection="papers_rag",
+            top_k=top_k,
+            rerank_top_n=rerank_top_n,
+            exercise_filter=state["exercise_type"],
+            rerank=True,
+        )
+        return {"papers_contexts": contexts}
+    except Exception:
+        logger.warning(
+            "retrieve_papers: error retrieving — degraded mode",
+            exc_info=True,
+        )
+        return {"papers_contexts": [], "degraded_mode": True}
