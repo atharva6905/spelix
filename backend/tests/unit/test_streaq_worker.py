@@ -67,3 +67,25 @@ def test_both_cron_jobs_are_registered() -> None:
     # them with the worker via decorator side-effect).
     assert callable(cleanup_expired_artifacts_cron)
     assert callable(ping_qdrant_health_cron)
+
+
+import pytest
+
+
+@pytest.mark.integration
+async def test_streaq_worker_opens_redis_connection_cleanly() -> None:
+    """End-to-end: streaq Worker can open its redis connection, roundtrip a
+    PING, and close cleanly against a live local Redis.
+
+    Does NOT invoke any task or cron — those are exercised at higher levels
+    (unit tests in Tasks 3+4 verified module shape; Task 12 verifies real
+    prod flow via Playwright MCP).
+
+    Requires Redis running on localhost:6379 (docker-compose.dev.yml).
+    """
+    from app.workers.streaq_worker import worker
+
+    async with worker:
+        pong = await worker.redis.ping()
+        # coredis returns the string "PONG", not a bool
+        assert pong in (True, b"PONG", "PONG")
