@@ -21,6 +21,7 @@ from app.workers.analysis_worker import process_analysis
 from app.workers.cleanup import cleanup_expired_artifacts
 from app.workers.consent_cascade import cascade_consent_withdrawal
 from app.workers.keepalive import ping_qdrant_health
+from app.workers.paper_ingestion import ingest_paper
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class WorkerSettings:
 
     redis_settings: RedisSettings = RedisSettings.from_dsn(os.environ.get("REDIS_URL", "redis://localhost:6379"))
 
-    functions = [process_analysis, cascade_consent_withdrawal]
+    functions = [process_analysis, cascade_consent_withdrawal, ingest_paper]
     cron_jobs = [
         cron(cleanup_expired_artifacts, hour=3, minute=0),  # 03:00 UTC nightly
         cron(ping_qdrant_health, hour=2, minute=0),  # 02:00 UTC nightly (ADR-P2-001)
