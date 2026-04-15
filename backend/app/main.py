@@ -1,5 +1,7 @@
 import logging
 import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 import sentry_sdk
 from fastapi import FastAPI, Request
@@ -20,7 +22,54 @@ if os.getenv("SENTRY_DSN"):
         environment=os.getenv("SPELIX_ENV", "development"),
     )
 
-app = FastAPI(title="Spelix API", version="0.1.0", redirect_slashes=False)
+
+@asynccontextmanager
+async def fastapi_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Enter the streaq worker's async context on startup so enqueue works.
+
+    streaq 6.4.0 requires `async with worker:` before any `task.enqueue(...)`
+    call — the underlying `worker.lib` (Redis publisher) is only constructed
+    inside `__aenter__`. Without this, every `process_analysis.enqueue(...)`
+    in an API request raises `StreaqError: Worker not initialized`.
+
+    The worker container runs the Worker via `streaq run ...` which enters
+    the context for the lifetime of the process. The FastAPI web process
+    does the same here. Both share the same `Worker` instance defined in
+    `app/workers/streaq_worker.py`, so task names and queue config match.
+
+    The worker's own lifespan (`app.workers.streaq_worker.lifespan`) reads
+    `SPELIX_WEB_PROCESS` and suppresses the heartbeat loop when True — so
+    entering the context from FastAPI doesn't duplicate heartbeat writes
+    and mask a dead worker container.
+    """
+    if os.environ.get("REDIS_URL"):
+        try:
+            from app.workers.streaq_worker import worker as streaq_worker
+
+            async with streaq_worker:
+                logger.info(
+                    "FastAPI lifespan: entered streaq worker context (enqueue ready)"
+                )
+                yield
+        except Exception:
+            logger.exception(
+                "FastAPI lifespan: failed to enter streaq worker context — "
+                "enqueue will raise; web app continues without queue"
+            )
+            yield
+    else:
+        logger.info(
+            "FastAPI lifespan: REDIS_URL unset — skipping streaq context"
+        )
+        yield
+
+
+app = FastAPI(
+    title="Spelix API",
+    version="0.1.0",
+    redirect_slashes=False,
+    lifespan=fastapi_lifespan,
+)
 
 # Rate limiting (NFR-SECU-10)
 app.state.limiter = limiter

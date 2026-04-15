@@ -19,6 +19,12 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
+    # SPELIX_WEB_PROCESS suppresses the streaq heartbeat loop when the web
+    # process enters `async with worker:` for enqueueing — otherwise a dead
+    # worker container would be masked by the web process's own heartbeat
+    # writes. See app/workers/streaq_worker.py lifespan docstring.
+    environment:
+      - SPELIX_WEB_PROCESS=1
     env_file:
       - .env.prod
     # Bind-mount the threshold config and PDF template from the host repo.
