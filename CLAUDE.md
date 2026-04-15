@@ -2,7 +2,7 @@
 
 Science-based barbell form coaching platform. Users upload squat/bench/deadlift videos → CV pipeline extracts pose + reps + metrics → AI generates structured coaching feedback. Private web app at spelix.app.
 
-**Current phase: Phase 2 COMPLETE → L2 beta polish (May 9 freeze)** — Phase 0 complete (93 items, B-001–B-093). Phase 1 complete (44 items, B-094–B-137). Phase 2 complete (44 items, P2-001–P2-044, 33 Must requirements, all implemented). Phase 2 delivered: RAG (Qdrant dual-collection, Cohere embed-v4 + Rerank 4.0), Docling ingestion, hybrid retrieval (dense+BM25+RRF), citation-grounded coaching, CoVe verification, follow-up chat, Coach Brain foundation (24 seed entries, contextual embedding, cold-start fallback, dual-collection orchestrator), GDPR consent (3-tier UI + withdrawal cascade), DPIA, per-analysis eval scores (RAGAS/HHEM), Langfuse tracing, expert reviewer portal (7 FR-EXPV), admin panels (corpus/brain/expert queue). Phase 3 (LangGraph agent) deferred to post-Saturniq (mid-August 2026). SRS v2.1 (north star — set in stone).
+**Current phase: L2 sprint — 19-day hard gate to 2026-05-03** (Phase 3 + landing V1 + expert portal PDF upload + ARQ→streaq migration all live on prod). Phase 0 complete (93 items, B-001–B-093). Phase 1 complete (44 items, B-094–B-137). Phase 2 complete (44 items, P2-001–P2-044, 33 Must requirements). Phase 2 delivered: RAG (Qdrant dual-collection, Cohere embed-v4 + Rerank 4.0), Docling ingestion, hybrid retrieval (dense+BM25+RRF), citation-grounded coaching, CoVe verification, follow-up chat, Coach Brain foundation (24 seed entries, contextual embedding, cold-start fallback, dual-collection orchestrator), GDPR consent (3-tier UI + withdrawal cascade), DPIA, per-analysis eval scores (RAGAS/HHEM), Langfuse tracing, expert reviewer portal metadata-only (7 FR-EXPV), admin panels (corpus/brain/expert queue). **Phase 3 (LangGraph agent) PULLED FORWARD — ships in this 19-day sprint per STRATEGY.md v3 (2026-04-14), not deferred.** SRS v2.1 (north star — set in stone).
 
 Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`. **Strategy & priorities: `STRATEGY.md`** — L2 beta launch plan, internship timeline, time budgets, stop-loss triggers. Read before suggesting new features or scope changes.
 
@@ -91,7 +91,7 @@ Named specialist agents carry permanent domain knowledge. Main agent auto-delega
 - `spelix-rag-engineer` — Qdrant, Cohere embed/rerank, hybrid retrieval, ingestion
 - `spelix-corpus-curator` — research document ingestion, metadata, citation provenance
 
-**Activate at Phase 3:** `spelix-langgraph-engineer`
+**Activate Day 10 of L2 sprint (2026-04-23):** `spelix-langgraph-engineer` — Phase 3 agent core, distillation StateGraph, CoVe verification, Coach Brain review queue, reasoning sidebar
 **Activate at Phase 4:** `spelix-eval-engineer`
 
 ### Delegation Rules
