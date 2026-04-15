@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.agents.graph import build_deterministic_graph
+from app.agents.graph import build_deterministic_graph, run_coaching_graph
 from app.agents.state import make_initial_state
 from app.schemas.coaching import CoachingOutput
 
@@ -122,7 +122,6 @@ async def test_deterministic_graph_marks_degraded_when_retrieval_returns_empty()
     assert "faithfulness" not in final_state["eval_scores"]
 
 
-from app.agents.graph import run_coaching_graph
 
 
 @pytest.mark.asyncio

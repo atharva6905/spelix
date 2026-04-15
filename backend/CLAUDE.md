@@ -276,6 +276,56 @@ Coverage target: 90% minimum, enforced in CI. Current: **91%** (Phase 1 gate).
 Managed by `uv`, pinned in `requirements.txt` (or `pyproject.toml`). Key packages:
 `fastapi`, `uvicorn`, `sqlalchemy[asyncio]`, `asyncpg`, `alembic`, `streaq`, `redis`, `mediapipe`, `opencv-python-headless`, `instructor`, `anthropic`, `openai`, `weasyprint`, `matplotlib`, `slowapi`, `pydantic>=2.0`, `httpx`, `pytest`, `pytest-asyncio`, `pytest-cov`.
 
+## Phase 3 Agent Architecture (FR-AICP-18/19/20)
+
+The Phase 3 agent lives in `app/agents/`. Two graph modes ship:
+
+- **Deterministic** (default) — `app/agents/graph.py::build_deterministic_graph`. Conditional-edge flow with a fixed tool ordering. Use this on prod until adaptive mode has been smoke-tested on real traffic.
+- **Adaptive** (FR-AICP-19) — `build_adaptive_graph`. Single reasoner node with `ChatAnthropic.bind_tools`; the LLM picks the next tool by docstring.
+
+### Feature flags
+
+| env var | default | meaning |
+|---------|---------|---------|
+| `SPELIX_PHASE3_AGENT_ENABLED` | `0` | When `1`, the worker routes coaching through the agent graph. When `0`, the imperative Phase 2 path runs. |
+| `SPELIX_AGENT_MODE` | `deterministic` | `deterministic` \| `adaptive`. Ignored when `SPELIX_PHASE3_AGENT_ENABLED=0`. |
+| `LANGCHAIN_TRACING_V2` | `false` | When `true` AND `LANGCHAIN_API_KEY` is set, graph runs emit traces to LangSmith. |
+| `LANGCHAIN_API_KEY` | unset | LangSmith API key. |
+| `LANGCHAIN_PROJECT` | `spelix-prod` (recommended) | LangSmith project name shown in the UI. |
+
+### Rollout plan
+
+1. Merge with `SPELIX_PHASE3_AGENT_ENABLED=0` on prod (default) — no behavioral change.
+2. Run E2E smoke test in staging with flag ON, confirm trace in LangSmith, confirm coaching output matches imperative-path shape.
+3. Set `SPELIX_PHASE3_AGENT_ENABLED=1` in prod env on DigitalOcean droplet + Vercel `VITE_*` no-op (frontend is flag-oblivious for Batch 1).
+4. Watch 3 real analyses through prod, compare trace shape vs expected.
+5. Remove the imperative path in a follow-up PR after 7+ days of stable agent traffic.
+
+### Graph flow (deterministic)
+
+`START → get_rep_metrics → retrieve_papers → retrieve_coach_brain → flag_form_deviation → compare_to_user_history → generate_correction_plan → validate_output → cove_verify → safety_filter → faithfulness_gate → END`
+
+Every node emits a `NodeEvent` appended to `state['trace']`, serialized to `coaching_results.agent_trace_json` under the `nodes_executed[]` key. The enriched trace payload shape is:
+
+```json
+{
+  "mode": "deterministic",
+  "nodes_executed": [{"node": "...", "started_at": "...", "duration_ms": 12, "output_keys": ["..."], "error": null}, ...],
+  "eval_scores": {"faithfulness": 0.92, "cove_verified": true, ...},
+  "cove_iterations": [...],
+  "converged": true,
+  "retrieval_source": "coach_brain_primary",
+  "degraded_mode": false
+}
+```
+
+### Gotchas
+
+- Do NOT add `@traceable` decorators to the tools manually. LangGraph's built-in tracing wraps every node automatically when `LANGCHAIN_TRACING_V2=true`.
+- `reasoner_llm` is ONLY required when `mode="adaptive"` — passing it in deterministic mode is a no-op.
+- The `state_box` shared-handle pattern in `build_adaptive_graph` is a concession for StructuredTool closures; it works because the graph is single-threaded. Do NOT run the adaptive graph in a multi-threaded executor.
+- Large trace fields get truncated by `serialize_trace_for_storage` before JSONB write. When adding new fields to the trace, consider whether they should live in the essential-fields whitelist (`node`, `duration_ms`, `error`, `started_at`, `output_keys`).
+
 ## Backend Gotchas
 
 ### Python imports

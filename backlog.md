@@ -377,9 +377,10 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P3-001 | LangGraph StateGraph definition — AgentState with tools: get_rep_metrics, retrieve_papers, retrieve_coach_brain, flag_form_deviation, compare_to_user_history, generate_correction_plan. Conditional edges for deterministic flow initially. | XL | — | FR-AICP-18 | pending |
-| P3-002 | Adaptive agent reasoning — agent reasons based on observations, not fixed script. Tool selection via LLM with descriptive docstrings. | L | P3-001 | FR-AICP-19 | pending |
-| P3-003 | LangSmith tracing integration — full agent reasoning trace logged per analysis | M | P3-001 | FR-AICP-20 | pending |
+| L2-PHASE3-BATCH1 | Phase 3 Batch 1 — LangGraph agent core (FR-AICP-18/19/20) | done at PR merge | XL | 2026-04-15 | — |
+| P3-001 | LangGraph StateGraph definition — AgentState with tools: get_rep_metrics, retrieve_papers, retrieve_coach_brain, flag_form_deviation, compare_to_user_history, generate_correction_plan. Conditional edges for deterministic flow initially. | XL | — | FR-AICP-18 | done — covered by L2-PHASE3-BATCH1 |
+| P3-002 | Adaptive agent reasoning — agent reasons based on observations, not fixed script. Tool selection via LLM with descriptive docstrings. | L | P3-001 | FR-AICP-19 | done — covered by L2-PHASE3-BATCH1 |
+| P3-003 | LangSmith tracing integration — full agent reasoning trace logged per analysis | M | P3-001 | FR-AICP-20 | done — covered by L2-PHASE3-BATCH1 |
 
 ### Batch 2 — Distillation Pipeline
 

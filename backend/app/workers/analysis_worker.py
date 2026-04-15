@@ -95,12 +95,6 @@ async def _run_pipeline(
     except Exception:
         logger.warning("OpenAI client unavailable — GPT-4o fallback disabled")
 
-    # Langfuse client for observability (P2-034, FR-BRAIN-13) — best-effort,
-    # None means Langfuse disabled (missing keys in dev/CI)
-    from app.services.langfuse_client import get_langfuse_client
-
-    langfuse_client = await get_langfuse_client()
-
     try:
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts

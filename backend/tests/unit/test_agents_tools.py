@@ -11,6 +11,7 @@ import pytest
 from app.agents.state import make_initial_state
 from app.agents.tools import (
     compare_to_user_history,
+    flag_form_deviation,
     generate_correction_plan,
     get_rep_metrics,
     retrieve_coach_brain,
@@ -160,7 +161,6 @@ async def test_retrieve_coach_brain_empty_result_cold_start():
     assert update == {"brain_contexts": []}
 
 
-from app.agents.tools import flag_form_deviation
 
 
 class _FakeThresholds:
