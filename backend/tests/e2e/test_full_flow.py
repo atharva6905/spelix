@@ -224,15 +224,15 @@ async def test_worker_full_pipeline_flow():
         "app.workers.analysis_worker.run_cv_pipeline",
         side_effect=mock_cv_pipeline,
     ), patch(
-        "app.workers.analysis_worker.CoachingResultRepository",
+        "app.repositories.coaching_result.CoachingResultRepository",
         return_value=mock_coaching_repo,
     ), patch(
         "app.workers.analysis_worker.RepMetricRepository",
         return_value=mock_rep_repo,
     ), patch(
-        "app.workers.analysis_worker.CoachingService",
+        "app.services.coaching.CoachingService",
     ) as MockCS, patch(
-        "app.workers.analysis_worker.anthropic",
+        "anthropic.AsyncAnthropic",
     ), patch(
         "app.workers.analysis_worker.ThresholdConfig",
     ), patch(

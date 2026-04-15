@@ -119,16 +119,18 @@ def _build_worker_patches(
         "repo": patch("app.workers.analysis_worker.AnalysisRepository", return_value=mock_repo),
         "session": patch("app.workers.analysis_worker.async_session"),
         "cv": patch("app.workers.analysis_worker.run_cv_pipeline", side_effect=mock_cv_pipeline),
+        # CoachingResultRepository / CoachingService / anthropic are now local imports
+        # inside _run_coaching_imperative — patch the source modules instead.
         "coaching_repo": patch(
-            "app.workers.analysis_worker.CoachingResultRepository",
+            "app.repositories.coaching_result.CoachingResultRepository",
             return_value=mock_coaching_repo,
         ),
         "rep_metric_repo": patch(
             "app.workers.analysis_worker.RepMetricRepository",
             return_value=mock_rep_metric_repo,
         ),
-        "coaching_svc": patch("app.workers.analysis_worker.CoachingService"),
-        "anthropic": patch("app.workers.analysis_worker.anthropic"),
+        "coaching_svc": patch("app.services.coaching.CoachingService"),
+        "anthropic": patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
         "threshold": patch("app.workers.analysis_worker.ThresholdConfig"),
         "cleanup": patch("app.workers.analysis_worker.cleanup_temp_files"),
         "summary": patch(

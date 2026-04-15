@@ -16,18 +16,14 @@ import os
 import uuid
 from typing import Any
 
-import anthropic
 
 from app.config import ThresholdConfig
 from app.cv.artifact_generation import (
     cleanup_temp_files,
 )
 from app.db import async_session
-from app.models.coaching_result import CoachingResult
 from app.repositories.analysis import AnalysisRepository
-from app.repositories.coaching_result import CoachingResultRepository
 from app.repositories.rep_metric import RepMetricRepository
-from app.services.coaching import CoachingService
 from app.services.pipeline import QualityGateRejection, run_cv_pipeline
 from app.services.status import transition
 from app.services.summary import SummaryService
@@ -99,12 +95,6 @@ async def _run_pipeline(
     except Exception:
         logger.warning("OpenAI client unavailable — GPT-4o fallback disabled")
 
-    # Langfuse client for observability (P2-034, FR-BRAIN-13) — best-effort,
-    # None means Langfuse disabled (missing keys in dev/CI)
-    from app.services.langfuse_client import get_langfuse_client
-
-    langfuse_client = await get_langfuse_client()
-
     try:
         # ------------------------------------------------------------------ #
         # CV Pipeline (B-022): quality gates → pose → reps → metrics → artifacts
@@ -134,391 +124,9 @@ async def _run_pipeline(
         await repo.update(analysis)
         await _write_heartbeat(redis)
 
-        # ------------------------------------------------------------------ #
-        # GPT-4o keyframe analysis (FR-AICP-02) — best-effort
-        # ------------------------------------------------------------------ #
-        keyframe_analysis_text: str | None = None
-        if pipeline_result.keyframes:
-            try:
-                from app.services.keyframe_analysis import KeyframeAnalysisService
-
-                kf_svc = KeyframeAnalysisService(openai_client)
-
-                # Build rep metrics dicts for keyframe analysis
-                rep_metric_repo_kf = RepMetricRepository(repo.db)
-                db_rep_metrics_kf = await rep_metric_repo_kf.get_by_analysis(analysis_id)
-                rep_metrics_for_kf = [
-                    {"rep_number": rm.rep_index + 1, **(rm.metrics_json or {})}
-                    for rm in db_rep_metrics_kf
-                ]
-
-                kf_result = await kf_svc.analyze_keyframes(
-                    keyframes=pipeline_result.keyframes,
-                    exercise_type=analysis.exercise_type,
-                    exercise_variant=analysis.exercise_variant,
-                    rep_metrics=rep_metrics_for_kf,
-                )
-                # Serialize to text for coaching prompt
-                keyframe_analysis_text = kf_result.model_dump_json(indent=2)
-                logger.info("GPT-4o keyframe analysis completed for %s", analysis_id)
-            except Exception:
-                logger.warning(
-                    "GPT-4o keyframe analysis failed for %s — continuing without",
-                    analysis_id,
-                    exc_info=True,
-                )
-
-        await _write_heartbeat(redis)
-
-        # ------------------------------------------------------------------ #
-        # Body stats (FR-AICP-05) — best-effort
-        # ------------------------------------------------------------------ #
-        body_stats: dict | None = None
-        try:
-            from app.repositories.user_profile import UserProfileRepository
-
-            profile_repo = UserProfileRepository(repo.db)
-            profile = await profile_repo.get_by_user_id(analysis.user_id)
-            if profile:
-                body_stats = {}
-                for attr in ("height_cm", "weight_kg", "age", "experience_level", "arm_span_cm", "femur_length_cm"):
-                    val = getattr(profile, attr, None)
-                    if val is not None:
-                        body_stats[attr] = val
-                if not body_stats:
-                    body_stats = None
-        except Exception:
-            logger.warning(
-                "Failed to fetch user profile for %s — coaching without body stats",
-                analysis_id,
-            )
-
-        # ------------------------------------------------------------------ #
-        # Coaching: Claude Sonnet streaming via CoachingService (Phase 1/2)
-        # ------------------------------------------------------------------ #
-        coaching_repo = CoachingResultRepository(repo.db)
-
-        rep_metric_repo = RepMetricRepository(repo.db)
-        db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
-        rep_metrics_dicts = [
-            {
-                "rep_number": rm.rep_index + 1,
-                **(rm.metrics_json or {}),
-            }
-            for rm in db_rep_metrics
-        ]
-
-        client = anthropic.AsyncAnthropic()
-        coaching_svc = CoachingService(client, langfuse_client=langfuse_client)
-
-        # Open dedicated Redis for pub/sub (not the ARQ ctx["redis"])
-        # Opened early so phase events can be published during retrieval
-        import redis.asyncio as aioredis
-
-        pubsub_redis = aioredis.from_url(
-            os.environ.get("REDIS_URL", "redis://localhost:6379"),
-            decode_responses=True,
+        coaching_output, rep_metrics_dicts, body_stats = await _dispatch_coaching(
+            analysis=analysis, repo=repo, redis=redis, pipeline_result=pipeline_result,
         )
-        try:
-            # -------------------------------------------------------------- #
-            # RAG retrieval — FR-AICP-08 Stage 1 (cite-then-generate)
-            # -------------------------------------------------------------- #
-            import json as _json
-
-            from app.schemas.rag import RetrievedContext
-
-            retrieved_contexts: list[RetrievedContext] | None = None
-            retrieval_source: str | None = None  # P2-026: routing mode
-            degraded_mode = False  # P2-019: tracks Qdrant unavailability
-
-            try:
-                await pubsub_redis.publish(
-                    f"coaching:{analysis_id}",
-                    _json.dumps({"type": "phase", "phase": "retrieving"}),
-                )
-
-                from app.services.cohere_client import get_cohere_client
-                from app.services.dual_collection import DualCollectionOrchestrator
-                from app.services.qdrant import get_qdrant_client
-                from app.services.retrieval import RetrievalService
-                from app.services.retrieval_guard import RetrievalGuard
-                from app.services.sparse_retrieval import SparseRetrievalService
-
-                cohere_client = get_cohere_client()
-                qdrant_wrapper = await get_qdrant_client()
-
-                if qdrant_wrapper is not None:
-                    sparse_svc = SparseRetrievalService(qdrant_wrapper)
-                    retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
-                    orchestrator = DualCollectionOrchestrator(
-                        retrieval_svc, cohere_client, langfuse_client=langfuse_client
-                    )
-
-                    retrieval_query = (
-                        f"{analysis.exercise_type} {analysis.exercise_variant} technique coaching"
-                    )
-                    retrieval_result = await orchestrator.retrieve(
-                        query=retrieval_query,
-                        exercise_type=analysis.exercise_type,
-                    )
-
-                    guard_result = RetrievalGuard.check(retrieval_result.primary)
-                    if guard_result.passed:
-                        retrieved_contexts = retrieval_result.primary
-                        retrieval_source = retrieval_result.retrieval_source
-                        logger.info(
-                            "Retrieval: %d contexts (source=%s) for analysis %s",
-                            len(retrieval_result.primary),
-                            retrieval_source,
-                            analysis_id,
-                        )
-                    else:
-                        logger.warning(
-                            "Retrieval guard failed for %s: %s",
-                            analysis_id, guard_result.reason,
-                        )
-                else:
-                    degraded_mode = True
-                    logger.warning(
-                        "Qdrant unavailable — coaching without RAG contexts for %s "
-                        "(degraded mode).",
-                        analysis_id,
-                    )
-                    if langfuse_client is not None:
-                        try:
-                            langfuse_client.trace(
-                                name="retrieval_degraded",
-                                input={"analysis_id": str(analysis_id), "reason": "qdrant_unavailable"},
-                            )
-                        except Exception:
-                            pass  # observability is best-effort
-                    await pubsub_redis.publish(
-                        f"coaching:{analysis_id}",
-                        _json.dumps({"type": "phase", "phase": "degraded"}),
-                    )
-            except Exception:
-                degraded_mode = True
-                logger.warning(
-                    "Retrieval failed for %s — coaching without contexts (degraded mode).",
-                    analysis_id,
-                    exc_info=True,
-                )
-                if langfuse_client is not None:
-                    try:
-                        langfuse_client.trace(
-                            name="retrieval_degraded",
-                            input={"analysis_id": str(analysis_id), "reason": "retrieval_exception"},
-                        )
-                    except Exception:
-                        pass  # observability is best-effort
-                try:
-                    await pubsub_redis.publish(
-                        f"coaching:{analysis_id}",
-                        _json.dumps({"type": "phase", "phase": "degraded"}),
-                    )
-                except Exception:
-                    pass  # pub/sub best-effort
-
-            await _write_heartbeat(redis)
-
-            # -------------------------------------------------------------- #
-            # Generate coaching with retrieved contexts
-            # -------------------------------------------------------------- #
-            coaching_output = await coaching_svc.generate_coaching_streaming(
-                exercise_type=analysis.exercise_type,
-                exercise_variant=analysis.exercise_variant,
-                rep_metrics=rep_metrics_dicts,
-                confidence_score=analysis.confidence_score or 0.0,
-                thresholds=thresholds,
-                body_stats=body_stats,
-                keyframe_analysis_text=keyframe_analysis_text,
-                retrieved_contexts=retrieved_contexts,
-                retrieval_source=retrieval_source,
-                analysis_id=analysis_id,
-                pubsub_redis=pubsub_redis,
-            )
-
-            # P2-019: stamp degraded_mode on coaching output if Qdrant was unavailable
-            if degraded_mode:
-                coaching_output = coaching_output.model_copy(
-                    update={"degraded_mode": True}
-                )
-
-            await _write_heartbeat(redis)
-
-            # -------------------------------------------------------------- #
-            # P2-017: Citation cross-reference validation (FR-AICP-10)
-            # -------------------------------------------------------------- #
-            if retrieved_contexts:
-                try:
-                    from app.services.coaching import build_citation_blocks
-                    from app.services.validate_output import ValidateOutputTool
-
-                    citation_blocks = build_citation_blocks(retrieved_contexts)
-                    validation_result = ValidateOutputTool.validate(
-                        coaching_output, citation_blocks
-                    )
-                    coaching_output = validation_result.output
-                    if validation_result.has_invalid_citations:
-                        logger.warning(
-                            "ValidateOutputTool: invalid citation indices %s for analysis %s"
-                            " — CoVe will attempt revision",
-                            validation_result.invalid_indices,
-                            analysis_id,
-                        )
-                except Exception:
-                    logger.warning(
-                        "Citation validation failed for %s — continuing",
-                        analysis_id,
-                        exc_info=True,
-                    )
-
-            await _write_heartbeat(redis)
-
-            # -------------------------------------------------------------- #
-            # CoVe verification — FR-AICP-08 Stage 2 (best-effort)
-            # -------------------------------------------------------------- #
-            cove_verified = False
-            agent_trace: dict | None = None
-
-            if retrieved_contexts:
-                try:
-                    await pubsub_redis.publish(
-                        f"coaching:{analysis_id}",
-                        _json.dumps({"type": "phase", "phase": "verifying"}),
-                    )
-
-                    from app.services.cove import CoveVerificationService
-
-                    cove_svc = CoveVerificationService(client)
-                    cove_result = await cove_svc.verify(
-                        initial_output=coaching_output,
-                        retrieved_contexts=retrieved_contexts,
-                        max_iterations=2,
-                    )
-                    coaching_output = cove_result.output
-                    cove_verified = cove_result.cove_verified
-                    agent_trace = {
-                        "cove_iterations": cove_result.trace,
-                        "converged": cove_result.cove_verified,
-                    }
-                    logger.info(
-                        "CoVe: verified=%s iterations=%d for analysis %s",
-                        cove_verified, cove_result.iterations_run, analysis_id,
-                    )
-                except Exception:
-                    logger.warning(
-                        "CoVe failed for %s — continuing with unverified output",
-                        analysis_id,
-                        exc_info=True,
-                    )
-
-            await _write_heartbeat(redis)
-
-            # -------------------------------------------------------------- #
-            # P2-018: Safety language post-filter (FR-AICP-14)
-            # Runs on ALL coaching outputs (RAG-grounded or not)
-            # -------------------------------------------------------------- #
-            try:
-                from app.services.safety_filter import SafetyFilter
-
-                sf_result = SafetyFilter.apply(coaching_output)
-                coaching_output = sf_result.output
-                if sf_result.injected_disclaimer or sf_result.phrases_replaced > 0:
-                    logger.info(
-                        "SafetyFilter: injected_disclaimer=%s phrases_replaced=%d for %s",
-                        sf_result.injected_disclaimer,
-                        sf_result.phrases_replaced,
-                        analysis_id,
-                    )
-            except Exception:
-                logger.warning(
-                    "SafetyFilter failed for %s — continuing",
-                    analysis_id,
-                    exc_info=True,
-                )
-
-            await _write_heartbeat(redis)
-
-            # -------------------------------------------------------------- #
-            # Faithfulness gate — FR-AICP-08 Stage 3 (best-effort)
-            # -------------------------------------------------------------- #
-            if retrieved_contexts:
-                try:
-                    from app.services.faithfulness_gate import FaithfulnessGateService
-
-                    fg_svc = FaithfulnessGateService(client)
-                    fg_result = await fg_svc.evaluate(coaching_output, retrieved_contexts)
-
-                    # P2-033 (FR-AICP-16): standardised eval_scores including CoVe fields.
-                    # cove_verified and agent_trace are set in scope above (line ~377).
-                    analysis.eval_scores = {
-                        "faithfulness": fg_result.score,
-                        "faithfulness_passed": fg_result.passed,
-                        "unsupported_claims": fg_result.unsupported_claims,
-                        "evaluator": "claude-sonnet-4-6-llm-judge",
-                        "threshold": 0.8,
-                        "cove_verified": cove_verified,
-                        "cove_iterations": (
-                            len(agent_trace.get("cove_iterations", []))
-                            if agent_trace
-                            else 0
-                        ),
-                    }
-
-                    if not fg_result.passed:
-                        logger.warning(
-                            "Faithfulness gate FAILED for %s: score=%.2f — flagging",
-                            analysis_id, fg_result.score,
-                        )
-                        analysis.flagged_for_review = True
-
-                    await repo.update(analysis)
-
-                    # P2-034 (FR-BRAIN-13): log eval scores to Langfuse (best-effort)
-                    if langfuse_client is not None:
-                        try:
-                            langfuse_client.score(
-                                trace_id=str(analysis_id),
-                                name="faithfulness",
-                                value=fg_result.score,
-                            )
-                            langfuse_client.score(
-                                trace_id=str(analysis_id),
-                                name="cove_verified",
-                                value=1.0 if cove_verified else 0.0,
-                            )
-                        except Exception:
-                            pass  # observability is best-effort
-                except Exception:
-                    logger.warning(
-                        "Faithfulness gate failed for %s — continuing",
-                        analysis_id,
-                        exc_info=True,
-                    )
-
-            await _write_heartbeat(redis)
-
-        finally:
-            await pubsub_redis.aclose()
-
-        # Store coaching result in DB
-        coaching_result = CoachingResult(
-            analysis_id=analysis_id,
-            structured_output_json=coaching_output.model_dump(),
-            stream_complete=True,
-            cove_verified=cove_verified,
-            retrieved_sources_json=(
-                {
-                    "contexts": [ctx.model_dump() for ctx in retrieved_contexts],
-                    "retrieval_source": retrieval_source,
-                }
-                if retrieved_contexts
-                else None
-            ),
-            agent_trace_json=agent_trace,
-        )
-        await coaching_repo.create(coaching_result)
 
         await _write_heartbeat(redis)
 
@@ -556,6 +164,679 @@ async def _run_pipeline(
         # quality_gate_rejected inside run_cv_pipeline
         logger.info(
             "Analysis %s rejected by quality gates", analysis_id,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Coaching dispatch — feature-flag router (Task 15, FR-AICP-18/19/20)
+# ---------------------------------------------------------------------------
+
+
+async def _run_coaching_imperative(
+    *,
+    analysis: Any,
+    repo: AnalysisRepository,
+    redis: Any,
+    pipeline_result: Any,
+) -> tuple[Any, list[dict], dict | None]:
+    """Original Phase 2 coaching orchestration (imperative).
+
+    Moved verbatim from inline in _run_pipeline. Kept as a fallback for
+    SPELIX_PHASE3_AGENT_ENABLED=0. Remove once agent traffic is stable
+    for 7+ days on prod.
+
+    Returns (coaching_output, rep_metrics_dicts, body_stats) so the caller
+    can forward them to _generate_and_upload_pdf.
+    """
+    import anthropic
+    import redis.asyncio as aioredis
+    import json as _json
+
+    from app.models.coaching_result import CoachingResult
+    from app.repositories.coaching_result import CoachingResultRepository
+    from app.schemas.rag import RetrievedContext
+    from app.services.coaching import CoachingService
+    from app.services.langfuse_client import get_langfuse_client
+
+    analysis_id = analysis.id
+    thresholds = ThresholdConfig()
+
+    # OpenAI client for GPT-4o keyframe analysis — best-effort
+    openai_client = None
+    try:
+        import openai as openai_mod
+
+        openai_client = openai_mod.AsyncOpenAI()
+    except Exception:
+        pass
+
+    langfuse_client = await get_langfuse_client()
+
+    # ------------------------------------------------------------------ #
+    # GPT-4o keyframe analysis (FR-AICP-02) — best-effort
+    # ------------------------------------------------------------------ #
+    keyframe_analysis_text: str | None = None
+    if pipeline_result.keyframes:
+        try:
+            from app.services.keyframe_analysis import KeyframeAnalysisService
+
+            kf_svc = KeyframeAnalysisService(openai_client)
+
+            # Build rep metrics dicts for keyframe analysis
+            rep_metric_repo_kf = RepMetricRepository(repo.db)
+            db_rep_metrics_kf = await rep_metric_repo_kf.get_by_analysis(analysis_id)
+            rep_metrics_for_kf = [
+                {"rep_number": rm.rep_index + 1, **(rm.metrics_json or {})}
+                for rm in db_rep_metrics_kf
+            ]
+
+            kf_result = await kf_svc.analyze_keyframes(
+                keyframes=pipeline_result.keyframes,
+                exercise_type=analysis.exercise_type,
+                exercise_variant=analysis.exercise_variant,
+                rep_metrics=rep_metrics_for_kf,
+            )
+            # Serialize to text for coaching prompt
+            keyframe_analysis_text = kf_result.model_dump_json(indent=2)
+            logger.info("GPT-4o keyframe analysis completed for %s", analysis_id)
+        except Exception:
+            logger.warning(
+                "GPT-4o keyframe analysis failed for %s — continuing without",
+                analysis_id,
+                exc_info=True,
+            )
+
+    await _write_heartbeat(redis)
+
+    # ------------------------------------------------------------------ #
+    # Body stats (FR-AICP-05) — best-effort
+    # ------------------------------------------------------------------ #
+    body_stats: dict | None = None
+    try:
+        from app.repositories.user_profile import UserProfileRepository
+
+        profile_repo = UserProfileRepository(repo.db)
+        profile = await profile_repo.get_by_user_id(analysis.user_id)
+        if profile:
+            body_stats = {}
+            for attr in (
+                "height_cm",
+                "weight_kg",
+                "age",
+                "experience_level",
+                "arm_span_cm",
+                "femur_length_cm",
+            ):
+                val = getattr(profile, attr, None)
+                if val is not None:
+                    body_stats[attr] = val
+            if not body_stats:
+                body_stats = None
+    except Exception:
+        logger.warning(
+            "Failed to fetch user profile for %s — coaching without body stats",
+            analysis_id,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Coaching: Claude Sonnet streaming via CoachingService (Phase 1/2)
+    # ------------------------------------------------------------------ #
+    coaching_repo = CoachingResultRepository(repo.db)
+
+    rep_metric_repo = RepMetricRepository(repo.db)
+    db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
+    rep_metrics_dicts = [
+        {
+            "rep_number": rm.rep_index + 1,
+            **(rm.metrics_json or {}),
+        }
+        for rm in db_rep_metrics
+    ]
+
+    client = anthropic.AsyncAnthropic()
+    coaching_svc = CoachingService(client, langfuse_client=langfuse_client)
+
+    # Open dedicated Redis for pub/sub (not the ARQ ctx["redis"])
+    # Opened early so phase events can be published during retrieval
+    pubsub_redis = aioredis.from_url(
+        os.environ.get("REDIS_URL", "redis://localhost:6379"),
+        decode_responses=True,
+    )
+    try:
+        # -------------------------------------------------------------- #
+        # RAG retrieval — FR-AICP-08 Stage 1 (cite-then-generate)
+        # -------------------------------------------------------------- #
+        retrieved_contexts: list[RetrievedContext] | None = None
+        retrieval_source: str | None = None  # P2-026: routing mode
+        degraded_mode = False  # P2-019: tracks Qdrant unavailability
+
+        try:
+            await pubsub_redis.publish(
+                f"coaching:{analysis_id}",
+                _json.dumps({"type": "phase", "phase": "retrieving"}),
+            )
+
+            from app.services.cohere_client import get_cohere_client
+            from app.services.dual_collection import DualCollectionOrchestrator
+            from app.services.qdrant import get_qdrant_client
+            from app.services.retrieval import RetrievalService
+            from app.services.retrieval_guard import RetrievalGuard
+            from app.services.sparse_retrieval import SparseRetrievalService
+
+            cohere_client = get_cohere_client()
+            qdrant_wrapper = await get_qdrant_client()
+
+            if qdrant_wrapper is not None:
+                sparse_svc = SparseRetrievalService(qdrant_wrapper)
+                retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
+                orchestrator = DualCollectionOrchestrator(
+                    retrieval_svc, cohere_client, langfuse_client=langfuse_client
+                )
+
+                retrieval_query = (
+                    f"{analysis.exercise_type} {analysis.exercise_variant} technique coaching"
+                )
+                retrieval_result = await orchestrator.retrieve(
+                    query=retrieval_query,
+                    exercise_type=analysis.exercise_type,
+                )
+
+                guard_result = RetrievalGuard.check(retrieval_result.primary)
+                if guard_result.passed:
+                    retrieved_contexts = retrieval_result.primary
+                    retrieval_source = retrieval_result.retrieval_source
+                    logger.info(
+                        "Retrieval: %d contexts (source=%s) for analysis %s",
+                        len(retrieval_result.primary),
+                        retrieval_source,
+                        analysis_id,
+                    )
+                else:
+                    logger.warning(
+                        "Retrieval guard failed for %s: %s",
+                        analysis_id,
+                        guard_result.reason,
+                    )
+            else:
+                degraded_mode = True
+                logger.warning(
+                    "Qdrant unavailable — coaching without RAG contexts for %s "
+                    "(degraded mode).",
+                    analysis_id,
+                )
+                if langfuse_client is not None:
+                    try:
+                        langfuse_client.trace(
+                            name="retrieval_degraded",
+                            input={
+                                "analysis_id": str(analysis_id),
+                                "reason": "qdrant_unavailable",
+                            },
+                        )
+                    except Exception:
+                        pass  # observability is best-effort
+                await pubsub_redis.publish(
+                    f"coaching:{analysis_id}",
+                    _json.dumps({"type": "phase", "phase": "degraded"}),
+                )
+        except Exception:
+            degraded_mode = True
+            logger.warning(
+                "Retrieval failed for %s — coaching without contexts (degraded mode).",
+                analysis_id,
+                exc_info=True,
+            )
+            if langfuse_client is not None:
+                try:
+                    langfuse_client.trace(
+                        name="retrieval_degraded",
+                        input={
+                            "analysis_id": str(analysis_id),
+                            "reason": "retrieval_exception",
+                        },
+                    )
+                except Exception:
+                    pass  # observability is best-effort
+            try:
+                await pubsub_redis.publish(
+                    f"coaching:{analysis_id}",
+                    _json.dumps({"type": "phase", "phase": "degraded"}),
+                )
+            except Exception:
+                pass  # pub/sub best-effort
+
+        await _write_heartbeat(redis)
+
+        # -------------------------------------------------------------- #
+        # Generate coaching with retrieved contexts
+        # -------------------------------------------------------------- #
+        coaching_output = await coaching_svc.generate_coaching_streaming(
+            exercise_type=analysis.exercise_type,
+            exercise_variant=analysis.exercise_variant,
+            rep_metrics=rep_metrics_dicts,
+            confidence_score=analysis.confidence_score or 0.0,
+            thresholds=thresholds,
+            body_stats=body_stats,
+            keyframe_analysis_text=keyframe_analysis_text,
+            retrieved_contexts=retrieved_contexts,
+            retrieval_source=retrieval_source,
+            analysis_id=analysis_id,
+            pubsub_redis=pubsub_redis,
+        )
+
+        # P2-019: stamp degraded_mode on coaching output if Qdrant was unavailable
+        if degraded_mode:
+            coaching_output = coaching_output.model_copy(update={"degraded_mode": True})
+
+        await _write_heartbeat(redis)
+
+        # -------------------------------------------------------------- #
+        # P2-017: Citation cross-reference validation (FR-AICP-10)
+        # -------------------------------------------------------------- #
+        if retrieved_contexts:
+            try:
+                from app.services.coaching import build_citation_blocks
+                from app.services.validate_output import ValidateOutputTool
+
+                citation_blocks = build_citation_blocks(retrieved_contexts)
+                validation_result = ValidateOutputTool.validate(coaching_output, citation_blocks)
+                coaching_output = validation_result.output
+                if validation_result.has_invalid_citations:
+                    logger.warning(
+                        "ValidateOutputTool: invalid citation indices %s for analysis %s"
+                        " — CoVe will attempt revision",
+                        validation_result.invalid_indices,
+                        analysis_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "Citation validation failed for %s — continuing",
+                    analysis_id,
+                    exc_info=True,
+                )
+
+        await _write_heartbeat(redis)
+
+        # -------------------------------------------------------------- #
+        # CoVe verification — FR-AICP-08 Stage 2 (best-effort)
+        # -------------------------------------------------------------- #
+        cove_verified = False
+        agent_trace: dict | None = None
+
+        if retrieved_contexts:
+            try:
+                await pubsub_redis.publish(
+                    f"coaching:{analysis_id}",
+                    _json.dumps({"type": "phase", "phase": "verifying"}),
+                )
+
+                from app.services.cove import CoveVerificationService
+
+                cove_svc = CoveVerificationService(client)
+                cove_result = await cove_svc.verify(
+                    initial_output=coaching_output,
+                    retrieved_contexts=retrieved_contexts,
+                    max_iterations=2,
+                )
+                coaching_output = cove_result.output
+                cove_verified = cove_result.cove_verified
+                agent_trace = {
+                    "cove_iterations": cove_result.trace,
+                    "converged": cove_result.cove_verified,
+                }
+                logger.info(
+                    "CoVe: verified=%s iterations=%d for analysis %s",
+                    cove_verified,
+                    cove_result.iterations_run,
+                    analysis_id,
+                )
+            except Exception:
+                logger.warning(
+                    "CoVe failed for %s — continuing with unverified output",
+                    analysis_id,
+                    exc_info=True,
+                )
+
+        await _write_heartbeat(redis)
+
+        # -------------------------------------------------------------- #
+        # P2-018: Safety language post-filter (FR-AICP-14)
+        # Runs on ALL coaching outputs (RAG-grounded or not)
+        # -------------------------------------------------------------- #
+        try:
+            from app.services.safety_filter import SafetyFilter
+
+            sf_result = SafetyFilter.apply(coaching_output)
+            coaching_output = sf_result.output
+            if sf_result.injected_disclaimer or sf_result.phrases_replaced > 0:
+                logger.info(
+                    "SafetyFilter: injected_disclaimer=%s phrases_replaced=%d for %s",
+                    sf_result.injected_disclaimer,
+                    sf_result.phrases_replaced,
+                    analysis_id,
+                )
+        except Exception:
+            logger.warning(
+                "SafetyFilter failed for %s — continuing",
+                analysis_id,
+                exc_info=True,
+            )
+
+        await _write_heartbeat(redis)
+
+        # -------------------------------------------------------------- #
+        # Faithfulness gate — FR-AICP-08 Stage 3 (best-effort)
+        # -------------------------------------------------------------- #
+        if retrieved_contexts:
+            try:
+                from app.services.faithfulness_gate import FaithfulnessGateService
+
+                fg_svc = FaithfulnessGateService(client)
+                fg_result = await fg_svc.evaluate(coaching_output, retrieved_contexts)
+
+                # P2-033 (FR-AICP-16): standardised eval_scores including CoVe fields.
+                # cove_verified and agent_trace are set in scope above.
+                analysis.eval_scores = {
+                    "faithfulness": fg_result.score,
+                    "faithfulness_passed": fg_result.passed,
+                    "unsupported_claims": fg_result.unsupported_claims,
+                    "evaluator": "claude-sonnet-4-6-llm-judge",
+                    "threshold": 0.8,
+                    "cove_verified": cove_verified,
+                    "cove_iterations": (
+                        len(agent_trace.get("cove_iterations", [])) if agent_trace else 0
+                    ),
+                }
+
+                if not fg_result.passed:
+                    logger.warning(
+                        "Faithfulness gate FAILED for %s: score=%.2f — flagging",
+                        analysis_id,
+                        fg_result.score,
+                    )
+                    analysis.flagged_for_review = True
+
+                await repo.update(analysis)
+
+                # P2-034 (FR-BRAIN-13): log eval scores to Langfuse (best-effort)
+                if langfuse_client is not None:
+                    try:
+                        langfuse_client.score(
+                            trace_id=str(analysis_id),
+                            name="faithfulness",
+                            value=fg_result.score,
+                        )
+                        langfuse_client.score(
+                            trace_id=str(analysis_id),
+                            name="cove_verified",
+                            value=1.0 if cove_verified else 0.0,
+                        )
+                    except Exception:
+                        pass  # observability is best-effort
+            except Exception:
+                logger.warning(
+                    "Faithfulness gate failed for %s — continuing",
+                    analysis_id,
+                    exc_info=True,
+                )
+
+        await _write_heartbeat(redis)
+
+    finally:
+        await pubsub_redis.aclose()
+
+    # Store coaching result in DB
+    coaching_result = CoachingResult(
+        analysis_id=analysis_id,
+        structured_output_json=coaching_output.model_dump(),
+        stream_complete=True,
+        cove_verified=cove_verified,
+        retrieved_sources_json=(
+            {
+                "contexts": [ctx.model_dump() for ctx in retrieved_contexts],
+                "retrieval_source": retrieval_source,
+            }
+            if retrieved_contexts
+            else None
+        ),
+        agent_trace_json=agent_trace,
+    )
+    await coaching_repo.create(coaching_result)
+
+    return coaching_output, rep_metrics_dicts, body_stats
+
+
+async def _run_coaching_graph(
+    *,
+    analysis: Any,
+    repo: AnalysisRepository,
+    redis: Any,
+    pipeline_result: Any,
+) -> tuple[Any, list[dict], dict | None]:
+    """Phase 3 coaching via LangGraph agent (FR-AICP-18/19/20).
+
+    Returns (coaching_output, rep_metrics_dicts, body_stats) so the caller
+    can forward them to _generate_and_upload_pdf.
+    """
+    import anthropic
+    import redis.asyncio as aioredis
+
+    from app.agents.graph import run_coaching_graph
+    from app.config import ThresholdConfig as _ThresholdConfig
+    from app.models.coaching_result import CoachingResult
+    from app.repositories.coaching_result import CoachingResultRepository
+    from app.repositories.rep_metric import RepMetricRepository as _RepMetricRepo
+    from app.repositories.user_profile import UserProfileRepository
+    from app.services.coaching import CoachingService
+    from app.services.cohere_client import get_cohere_client
+    from app.services.cove import CoveVerificationService
+    from app.services.faithfulness_gate import FaithfulnessGateService
+    from app.services.langfuse_client import get_langfuse_client
+    from app.services.qdrant import get_qdrant_client
+    from app.services.retrieval import RetrievalService
+    from app.services.sparse_retrieval import SparseRetrievalService
+
+    analysis_id = analysis.id
+    mode = os.environ.get("SPELIX_AGENT_MODE", "deterministic")
+
+    thresholds = _ThresholdConfig()
+
+    # Fetch body stats (same logic as imperative path).
+    profile_repo = UserProfileRepository(repo.db)
+    profile = await profile_repo.get_by_user_id(analysis.user_id)
+    body_stats: dict | None = None
+    if profile:
+        body_stats = {}
+        for attr in (
+            "height_cm",
+            "weight_kg",
+            "age",
+            "experience_level",
+            "arm_span_cm",
+            "femur_length_cm",
+        ):
+            val = getattr(profile, attr, None)
+            if val is not None:
+                body_stats[attr] = val
+        body_stats = body_stats or None
+
+    # Keyframe analysis — best-effort
+    keyframe_analysis_text: str | None = None
+    if pipeline_result.keyframes:
+        try:
+            from app.services.keyframe_analysis import KeyframeAnalysisService
+
+            openai_client = None
+            try:
+                import openai as _openai
+
+                openai_client = _openai.AsyncOpenAI()
+            except Exception:
+                pass
+
+            kf_svc = KeyframeAnalysisService(openai_client)
+            rep_metric_repo_kf = _RepMetricRepo(repo.db)
+            db_rep_metrics_kf = await rep_metric_repo_kf.get_by_analysis(analysis_id)
+            rep_metrics_for_kf = [
+                {"rep_number": rm.rep_index + 1, **(rm.metrics_json or {})}
+                for rm in db_rep_metrics_kf
+            ]
+            kf_result = await kf_svc.analyze_keyframes(
+                keyframes=pipeline_result.keyframes,
+                exercise_type=analysis.exercise_type,
+                exercise_variant=analysis.exercise_variant,
+                rep_metrics=rep_metrics_for_kf,
+            )
+            keyframe_analysis_text = kf_result.model_dump_json(indent=2)
+        except Exception:
+            logger.warning(
+                "Graph path: keyframe analysis failed for %s — continuing",
+                analysis_id,
+                exc_info=True,
+            )
+
+    # Build rep_metrics_dicts for PDF (same shape as imperative path).
+    rep_metric_repo = _RepMetricRepo(repo.db)
+    db_rep_metrics = await rep_metric_repo.get_by_analysis(analysis_id)
+    rep_metrics_dicts = [
+        {"rep_number": rm.rep_index + 1, **(rm.metrics_json or {})}
+        for rm in db_rep_metrics
+    ]
+
+    # Build dependencies.
+    langfuse_client = await get_langfuse_client()
+    cohere_client = get_cohere_client()
+    qdrant_wrapper = await get_qdrant_client()
+
+    if qdrant_wrapper is not None:
+        sparse_svc = SparseRetrievalService(qdrant_wrapper)
+        retrieval_svc = RetrievalService(cohere_client, qdrant_wrapper, sparse_svc)
+    else:
+        logger.warning(
+            "Graph path: Qdrant unavailable for %s — degraded mode", analysis_id,
+        )
+
+        class _NullRetrieval:
+            async def hybrid_search(self, *_a, **_kw):
+                return []
+
+        retrieval_svc = _NullRetrieval()  # type: ignore[assignment]
+
+    anthropic_client = anthropic.AsyncAnthropic()
+    coaching_svc = CoachingService(anthropic_client, langfuse_client=langfuse_client)
+    cove_svc = CoveVerificationService(anthropic_client)
+    fg_svc = FaithfulnessGateService(anthropic_client)
+
+    pubsub_redis = aioredis.from_url(
+        os.environ.get("REDIS_URL", "redis://localhost:6379"),
+        decode_responses=True,
+    )
+
+    reasoner_llm = None
+    if mode == "adaptive":
+        from langchain_anthropic import ChatAnthropic
+
+        reasoner_llm = ChatAnthropic(
+            model_name="claude-sonnet-4-6",
+            temperature=0.0,
+            max_tokens_to_sample=2048,
+            timeout=60.0,
+            stop=None,
+        )
+
+    try:
+        final_state, trace_payload, coaching_output = await run_coaching_graph(
+            analysis_id=analysis_id,
+            user_id=analysis.user_id,
+            exercise_type=analysis.exercise_type,
+            exercise_variant=analysis.exercise_variant,
+            confidence_score=analysis.confidence_score or 0.0,
+            body_stats=body_stats,
+            keyframe_analysis_text=keyframe_analysis_text,
+            mode=mode,
+            rep_metric_repo=rep_metric_repo,
+            retrieval_svc=retrieval_svc,
+            thresholds=thresholds,
+            analysis_repo=repo,
+            coaching_svc=coaching_svc,
+            cove_svc=cove_svc,
+            fg_svc=fg_svc,
+            pubsub_redis=pubsub_redis,
+            reasoner_llm=reasoner_llm,
+        )
+    finally:
+        await pubsub_redis.aclose()
+
+    if coaching_output is None:
+        raise RuntimeError(
+            f"graph completed without coaching_output for analysis {analysis_id}"
+        )
+
+    # Persist outputs — same shape as imperative path.
+    coaching_repo = CoachingResultRepository(repo.db)
+    coaching_result = CoachingResult(
+        analysis_id=analysis_id,
+        structured_output_json=coaching_output.model_dump(),
+        stream_complete=True,
+        cove_verified=bool(final_state.get("cove_verified")),
+        retrieved_sources_json=(
+            {
+                "contexts": [
+                    ctx.model_dump()
+                    for ctx in (final_state.get("papers_contexts") or [])
+                    + (final_state.get("brain_contexts") or [])
+                    if hasattr(ctx, "model_dump")
+                ],
+                "retrieval_source": final_state.get("retrieval_source"),
+            }
+            if (
+                final_state.get("papers_contexts") or final_state.get("brain_contexts")
+            )
+            else None
+        ),
+        agent_trace_json=trace_payload,
+    )
+    await coaching_repo.create(coaching_result)
+
+    # Persist eval_scores + flagged_for_review to analyses row.
+    eval_scores = final_state.get("eval_scores") or {}
+    if eval_scores:
+        analysis.eval_scores = eval_scores
+        if eval_scores.get("faithfulness_passed") is False:
+            analysis.flagged_for_review = True
+        await repo.update(analysis)
+
+    return coaching_output, rep_metrics_dicts, body_stats
+
+
+async def _dispatch_coaching(
+    *,
+    analysis: Any,
+    repo: Any,
+    redis: Any,
+    pipeline_result: Any,
+) -> tuple[Any, list[dict], dict | None]:
+    """Route coaching to graph or imperative path based on env flag.
+
+    Returns (coaching_output, rep_metrics_dicts, body_stats) for the PDF step.
+    """
+    if os.environ.get("SPELIX_PHASE3_AGENT_ENABLED", "0").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return await _run_coaching_graph(
+            analysis=analysis,
+            repo=repo,
+            redis=redis,
+            pipeline_result=pipeline_result,
+        )
+    else:
+        return await _run_coaching_imperative(
+            analysis=analysis,
+            repo=repo,
+            redis=redis,
+            pipeline_result=pipeline_result,
         )
 
 
