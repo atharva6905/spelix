@@ -286,3 +286,60 @@ async def compare_to_user_history(
     parts.append(f"trend: {trend}")
 
     return {"user_history_summary": "; ".join(parts)}
+
+
+async def generate_correction_plan(
+    state: AgentState,
+    *,
+    coaching_svc: Any,
+    thresholds: Any,
+    pubsub_redis: Any,
+) -> dict[str, Any]:
+    """Generate the initial structured coaching output via Claude Sonnet.
+
+    Calls ``CoachingService.generate_coaching_streaming`` with every piece
+    of context available in ``state`` — rep metrics, flagged deviations
+    (via the user prompt), retrieved research and Coach Brain contexts,
+    body stats, keyframe analysis, user history summary. Coach Brain
+    contexts are ordered first when ``retrieval_source`` indicates
+    ``coach_brain_primary``; otherwise papers-first.
+
+    Streams text chunks to ``coaching:{analysis_id}`` via ``pubsub_redis``
+    for the SSE endpoint (FR-AICP-07). When ``state['degraded_mode']`` is
+    True, stamps that flag onto the returned CoachingOutput so the
+    frontend can show the degraded-mode banner (FR-AICP-15). Returns the
+    fully validated CoachingOutput on ``state['coaching_output']``.
+    """
+    # Merge papers + brain contexts with primary source first (matches
+    # Phase 2 behavior from DualCollectionOrchestrator).
+    papers = state.get("papers_contexts") or []
+    brain = state.get("brain_contexts") or []
+    retrieval_source = state.get("retrieval_source")
+
+    if retrieval_source == "coach_brain_primary":
+        merged = list(brain) + list(papers)
+    else:
+        merged = list(papers) + list(brain)
+
+    contexts = merged or None  # None preserves Phase 0/1 prompt shape if empty
+
+    coaching_output = await coaching_svc.generate_coaching_streaming(
+        exercise_type=state["exercise_type"],
+        exercise_variant=state["exercise_variant"],
+        rep_metrics=state["rep_metrics"],
+        confidence_score=state["confidence_score"],
+        thresholds=thresholds,
+        body_stats=state.get("body_stats"),
+        keyframe_analysis_text=state.get("keyframe_analysis_text"),
+        retrieved_contexts=contexts,
+        retrieval_source=retrieval_source,
+        analysis_id=state["analysis_id"],
+        pubsub_redis=pubsub_redis,
+    )
+
+    if state.get("degraded_mode"):
+        coaching_output = coaching_output.model_copy(
+            update={"degraded_mode": True}
+        )
+
+    return {"coaching_output": coaching_output}

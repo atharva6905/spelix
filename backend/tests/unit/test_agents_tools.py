@@ -11,10 +11,12 @@ import pytest
 from app.agents.state import make_initial_state
 from app.agents.tools import (
     compare_to_user_history,
+    generate_correction_plan,
     get_rep_metrics,
     retrieve_coach_brain,
     retrieve_papers,
 )
+from app.schemas.coaching import CoachingOutput
 
 
 @pytest.mark.asyncio
@@ -275,3 +277,93 @@ async def test_compare_to_user_history_no_history():
     update = await compare_to_user_history(state, analysis_repo=analysis_repo, limit=5)
 
     assert update == {"user_history_summary": None}
+
+
+@pytest.mark.asyncio
+async def test_generate_correction_plan_invokes_streaming_with_state():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        body_stats={"height_cm": 180},
+        keyframe_analysis_text="keyframe notes",
+    )
+    state["rep_metrics"] = [{"rep_number": 1, "depth_angle": 92}]
+    papers_ctx = SimpleNamespace(collection="papers_rag")
+    brain_ctx = SimpleNamespace(collection="coach_brain")
+    state["papers_contexts"] = [papers_ctx]
+    state["brain_contexts"] = [brain_ctx]
+    state["retrieval_source"] = "coach_brain_primary"
+
+    expected = CoachingOutput(
+        summary="ok summary here.",
+        strengths=["good"],
+        correction_plan=["cue one"],
+        disclaimer=(
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+        raw_prompt_tokens=1,
+        raw_completion_tokens=1,
+    )
+
+    coaching_svc = SimpleNamespace(
+        generate_coaching_streaming=AsyncMock(return_value=expected)
+    )
+
+    thresholds = SimpleNamespace()  # not used in this path — CoachingService owns
+    pubsub_redis = SimpleNamespace()
+
+    update = await generate_correction_plan(
+        state,
+        coaching_svc=coaching_svc,
+        thresholds=thresholds,
+        pubsub_redis=pubsub_redis,
+    )
+
+    assert update["coaching_output"] is expected
+    call_kwargs = coaching_svc.generate_coaching_streaming.await_args.kwargs
+    # Contexts are merged (primary first per routing).
+    assert call_kwargs["retrieved_contexts"] == [brain_ctx, papers_ctx]
+    assert call_kwargs["retrieval_source"] == "coach_brain_primary"
+    assert call_kwargs["exercise_type"] == "squat"
+    assert call_kwargs["analysis_id"] == state["analysis_id"]
+    assert call_kwargs["pubsub_redis"] is pubsub_redis
+
+
+@pytest.mark.asyncio
+async def test_generate_correction_plan_stamps_degraded_mode_flag():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+    state["degraded_mode"] = True
+
+    expected = CoachingOutput(
+        summary="s.",
+        strengths=["g"],
+        correction_plan=["c"],
+        disclaimer=(
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+        raw_prompt_tokens=1,
+        raw_completion_tokens=1,
+    )
+    coaching_svc = SimpleNamespace(
+        generate_coaching_streaming=AsyncMock(return_value=expected)
+    )
+
+    update = await generate_correction_plan(
+        state,
+        coaching_svc=coaching_svc,
+        thresholds=SimpleNamespace(),
+        pubsub_redis=SimpleNamespace(),
+    )
+
+    assert update["coaching_output"].degraded_mode is True
