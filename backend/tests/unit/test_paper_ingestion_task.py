@@ -52,8 +52,13 @@ async def test_ingest_paper_not_found_when_row_missing(caplog):
 
 
 def test_ingest_paper_registered_in_streaq_worker():
-    """Confirm the task wrapper exists on the streaq worker so it can be enqueued."""
-    from app.workers.streaq_worker import ingest_paper
+    """Confirm the task is in the streaq worker's dispatch registry.
 
-    # streaq exposes the function name via AsyncRegisteredTask.fn_name
-    assert ingest_paper.fn_name == "ingest_paper"
+    Presence in worker.registry is the property the old WorkerSettings.functions
+    check was really about — it means the worker process can actually invoke this
+    task, not just that the wrapper object exists.
+    """
+    from app.workers.streaq_worker import ingest_paper, worker
+
+    assert "ingest_paper" in worker.registry
+    assert worker.registry["ingest_paper"] is ingest_paper
