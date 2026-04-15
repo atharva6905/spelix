@@ -8,6 +8,8 @@ cron jobs). Does NOT exercise Redis — that's integration-test territory
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_streaq_worker_module_importable() -> None:
     """The module must import without touching Redis."""
@@ -67,9 +69,6 @@ def test_both_cron_jobs_are_registered() -> None:
     # them with the worker via decorator side-effect).
     assert callable(cleanup_expired_artifacts_cron)
     assert callable(ping_qdrant_health_cron)
-
-
-import pytest
 
 
 @pytest.mark.integration

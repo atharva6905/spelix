@@ -542,7 +542,7 @@ class TestAdminRedisInjection:
 
         assert health["queue_depth"] == 5
         assert health["worker_heartbeat"] is True
-        mock_redis.llen.assert_called_once_with("arq:queue")
+        mock_redis.llen.assert_called_once_with("spelix")
         mock_redis.get.assert_called_once_with("spelix:worker:heartbeat")
 
     @pytest.mark.asyncio

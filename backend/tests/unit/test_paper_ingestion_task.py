@@ -51,9 +51,9 @@ async def test_ingest_paper_not_found_when_row_missing(caplog):
     assert any("not_found" in rec.message for rec in caplog.records)
 
 
-def test_ingest_paper_registered_in_worker_settings():
-    """Confirm the task is in WorkerSettings.functions so ARQ dispatches it."""
-    from app.workers.settings import WorkerSettings
+def test_ingest_paper_registered_in_streaq_worker():
+    """Confirm the task wrapper exists on the streaq worker so it can be enqueued."""
+    from app.workers.streaq_worker import ingest_paper
 
-    names = [f.__name__ for f in WorkerSettings.functions]
-    assert "ingest_paper" in names
+    # streaq exposes the function name via AsyncRegisteredTask.fn_name
+    assert ingest_paper.fn_name == "ingest_paper"

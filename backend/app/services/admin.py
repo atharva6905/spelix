@@ -57,7 +57,7 @@ class AdminService:
         worker_heartbeat = False
         if self._redis is not None:
             try:
-                queue_depth = await self._redis.llen("arq:queue")
+                queue_depth = await self._redis.llen("spelix")
             except Exception:
                 pass
             try:
