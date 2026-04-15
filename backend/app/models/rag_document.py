@@ -9,7 +9,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, Integer, Numeric, SmallInteger, String, Text
+from sqlalchemy import CheckConstraint, DateTime, Integer, Numeric, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,16 @@ from app.models.base import Base, TimestampMixin, gen_uuid
 
 class RagDocument(TimestampMixin, Base):
     __tablename__ = "rag_documents"
+    __table_args__ = (
+        # Migration 009 — widened to include 'uploading' (FR-EXPV-02, ADR-EXPERT-01).
+        # Constraint name matches the DDL name set in migration 006.
+        CheckConstraint(
+            "review_status IN ("
+            "'pending','needs_revision','reviewed_approved','reviewed_rejected','uploading'"
+            ")",
+            name="ck_rag_documents_review_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=gen_uuid)
     title: Mapped[str] = mapped_column(Text, nullable=False)
