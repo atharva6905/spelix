@@ -1,3 +1,79 @@
+# Session 30 Handoff → Session 31: L2 Sprint Day 3 — Expert PDF Upload live on prod
+
+**Context refresh:** Session 30 shipped end-to-end expert PDF upload on 2026-04-15 (Day 3 of the 19-day L2 sprint). STRATEGY.md v3 Day 1-2 Track B hard gate now met — the kin expert onboarding can proceed with a working upload portal. Phase 3 LangGraph pull-forward is now unblocked for Day 10-16. The Day 3-9 ARQ→streaq migration is the next scheduled sprint item.
+
+## L2-EXPERT-UPLOAD shipped via PR #47 (2026-04-15)
+
+Merge commit: `864c3c9` (merge commit, not squash). Deploy workflow completed. Droplet on `864c3c9`, all containers healthy. Migration 009 applied to prod Supabase — bucket `papers` exists with 50 MB + `application/pdf` mime allow-list; three storage-objects RLS policies in place (`expert_papers_insert`, `expert_papers_service_delete`, `expert_papers_service_select`).
+
+**14 commits**, `1b5fa79..83b5d08` (plus the merge):
+- `1b5fa79` ADR-EXPERT-01 + expert PDF upload plan
+- `732f157` migration 009 papers bucket RLS + review_status='uploading'
+- `54c7ddd` PDF filename sanitiser + 50 MB + magic-byte constants (16 tests)
+- `0e5ded1` PaperStorageService (5 tests)
+- `973b180` RagDocumentUploadRequest/Response/CompleteResponse schemas (9 tests)
+- `0d5e705` POST /expert/papers phase 1 signed URL (5 tests)
+- `ae1a71b` POST /expert/papers/:id/complete phase 3 magic-byte + enqueue (5 tests)
+- `6b2d514` ingest_paper ARQ task stub (3 tests)
+- `0ae6a8c` e2e integration test phase 1→3 (2 tests)
+- `af8bbee` frontend expert paper upload API client (5 vitest cases)
+- `86a1670` ExpertPaperUploadPage file input + progress UI (5 vitest cases)
+- `18acd67` security review fixes C-1, H-1..H-4
+- `b8635fe` backlog L2-EXPERT-UPLOAD + close D-017
+- `83b5d08` pyright fix: narrow Optional types in complete handler
+
+## E2E Verification — Expert PDF Upload (2026-04-15 ~05:15 EDT)
+
+**UI probe** via Playwright MCP against live `https://spelix.app/expert/papers/upload`:
+- Route exists on prod (not a 404) — role guard redirects unauthenticated session to `/upload` (user's own video upload page), which is the expected defense-in-depth behavior.
+- No console errors or network 5xx on redirect.
+
+**API probes** via curl against `https://api.spelix.app/api/v1/expert/...`:
+- `POST /expert/papers` unauthenticated → `401 Not authenticated` ✓
+- `POST /expert/papers/:id/complete` unauthenticated → `401 Not authenticated` ✓
+- JWT-gated paths confirmed live.
+
+**Prod Supabase verification** via `docker exec` + `/app/.venv/bin/python` one-off query:
+- `storage.buckets` row `('papers', 52428800)` present ✓
+- `storage.objects` policies `['expert_papers_insert', 'expert_papers_service_delete', 'expert_papers_service_select']` all present ✓
+
+**Full upload flow (metadata → PUT → complete) NOT yet exercised on prod** — requires an expert-reviewer JWT we don't have set up in a test fixture. The kin expert is the first real user and will exercise the flow during today's onboarding call. If anything breaks at that step, it's a fast fix (I've already verified backend + frontend wiring at unit + integration level).
+
+## Next session start (Session 31)
+
+**Day 4 of L2 sprint** — STRATEGY.md v3 Day 3-9 is the **ARQ → streaq migration** (drop-in replacement, 4 job types). See `STRATEGY.md §Day 3-9`.
+
+Priority ordering:
+1. **Kin expert onboarding call** (60 min) — walk the portal, upload first PDF end-to-end (the very first prod exercise of this feature). Agree paper priority list + cadence. Log to `docs/expert-cadence.md`.
+2. **Begin ARQ → streaq migration** — migrate `run_analysis`, coaching stream, `ping_qdrant_health`, `ingest_paper`. Write ADR-BRAIN-04-reversal. Target: all 4 job types on streaq by Day 9 (Apr 22).
+3. **Watch for expert-upload first-use feedback** — if any UX bug lands during the onboarding call, fix in a quick follow-up PR.
+
+## Parked / opportunistic (deferred)
+
+Backlog rows opened by security review + handoff:
+- **D-029** — Rename `injury_advice_accurate` to `movement_advice_accurate` (pre-existing SaMD violation; 6 files across DB + schemas + UI; separate PR; size M)
+- **D-030** — Nightly cron to sweep abandoned `rag_documents.review_status='uploading'` rows (+ their storage objects) older than 2 hours (size S)
+- **D-031** — Admin `GET /rag/documents` free-text `review_status` query should be `Literal`-constrained or default-filter `uploading` rows (size S)
+- **D-028** — useAnalysisStatus cosmetic "Connection lost" banner (size S, unchanged)
+- **D-004..D-010** — Session 13 tech debt (defer to post-L2)
+
+**Do NOT make D-029/D-030/D-031 top priority** — they're follow-ups from the security audit, not merge-blockers. The kin expert onboarding + streaq migration own the next 7 days.
+
+## Test counts on `main` after merge
+
+- **Backend**: 1479 passing, 25 skipped, 0 failing
+- **Frontend**: 266 passing, 0 failing
+- **Coverage**: 91% preserved (not re-measured this session; CI coverage job not failing)
+
+## Test artifacts
+
+- `docs/superpowers/plans/2026-04-15-expert-pdf-upload-wiring.md` — the implementation plan used to drive this session
+- `.playwright-mcp/page-2026-04-15T09-15-07-923Z.yml` — Playwright snapshot of the expert upload route redirect (unauth'd)
+
+## Prior session continues below
+
+---
+
 # Session 29 Handoff → Session 30: L2 Sprint Day 1-2 complete — Landing V1 live on prod
 
 **Context refresh:** Session 29 shipped Landing V1 to prod on 2026-04-15 (end of Day 2 of the 19-day L2 sprint). STRATEGY.md v3 Day 1-2 hard gate met. Next up per STRATEGY v3 Day 3-5: Track A = expert PDF upload wiring; Track B starts the Phase 3 LangGraph pull-forward. `backlog.md` seeds the V2 polish items under the L2-LANDING-V2-* IDs (deferred to Sprint BETA, May 4-14).
