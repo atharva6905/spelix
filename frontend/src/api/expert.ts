@@ -87,15 +87,49 @@ export interface RagDocumentResponse {
   updated_at: string;
 }
 
-export interface PaperUploadData {
+// Replaces the legacy metadata-only uploadPaper. Matches backend
+// ADR-EXPERT-01 three-phase signed-URL flow.
+export interface PaperUploadMetadata {
   title: string;
-  authors: string[];
-  year: number | null;
-  doi: string | null;
-  exercise_tags: string[];
-  quality_tier: string | null;
-  study_design: string | null;
-  document_type: string;
+  document_type?:
+    | "research_paper"
+    | "textbook"
+    | "clinical_guideline"
+    | "expert_annotation"
+    | "other";
+  exercise_tags?: string[];
+  authors?: string[];
+  year?: number;
+  doi?: string;
+  study_design?:
+    | "rct"
+    | "observational"
+    | "systematic_review"
+    | "narrative_review"
+    | "guideline"
+    | "other";
+  population?: string;
+  measurement_method?: string;
+  quality_tier?:
+    | "L1_systematic_review"
+    | "L2_rct"
+    | "L3_observational"
+    | "L4_guideline";
+  filename: string;
+  file_size_bytes: number;
+}
+
+export interface PaperUploadResponse {
+  id: string;
+  upload_url: string;
+  storage_path: string;
+  expires_at: string;
+}
+
+export interface PaperCompleteResponse {
+  id: string;
+  review_status: "pending";
+  storage_path: string;
 }
 
 export interface PaperReviewAction {
@@ -180,14 +214,76 @@ export async function getAnnotations(analysisId: string): Promise<AnnotationResp
   );
 }
 
+/** @deprecated Remove in Task 10 — ExpertPaperUploadPage will use the 3-phase API */
+export interface PaperUploadData {
+  title: string;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  exercise_tags: string[];
+  quality_tier: string | null;
+  study_design: string | null;
+  document_type: string;
+}
+
 // ---------------------------------------------------------------------------
-// Paper Upload (FR-EXPV-05)
+// Paper Upload (FR-EXPV-05) — three-phase signed-URL flow (ADR-EXPERT-01)
 // ---------------------------------------------------------------------------
 
+export async function requestPaperUploadUrl(
+  data: PaperUploadMetadata,
+): Promise<PaperUploadResponse> {
+  return expertFetch<PaperUploadResponse>("/api/v1/expert/papers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function completePaperUpload(
+  paperId: string,
+): Promise<PaperCompleteResponse> {
+  return expertFetch<PaperCompleteResponse>(
+    `/api/v1/expert/papers/${paperId}/complete`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * @deprecated Compatibility shim — Task 10 will replace ExpertPaperUploadPage
+ * with the 3-phase upload flow and remove this function.
+ */
 export async function uploadPaper(data: PaperUploadData): Promise<RagDocumentResponse> {
   return expertFetch<RagDocumentResponse>("/api/v1/expert/papers", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ ...data, filename: "unknown.pdf", file_size_bytes: 0 }),
+  });
+}
+
+export function uploadPaperFile(
+  uploadUrl: string,
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", uploadUrl);
+    xhr.setRequestHeader("Content-Type", "application/pdf");
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`upload failed: HTTP ${xhr.status}`));
+    });
+    xhr.addEventListener("error", () =>
+      reject(new Error("upload failed: network error")),
+    );
+    xhr.addEventListener("abort", () => reject(new Error("upload aborted")));
+
+    xhr.send(file);
   });
 }
 
