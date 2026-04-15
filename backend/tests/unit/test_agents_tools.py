@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.agents.state import make_initial_state
-from app.agents.tools import get_rep_metrics, retrieve_papers
+from app.agents.tools import get_rep_metrics, retrieve_coach_brain, retrieve_papers
 
 
 @pytest.mark.asyncio
@@ -108,3 +108,46 @@ async def test_retrieve_papers_returns_empty_on_service_error():
     update = await retrieve_papers(state, retrieval_svc=retrieval_svc)
 
     assert update == {"papers_contexts": [], "degraded_mode": True}
+
+
+@pytest.mark.asyncio
+async def test_retrieve_coach_brain_applies_status_active_filter():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+
+    fake_ctx = SimpleNamespace(
+        collection="coach_brain",
+        score=0.88,
+        chunk=SimpleNamespace(id="b1", text="Spread the floor cue", title="Cue"),
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[fake_ctx]))
+
+    update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    assert update["brain_contexts"] == [fake_ctx]
+    call = retrieval_svc.hybrid_search.await_args
+    assert call.kwargs["collection"] == "coach_brain"
+    # Ensure the status=active filter is applied via additional_filters.
+    assert call.kwargs["additional_filters"] is not None
+    assert len(call.kwargs["additional_filters"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_retrieve_coach_brain_empty_result_cold_start():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+    update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    assert update == {"brain_contexts": []}

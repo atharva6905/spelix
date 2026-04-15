@@ -95,3 +95,54 @@ async def retrieve_papers(
             exc_info=True,
         )
         return {"papers_contexts": [], "degraded_mode": True}
+
+
+async def retrieve_coach_brain(
+    state: AgentState,
+    *,
+    retrieval_svc: Any,
+    top_k: int = 10,
+    rerank_top_n: int = 5,
+) -> dict[str, Any]:
+    """Retrieve curated coaching cues from the ``coach_brain`` Qdrant collection.
+
+    Applies a ``status='active'`` payload filter (FR-BRAIN-04) and an
+    ``exercise``-type payload filter (FR-AICP-12), running dense+BM25+RRF
+    hybrid retrieval with Cohere reranking. Returns distilled coaching
+    knowledge — cues, heuristics, compensation entries — curated by the
+    kinesiology expert and/or produced by the Phase 3 distillation
+    pipeline.
+
+    Use this to source high-value coaching cues. Prefer Coach Brain when
+    retrieval scores exceed 0.82 (FR-BRAIN-05 primary threshold); fall back
+    to papers_rag otherwise. Returns empty list on cold-start
+    (``brain_contexts = []``) — callers must degrade gracefully.
+    """
+    from qdrant_client import models as qdrant_models
+
+    status_filter = qdrant_models.FieldCondition(
+        key="status",
+        match=qdrant_models.MatchValue(value="active"),
+    )
+
+    query = (
+        f"{state['exercise_type']} {state['exercise_variant']} "
+        "coaching cue correction"
+    )
+    try:
+        contexts = await retrieval_svc.hybrid_search(
+            query,
+            collection="coach_brain",
+            top_k=top_k,
+            rerank_top_n=rerank_top_n,
+            exercise_filter=state["exercise_type"],
+            additional_filters=[status_filter],
+            rerank=True,
+        )
+        return {"brain_contexts": contexts}
+    except Exception:
+        logger.warning(
+            "retrieve_coach_brain: error retrieving — returning empty",
+            exc_info=True,
+        )
+        return {"brain_contexts": []}
