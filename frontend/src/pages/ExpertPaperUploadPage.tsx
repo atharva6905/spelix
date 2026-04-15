@@ -5,16 +5,26 @@
  *
  * - FR-EXPV-01: Only expert_reviewer or admin roles may access.
  * - FR-EXPV-05: Submit a research document with metadata to the RAG ingestion pipeline.
+ *   Uses three-phase signed-URL flow (ADR-EXPERT-01):
+ *   1. POST /api/v1/expert/papers → signed upload URL
+ *   2. PUT {upload_url} — browser uploads PDF directly to storage
+ *   3. POST /api/v1/expert/papers/{id}/complete — finalize + trigger ingestion
  */
 
 import { useState, useEffect } from "react";
 import { Link, Navigate } from "react-router";
 import { supabase } from "@/lib/supabase";
-import { uploadPaper, type RagDocumentResponse } from "@/api/expert";
+import {
+  requestPaperUploadUrl,
+  uploadPaperFile,
+  completePaperUpload,
+} from "@/api/expert";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+const MAX_BYTES = 50 * 1024 * 1024;
 
 const EXERCISE_TAG_OPTIONS = [
   { value: "squat", label: "Squat" },
@@ -69,9 +79,15 @@ const INITIAL_FORM: FormState = {
 export default function ExpertPaperUploadPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [uploadedDoc, setUploadedDoc] = useState<RagDocumentResponse | null>(null);
+
+  // File + upload phase state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<
+    "idle" | "requesting" | "uploading" | "completing" | "success" | "error"
+  >("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Role check — FR-EXPV-01
   useEffect(() => {
@@ -98,11 +114,34 @@ export default function ExpertPaperUploadPage() {
     }));
   }
 
-  async function handleSubmit() {
-    setSubmitError(null);
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    setFileError(null);
+    if (!file) {
+      setSelectedFile(null);
+      return;
+    }
+    if (file.type !== "application/pdf") {
+      setSelectedFile(null);
+      setFileError("File must be a PDF");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      setSelectedFile(null);
+      setFileError("File is larger than 50 MB");
+      return;
+    }
+    setSelectedFile(file);
+  }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedFile) return;
+
+    // Validate metadata before starting upload
     if (!form.title.trim()) {
-      setSubmitError("Title is required.");
+      setUploadError("Title is required.");
+      setUploadPhase("error");
       return;
     }
 
@@ -111,30 +150,56 @@ export default function ExpertPaperUploadPage() {
       .map((a) => a.trim())
       .filter(Boolean);
 
-    const yearNum = form.year.trim() ? parseInt(form.year.trim(), 10) : null;
-    if (form.year.trim() && (isNaN(yearNum!) || yearNum! < 1900 || yearNum! > 2100)) {
-      setSubmitError("Year must be a valid 4-digit year.");
+    const yearNum = form.year.trim() ? parseInt(form.year.trim(), 10) : undefined;
+    if (
+      form.year.trim() &&
+      (isNaN(yearNum!) || yearNum! < 1900 || yearNum! > 2100)
+    ) {
+      setUploadError("Year must be a valid 4-digit year.");
+      setUploadPhase("error");
       return;
     }
 
-    setSubmitting(true);
+    setUploadPhase("requesting");
+    setUploadError(null);
+    setUploadProgress(0);
+
     try {
-      const result = await uploadPaper({
+      const signed = await requestPaperUploadUrl({
         title: form.title.trim(),
+        document_type: "research_paper",
+        exercise_tags: form.exercise_tags,
         authors,
         year: yearNum,
-        doi: form.doi.trim() || null,
-        exercise_tags: form.exercise_tags,
-        quality_tier: form.quality_tier || null,
-        study_design: form.study_design || null,
-        document_type: "research_paper",
+        doi: form.doi.trim() || undefined,
+        study_design: (form.study_design || undefined) as
+          | "rct"
+          | "observational"
+          | "systematic_review"
+          | "narrative_review"
+          | "guideline"
+          | "other"
+          | undefined,
+        quality_tier: (form.quality_tier || undefined) as
+          | "L1_systematic_review"
+          | "L2_rct"
+          | "L3_observational"
+          | "L4_guideline"
+          | undefined,
+        filename: selectedFile.name,
+        file_size_bytes: selectedFile.size,
       });
-      setUploadedDoc(result);
+
+      setUploadPhase("uploading");
+      await uploadPaperFile(signed.upload_url, selectedFile, setUploadProgress);
+
+      setUploadPhase("completing");
+      await completePaperUpload(signed.id);
+
+      setUploadPhase("success");
     } catch (err) {
-      console.error("Failed to upload paper", err);
-      setSubmitError("Failed to upload paper. Please try again.");
-    } finally {
-      setSubmitting(false);
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      setUploadPhase("error");
     }
   }
 
@@ -172,91 +237,8 @@ export default function ExpertPaperUploadPage() {
 
         <h1 className="mb-8 text-3xl font-bold text-gray-900">Upload Research Paper</h1>
 
-        {/* Success state */}
-        {uploadedDoc ? (
-          <div className="rounded-lg bg-white p-6 shadow-sm">
-            <div className="mb-4 rounded-md bg-green-50 p-4">
-              <h2 className="mb-1 text-base font-semibold text-green-800">
-                Paper uploaded successfully
-              </h2>
-              <p className="text-sm text-green-700">
-                Document ID:{" "}
-                <span className="font-mono">{uploadedDoc.id}</span>
-              </p>
-              <p className="mt-1 text-sm text-green-700">
-                Status:{" "}
-                <span className="font-medium capitalize">{uploadedDoc.review_status}</span>
-              </p>
-            </div>
-
-            <dl className="mb-6 space-y-2 text-sm text-gray-700">
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Title</dt>
-                <dd>{uploadedDoc.title}</dd>
-              </div>
-              {uploadedDoc.authors.length > 0 && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Authors</dt>
-                  <dd>{uploadedDoc.authors.join(", ")}</dd>
-                </div>
-              )}
-              {uploadedDoc.year && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Year</dt>
-                  <dd>{uploadedDoc.year}</dd>
-                </div>
-              )}
-              {uploadedDoc.doi && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">DOI</dt>
-                  <dd className="font-mono text-xs">{uploadedDoc.doi}</dd>
-                </div>
-              )}
-              {uploadedDoc.exercise_tags.length > 0 && (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-gray-500">Exercise Tags</dt>
-                  <dd className="flex flex-wrap gap-1">
-                    {uploadedDoc.exercise_tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 capitalize"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </dd>
-                </div>
-              )}
-            </dl>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setUploadedDoc(null);
-                  setForm(INITIAL_FORM);
-                }}
-                className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-              >
-                Upload Another
-              </button>
-              <Link
-                to="/expert"
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Back to Portal
-              </Link>
-            </div>
-          </div>
-        ) : (
-          /* Upload form */
-          <div className="rounded-lg bg-white p-6 shadow-sm">
-            {submitError && (
-              <div className="mb-5 rounded-md bg-red-50 p-3 text-sm text-red-600">
-                {submitError}
-              </div>
-            )}
-
+        <div className="rounded-lg bg-white p-6 shadow-sm">
+          <form onSubmit={handleSubmit}>
             <div className="space-y-5">
               {/* Title */}
               <div>
@@ -269,7 +251,8 @@ export default function ExpertPaperUploadPage() {
                   value={form.title}
                   onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                   placeholder="Full paper title"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
               </div>
 
@@ -284,7 +267,8 @@ export default function ExpertPaperUploadPage() {
                   value={form.authors}
                   onChange={(e) => setForm((f) => ({ ...f, authors: e.target.value }))}
                   placeholder="Comma-separated, e.g. Smith J, Jones A"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
                 <p className="mt-0.5 text-xs text-gray-400">Separate multiple authors with commas.</p>
               </div>
@@ -302,7 +286,8 @@ export default function ExpertPaperUploadPage() {
                   value={form.year}
                   onChange={(e) => setForm((f) => ({ ...f, year: e.target.value }))}
                   placeholder="e.g. 2023"
-                  className="w-36 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-36 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
               </div>
 
@@ -317,7 +302,8 @@ export default function ExpertPaperUploadPage() {
                   value={form.doi}
                   onChange={(e) => setForm((f) => ({ ...f, doi: e.target.value }))}
                   placeholder="10.xxxx/xxxxx"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
               </div>
 
@@ -331,7 +317,8 @@ export default function ExpertPaperUploadPage() {
                         type="checkbox"
                         checked={form.exercise_tags.includes(value)}
                         onChange={() => toggleExerciseTag(value)}
-                        className="rounded text-indigo-600"
+                        disabled={uploadPhase !== "idle"}
+                        className="rounded text-indigo-600 disabled:opacity-50"
                       />
                       {label}
                     </label>
@@ -348,7 +335,8 @@ export default function ExpertPaperUploadPage() {
                   id="quality_tier"
                   value={form.quality_tier}
                   onChange={(e) => setForm((f) => ({ ...f, quality_tier: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 >
                   <option value="">Select quality tier...</option>
                   {QUALITY_TIER_OPTIONS.map(({ value, label }) => (
@@ -366,7 +354,8 @@ export default function ExpertPaperUploadPage() {
                   id="study_design"
                   value={form.study_design}
                   onChange={(e) => setForm((f) => ({ ...f, study_design: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 >
                   <option value="">Select study design...</option>
                   {STUDY_DESIGN_OPTIONS.map(({ value, label }) => (
@@ -375,27 +364,103 @@ export default function ExpertPaperUploadPage() {
                 </select>
               </div>
 
-              {/* Document type is always research_paper — no user input needed */}
+              {/* PDF file input */}
+              <div>
+                <label htmlFor="pdf-file" className="block text-sm font-medium mb-1">
+                  PDF file
+                </label>
+                <input
+                  id="pdf-file"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleFileChange}
+                  disabled={uploadPhase !== "idle"}
+                  aria-label="PDF file"
+                />
+                {selectedFile && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  </p>
+                )}
+                {fileError && (
+                  <p className="text-sm text-destructive mt-1">{fileError}</p>
+                )}
+              </div>
 
+              {/* Upload progress */}
+              {uploadPhase === "uploading" && (
+                <div>
+                  <progress value={uploadProgress} max={100} />
+                  <span className="ml-2 text-sm">{uploadProgress}%</span>
+                </div>
+              )}
+
+              {/* Success banner */}
+              {uploadPhase === "success" && (
+                <div role="status" className="rounded-md bg-green-100 p-3 text-green-900">
+                  {selectedFile?.name} uploaded and queued for review
+                </div>
+              )}
+
+              {/* Error banner */}
+              {uploadPhase === "error" && uploadError && (
+                <div role="alert" className="rounded-md bg-red-100 p-3 text-red-900">
+                  {uploadError}
+                </div>
+              )}
+
+              {/* Submit / actions */}
               <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                  className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  {submitting ? "Uploading..." : "Upload Paper"}
-                </button>
-                <Link
-                  to="/expert"
-                  className="text-sm text-gray-500 hover:text-gray-700"
-                >
-                  Cancel
-                </Link>
+                {uploadPhase === "success" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadPhase("idle");
+                        setSelectedFile(null);
+                        setUploadProgress(0);
+                        setUploadError(null);
+                        setFileError(null);
+                        setForm(INITIAL_FORM);
+                      }}
+                      className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                    >
+                      Upload Another
+                    </button>
+                    <Link
+                      to="/expert"
+                      className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Back to Portal
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="submit"
+                      disabled={!selectedFile || !form.title.trim() || uploadPhase !== "idle"}
+                      className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {uploadPhase === "requesting"
+                        ? "Requesting upload URL..."
+                        : uploadPhase === "uploading"
+                          ? "Uploading..."
+                          : uploadPhase === "completing"
+                            ? "Finalizing..."
+                            : "Upload Paper"}
+                    </button>
+                    <Link
+                      to="/expert"
+                      className="text-sm text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          </form>
+        </div>
       </div>
     </div>
   );

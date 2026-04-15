@@ -87,8 +87,7 @@ export interface RagDocumentResponse {
   updated_at: string;
 }
 
-// Replaces the legacy metadata-only uploadPaper. Matches backend
-// ADR-EXPERT-01 three-phase signed-URL flow.
+// PaperUploadMetadata — ADR-EXPERT-01 three-phase signed-URL flow.
 export interface PaperUploadMetadata {
   title: string;
   document_type?:
@@ -214,18 +213,6 @@ export async function getAnnotations(analysisId: string): Promise<AnnotationResp
   );
 }
 
-/** @deprecated Remove in Task 10 — ExpertPaperUploadPage will use the 3-phase API */
-export interface PaperUploadData {
-  title: string;
-  authors: string[];
-  year: number | null;
-  doi: string | null;
-  exercise_tags: string[];
-  quality_tier: string | null;
-  study_design: string | null;
-  document_type: string;
-}
-
 // ---------------------------------------------------------------------------
 // Paper Upload (FR-EXPV-05) — three-phase signed-URL flow (ADR-EXPERT-01)
 // ---------------------------------------------------------------------------
@@ -246,17 +233,6 @@ export async function completePaperUpload(
     `/api/v1/expert/papers/${paperId}/complete`,
     { method: "POST" },
   );
-}
-
-/**
- * @deprecated Compatibility shim — Task 10 will replace ExpertPaperUploadPage
- * with the 3-phase upload flow and remove this function.
- */
-export async function uploadPaper(data: PaperUploadData): Promise<RagDocumentResponse> {
-  return expertFetch<RagDocumentResponse>("/api/v1/expert/papers", {
-    method: "POST",
-    body: JSON.stringify({ ...data, filename: "unknown.pdf", file_size_bytes: 0 }),
-  });
 }
 
 export function uploadPaperFile(
