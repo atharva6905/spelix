@@ -386,3 +386,70 @@ The regression tests added in session 13 (`TestMakeStorageServiceFactory`, `Test
 **Context**: Two defensive fixes landed during Landing V1 merge. (1) `BetaRequestResponse` originally echoed the submitted `email` field in the 201 response body — flagged CRITICAL by `spelix-security-reviewer` because observability tools (Sentry, Loki breadcrumbs) routinely index response payloads and an anonymous public endpoint should not write PII there (the client already has the email from form state). (2) The `uq_beta_requests_email` UNIQUE index existed only in alembic migration 008. The CI workflow uses `scripts/create_test_tables.py` (`Base.metadata.create_all`) instead of alembic — because the CI Postgres lacks Supabase's `auth` schema required by migration 002's RLS policies — so the integration test `test_create_duplicate_email_raises_integrity_error` passed locally (post-migration) but failed in CI with `DID NOT RAISE IntegrityError`.
 **Decision**: (1) Remove `email: EmailStr` from `BetaRequestResponse` on both backend (`app/schemas/beta_request.py`) and frontend (`src/api/beta.ts`); the 201 body returns `{id, status, created_at}` only. Assertion in `test_beta_request_api.py::test_valid_submission_returns_201` updated to `assert "email" not in body`. (2) Add `Index("uq_beta_requests_email", "email", unique=True)` to `BetaRequest.__table_args__`. Both the model-declared index and the migration DDL produce the same end state — zero drift. Add regression-guard unit test `test_beta_request_email_has_unique_index_on_model` so a future edit that drops the `Index(...)` declaration fails locally, not only in CI.
 **Consequences**: Any future SQLAlchemy model whose migration declares a UNIQUE/ordinary index must mirror that declaration on the model itself or CI's `create_all` DB will drift from prod. The pattern now exists as a precedent (see `beta_request.py` `__table_args__`). RLS policies remain migration-only because CI's Postgres can't host Supabase's `auth` schema — this is the same intentional divergence documented in `scripts/create_test_tables.py`'s docstring. The PII removal sets a "never echo user-submitted identifiers in public-endpoint response bodies" precedent across the backend — next review target if we add more public POST endpoints is `POST /api/v1/consent/anonymous-acknowledge` if that ever exists.
+
+## ADR-EXPERT-01: Expert Paper Upload Security Model
+
+**Date:** 2026-04-15
+**Status:** Accepted
+**Phase:** L2 sprint (Day 3-5)
+**Related:** STRATEGY.md §Day 1-2 Track B; handoff.md §2 Track B; FR-EXPV-02
+
+### Context
+
+Expert reviewer portal shipped in Phase 2 with metadata-only `POST /api/v1/expert/papers` — no file input on frontend, no multipart on backend. L2 sprint requires the kin expert to upload real peer-reviewed PDFs directly into the `papers_rag` corpus by end of Day 2.
+
+### Decision
+
+Two-phase signed-URL upload to a dedicated Supabase Storage bucket named `papers`, matching the existing video upload pattern (`AnalysisService.create_analysis` + XHR PUT to signed URL).
+
+**Phase 1** — `POST /api/v1/expert/papers` accepts JSON body `{metadata..., filename, file_size_bytes}`. Backend:
+- Validates `file_size_bytes <= 52_428_800` (50 MB).
+- Validates filename matches `^[A-Za-z0-9._-]+\.pdf$` after sanitisation (whitespace → `_`, non-allowed chars stripped, max 255 chars).
+- Generates `paper_id = uuid4()`; builds `storage_path = f"papers/{paper_id}/{sanitized_filename}"`.
+- Calls `PaperStorageService.generate_signed_upload_url(storage_path)` — TTL 3600 s.
+- Inserts `rag_documents` row with `review_status='uploading'`, `storage_path=<path>`, user-supplied metadata.
+- Returns `{id, upload_url, storage_path, expires_at}`.
+
+**Phase 2** — Browser PUTs the file directly to `upload_url` with `Content-Type: application/pdf`. FastAPI never touches bytes.
+
+**Phase 3** — `POST /api/v1/expert/papers/{id}/complete`. Backend:
+- Downloads the first 8 bytes of the object via service-role Supabase client.
+- Asserts bytes start with `b"%PDF-"`. If not, deletes the storage object + the `rag_documents` row, returns 422 `INVALID_PDF`.
+- If ok, updates `review_status='pending'`, enqueues `ingest_paper(paper_id)` ARQ job.
+- Returns `{id, review_status: 'pending'}`.
+
+### Security posture
+
+- **Bucket RLS**: `INSERT` allowed for JWT where `user_metadata.role IN ('expert_reviewer', 'admin')` AND `bucket_id='papers'`. `SELECT` only for `service_role`. No public read.
+- **Magic-byte validation** happens post-upload via service-role download, not pre-upload, because signed-URL PUTs bypass the FastAPI handler. 8-byte head is enough to identify PDF (`%PDF-1.x`).
+- **Size limit** enforced at schema (Phase 1 rejects large claims) + bucket config (Supabase enforces on PUT).
+- **Filename sanitisation** prevents path traversal, command injection, and filesystem quirks. Rejected filenames fail Phase 1 with 422.
+- **Role gate** via existing `get_expert_reviewer_user` dependency (admin + expert_reviewer only).
+- **Service-role key** is server-side only, read from `SUPABASE_SERVICE_ROLE_KEY` env var. Never sent to the browser.
+
+### Why two phases + completion endpoint (not one phase + worker poll)
+
+A third endpoint is cheaper than making the ARQ worker poll Supabase Storage for "upload finished" state. It also lets the client signal intent to commit — orphaned rows with `review_status='uploading'` + expired `upload_url` can be swept by a cron later if abandonment becomes a real problem.
+
+### Why not TUS protocol
+
+Matches the pattern in `UploadPage.tsx` lines 9–18: Supabase REST signed upload URLs reject TUS protocol headers. Plain XHR PUT is the supported path.
+
+### Why Docling is not in this ADR
+
+P2-005 is open. The `ingest_paper` task in this scope downloads the PDF and logs `docling-pending`. Chunking + embedding fire when P2-005 ships. The May 3 gate is "expert uploaded end-to-end", not "papers appear in RAG queries".
+
+### Consequences
+
+- New Supabase bucket `papers` created via Alembic migration 009 (or dashboard if Alembic-over-storage is flaky on this Supabase project).
+- `rag_documents.review_status` CHECK constraint widened to include `'uploading'`.
+- Two new schemas: `RagDocumentUploadRequest`, `RagDocumentUploadResponse`, `RagDocumentCompleteResponse`.
+- `StorageService` sprouts a papers-flavoured sibling (`PaperStorageService`) bound to bucket `papers`.
+- Frontend page adds `<input type="file">` + XHR PUT + progress bar. Matches `UploadPage.tsx` conventions.
+- ARQ worker registry adds `ingest_paper` (no-op stub until P2-005).
+
+### Alternatives considered
+
+- **Multipart/form-data on FastAPI** — rejected. Would make the backend a bandwidth bottleneck on the 4 GB droplet; violates ADR-048 memory budget. Signed-URL matches existing patterns.
+- **One-phase upload + worker polls** — rejected. Worker is ARQ, not a long-running poller; adding poll loops adds complexity. A cheap completion endpoint is clearer.
+- **Reuse `videos` bucket with `papers/` prefix** — rejected. Bucket-level RLS is clearer when one bucket = one purpose. Video RLS uses `user_id` path segments; papers RLS needs role claims.

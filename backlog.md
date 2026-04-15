@@ -357,7 +357,7 @@ Phase 2 transition gate passed. All 33 Must requirements implemented, E2E smoke 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
 | D-026 | Droplet OOM during concurrent analyses — 2GB RAM + 2GB swap insufficient; worker unresponsive to SSH during session 27 test. Previously patched in session 24 (D-014) with swap; may need 4GB droplet upgrade for L2 beta. | M | — | NFR-OPER-02 | done | Resized to `s-2vcpu-4gb` ($24/mo) via DO MCP, Datadog agent purged (saved 181MB). Memory PSI full=0, CPU PSI=0, swap <1MB during analysis. E2E verified. See ADR-048. |
-| D-027 | Apply migration 007 to Supabase via `alembic upgrade head` — one-off SQL was used during debugging; alembic head still at 006 in the migrations table. | S | — | — | pending |
+| D-027 | Apply migration 007 to Supabase via `alembic upgrade head` — one-off SQL was used during debugging; alembic head still at 006 in the migrations table. | S | — | — | done | Verified 2026-04-15 session 30: prod `alembic_version` already at `008_beta_requests (head)`; `upgrade head` is a no-op. Applied as side-effect of PR #45 landing V1 deploy. |
 | D-028 | Frontend `useAnalysisStatus` hook shows "Connection lost — reconnecting…" banner after a terminal-state UPDATE when it intentionally calls `channel.unsubscribe()`. Cosmetic issue — analysis results still render correctly. Fix: don't set `isReconnecting=true` when channel status is "CLOSED" after we intentionally unsubscribed. | S | — | FR-RESL-13 | pending |
 
 ---
