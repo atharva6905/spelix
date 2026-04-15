@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -109,3 +110,38 @@ class ReEmbedResponse(BaseModel):
 
     message: str
     document_id: uuid.UUID
+
+
+class RagDocumentUploadRequest(BaseModel):
+    """Phase 1 request: metadata + filename + size, server returns signed URL.
+
+    Reuses DocumentTypeLiteral / QualityTierLiteral / StudyDesignLiteral from
+    this module for consistency with RagDocumentUpload (FR-EXPV-05).
+    """
+
+    title: str = Field(..., min_length=1, max_length=500)
+    document_type: DocumentTypeLiteral = "research_paper"
+    exercise_tags: list[str] = Field(default_factory=list)
+    authors: list[str] = Field(default_factory=list)
+    year: int | None = Field(default=None, ge=1900, le=2100)
+    doi: str | None = Field(default=None, max_length=200)
+    study_design: StudyDesignLiteral | None = None
+    population: str | None = Field(default=None, max_length=500)
+    measurement_method: str | None = Field(default=None, max_length=500)
+    quality_tier: QualityTierLiteral | None = None
+
+    filename: str = Field(..., min_length=5, max_length=255)
+    file_size_bytes: int = Field(..., gt=0, le=52_428_800)
+
+
+class RagDocumentUploadResponse(BaseModel):
+    id: UUID
+    upload_url: str
+    storage_path: str
+    expires_at: datetime
+
+
+class RagDocumentCompleteResponse(BaseModel):
+    id: UUID
+    review_status: Literal["pending"]
+    storage_path: str
