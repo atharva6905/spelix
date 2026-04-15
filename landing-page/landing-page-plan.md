@@ -682,4 +682,295 @@ Explicitly deferred from this plan. Not because they are unimportant — because
 
 ---
 
-**End of plan. Awaiting founder review before proceeding to implementation plan.**
+## 16. Template Replication Plan — Framer "EvoTrack" → Spelix Landing V1
+
+**Added:** 2026-04-15 (Day 2 of L2 sprint) by Atharva. Extends the generic plan (§§1–15) with the concrete template we are copying from, the exact design tokens extracted from it, and the mapping of every template surface onto Spelix content. Read §§1–3 and §6 first — this section assumes those constraints as non-negotiable.
+
+### 16.1 Template & Provenance
+
+- **Live reference:** https://fluid-actor-392760.framer.app/ ("EvoTrack – AI & Smart Tech Landing Page Template", Framer, exported 2026-04-13 by NoCodeExport)
+- **Local export:** `landing-page/template-export/index.html` (435 KB, hotlinks Framer CDN assets — open with internet access)
+- **Screenshots (desktop @ 1440, responsive-mobile @ 375, responsive-tablet @ 768):** `landing-page/screenshots/`
+  - `01-desktop-full.png` — full scrollable page
+  - `02-hero.png` through `08-final-cta-footer.png` — 7 viewport captures top to bottom
+  - `responsive-mobile.png`, `responsive-tablet.png`, `responsive-desktop.png`
+- **Accessibility tree:** `landing-page/screenshots/tree-desktop.txt`
+- **Raw token introspection JSON:** `landing-page/design-tokens.json`, `landing-page/structure.json`
+- **Extract scripts (re-runnable against the live URL):** `landing-page/extract-tokens.js`, `landing-page/extract-structure.js`
+
+**Why this template.** The template reads as a "quiet-confident tech-product" landing — dark photo hero, generous whitespace, light body surfaces, one distinctive accent colour, large light-weight headlines, section labels above each H2, card grids + one accordion + one testimonial carousel + one final CTA block. That matches the Cronometer-ish tone §1 calls for far better than a generic SaaS gradient template. Zero section here is wasted on Spelix.
+
+**Scope of copying.** Everything visual — colours, typography scale, spacing rhythm, radii, section layouts, scroll-reveal motion, component primitives (accordion, pill CTA, section-label, card grid, rounded-dark-CTA-block). Everything textual is **100% replaced** with Spelix content from §§4–6. No template copy survives.
+
+### 16.2 Design Tokens — Exact Values From Live CSS
+
+Extracted from `getComputedStyle` on the live template, 2026-04-15. These are the authoritative values — commit them into `tailwind.config.ts` / `globals.css` exactly.
+
+**Colour palette.**
+
+| Role | Token | Value | Notes |
+|---|---|---|---|
+| `--brand-primary` | chartreuse / lime-green | `#D5FF45` (rgb 213 255 69) | CTA button fill; hero accent badges; accordion-open marker |
+| `--brand-primary-soft` | pale chartreuse | `#E8FF9C` (rgb 232 255 156) | Hover state on primary; inactive pill fill |
+| `--brand-primary-glow` | chartreuse 20% | `rgba(213, 255, 69, 0.2)` | CTA box-shadow on hover/focus |
+| `--surface-page` | page background | `#FAFAFA` (rgb 250 250 250) | Body bg between sections |
+| `--surface-elevated` | white | `#FFFFFF` | Cards on light bg |
+| `--surface-dark` | near-black | `#121212` (rgb 18 18 18) | Dark product cards (AI in Action carousel), final CTA panel |
+| `--ink-primary` | black | `#000000` | Body text on light surfaces |
+| `--ink-on-dark` | white | `#FFFFFF` | Body text on dark surfaces |
+| `--ink-muted` | 70% dark gray | `rgba(48, 48, 48, 0.7)` | Section labels ("Introduction", "AI in Action", etc.), secondary meta text |
+| `--ink-on-dark-muted` | 80% near-white | `rgba(235, 235, 235, 1.0)` | Nav links on hero photo |
+| `--border-subtle` | black 16% | `rgba(0, 0, 0, 0.16)` | Accordion item dividers; card hairlines |
+| `--divider-soft` | gray 15% | `rgba(187, 187, 187, 0.15)` | Footer divider; faint grid lines |
+
+**One colour-philosophy note** — the template's chartreuse is loud. Spelix's §2 persona ("evidence-forward, calm, Cronometer-style") can absolutely carry one loud accent so long as the rest of the page is quiet, which the template already enforces. **Keep the chartreuse verbatim as Spelix's marketing accent.** Rationale: (a) we need a distinctive brand colour that the product UI doesn't already use (product uses neutral slate + blue-ish status colours), (b) chartreuse is unusual enough to not feel generic-SaaS, (c) it signals "scientific/analytical" more than a blue or purple would. If the founder rejects the colour, the swap is one token line — design system is additive, not coupled.
+
+**Typography.**
+
+| Role | Font | Weight | Size | Line-height | Letter-spacing | Colour |
+|---|---|---|---|---|---|---|
+| Hero H1 | `Host Grotesk` | 400 | 56px | 56px (1.0) | -1.68px (-0.03em) | `--ink-on-dark` |
+| Section H2 (on light) | `Host Grotesk` | 400 | 40px | 44px (1.1) | -1.2px (-0.03em) | `--ink-primary` |
+| Card title H2/H3 (on dark card) | `DM Sans` | 500 | 20px | 22px (1.1) | -0.6px (-0.03em) | `--ink-on-dark` |
+| Section label (above H2) | `DM Sans` | 400 | 14px | 18.2px (1.3) | normal | `--ink-muted` |
+| Nav link | `DM Sans` | 400 | 16px | 20.8px (1.3) | normal | `--ink-on-dark-muted` |
+| Body paragraph | `DM Sans` | 400 | 16px | ~1.5 | normal | `--ink-primary` |
+| Small meta / byline | `DM Sans` | 400 | 14px | 1.3 | normal | `--ink-muted` |
+
+**Mobile scale-down (from responsive screenshots):** H1 ~36px / H2 ~28px / body unchanged. Exact breakpoints follow Tailwind defaults (`md: 768px`, `lg: 1024px`).
+
+**Font loading.** Both fonts are on Google Fonts — no need to host locally. Add to `frontend/index.html` `<head>`:
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;1,400&family=Host+Grotesk:wght@400&display=swap" rel="stylesheet">
+```
+
+Preload only the weights we use. `font-display: swap` prevents FOIT.
+
+**Spacing & rhythm.**
+
+- **Section vertical padding**: `py-24` (96px top + 96px bottom — confirmed on 6 of 7 sections)
+- **Footer/CTA band padding**: `py-12` (48px top + 48px bottom)
+- **Container max-width**: `max-w-[1128px]` (1128px — Framer's chosen content width; use a CSS custom prop so we can tune once)
+- **Horizontal gutter**: responsive — `px-6` mobile / `px-12` tablet / `px-16` desktop (extrapolated from screenshot inspection)
+
+**Border radii.**
+
+| Radius | Use |
+|---|---|
+| `6px` | Small chips / tags |
+| `8px` | Pill nav button (secondary) |
+| `12px` | Primary CTA button ("Join waitlist now") — **authoritative** |
+| `16px` | Small product cards |
+| `20–24px` | Medium cards (accordion items, testimonial quote cards) |
+| `40px` | Large cards (AI in Action carousel cards, hero-embedded figure) |
+| `100px` | Pill shape (nav CTA, small badges) — use `rounded-full` |
+| `50%` | Circle (icon containers, slideshow nav arrows) — use `rounded-full` |
+
+### 16.3 Section-by-Section Mapping — Template → Spelix
+
+Each row: template section → Spelix plan section → V1 inclusion → notes on what changes.
+
+| # | Template section | Spelix plan section | V1? | Key adaptation |
+|---|---|---|---|---|
+| A | Nav bar (logo + 4 links + Join CTA) | new — not in plan | V1 | Replace "EvoTrack + 4 links" → "Spelix + 3 links (How it works, Why Spelix, Privacy)". CTA stays as "Request beta access" anchor-link to `#final-cta`. Sticky on scroll. |
+| B | Hero (photo bg + H1 + subhead + CTA pill) | §6.1 | V1 | Swap bg image (see §16.4). H1 = Option A from §4. CTA = email input inline + "Request private-beta access" button. Disclaimer badge below CTA per §6.1. |
+| C | "Introduction / Smarter. Faster. More Personal." — big stat + 3 bullets | §6.2 Problem | V1 | Big stat becomes **"8%"** + caption "of AI fitness apps cite their sources (JMIR, 2024)". Three bullet leads → "No source / No consistency / One body fits all" failure modes verbatim from §6.2. |
+| D | "AI in Action / Your AI coach, always on your wrist" — horizontal card carousel of 6 feature pills | §6.3 How Spelix Works | V1 | **Use non-scrolling 3-card grid**, not the 6-card carousel (overkill + we only have 3 steps). Cards: Upload / Analyse / Coach-with-citations. Below the grid: "What you get" bullets (§6.3). |
+| E | "Why It Works / Smarter training with clear and proven results" — 5-item accordion on left + product image right | §6.4 Differentiators | V1 | **Perfect fit.** Accordion on left = 3 items (not 5): Every claim cites its source / Built with a kinesiology specialist / The Coach Brain compounds. Image on right = Spelix ResultsPage with citation tooltip expanded (§9 asset #1). First item open by default. |
+| F | "Testimonials / Trusted by Athletes Worldwide" | — (skipped for V1) | — | Cut from V1. No beta users to quote yet. Add to V2 per §5 once Sprint BETA produces a clean quote. Keep template pattern noted for the re-add. |
+| G | "FAQ / Frequently Asked Questions" — 6-item accordion | **repurpose** → §6.7 Privacy & Disclaimer | V1 | **Reskin as Privacy**. Headline "What Spelix does with your video — and what it does not do." 3 accordion items (not 6) matching §6.7 exactly: "Your video is not kept" / "Spelix is not a medical device" / "Your data belongs to you". |
+| H | Final CTA (dark rounded block w/ email input + button) | §6.8 Final CTA | V1 | Copy layout verbatim. Swap text to §6.8: "You have filmed your lifts..." + consent checkbox + email input + "Join the private beta". Final disclaimer line below. |
+| I | Footer (logo + tagline + social + nav) | not in plan | V1 | Minimal: Spelix wordmark + §3.2 disclaimer (always visible) + 2 nav links (`/beta-terms`, future `/privacy`) + byline (§12 D-2 recommends a small "Built by [name] with a kinesiology-specialist B.Sc. candidate"). No social icons for V1 (no live channels yet). |
+| — | — | §6.5 Four Dimensions | **V2 only** | Shown in plan §5 as V2. When added, use a 2×2 card grid reusing the `Card` primitive from Section D. |
+| — | — | §6.6 Roadmap | **V2 only** | Same. 3-card row using Section D primitive, but with simple icons instead of photos. |
+
+### 16.4 Visual Assets — Template Uses vs What We Swap
+
+The template hotlinks 25 images + 7 background images from `framerusercontent.com`. Spelix cannot use any of them (licence, domain hotlink fragility, off-topic imagery). Map per-surface:
+
+| Surface | Template uses | Spelix uses | Provenance |
+|---|---|---|---|
+| Hero background | Dark-blue photo of woman on rooftop lifting arms (framerusercontent.com) | **A single high-fidelity dark photo of a barbell lift** — sagittal view, low-saturation, high contrast. Sourced from a paid stock library (Unsplash pro / Pexels) OR the founder's own gym footage treated to match. Must be NON-gendered-focal (no faces as the dominant feature). Store at `frontend/public/landing/hero-bg.webp` — WebP, progressive, ≤250 KB, 2560×1600 source, CSS `object-fit: cover`. | §9 asset list + new |
+| Hero foreground focal element | Smartwatch product mockup with "00" dial | **Spelix ResultsPage hero crop** — small floating "product" card showing a coaching paragraph mid-stream with one citation tooltip expanded. This becomes the single visual proof point. Capture via Playwright MCP on spelix.app against a real completed analysis; crop to ~480×640. | §9 asset #1 (already in plan) |
+| Intro "25%" stat section | (no image) | **No image** — just the big 8% + caption. Keep section minimal, text-only. | n/a |
+| "AI in Action" 6 carousel cards | 6 dark product-scene photos + smartwatch crops | **3 step illustrations** — each a small schematic + label: (1) phone-with-video icon, (2) pose-skeleton overlay icon/SVG, (3) citation-tooltip mockup icon. Option to replace the third card photo with the actual `citation-tooltip.png` crop from §9. | §9 asset list |
+| "Why It Works" accordion+visual | Landscape hillside photo w/ floating watch stats | **Spelix ResultsPage full screenshot** (hero screenshot from §9 asset #1 reused) — fills the right column. First accordion item open ("Every claim has a source") so the visual reinforces citation presence. | §9 asset #1 reused |
+| Final CTA rounded block | Dark photo of woman running | **Reuse hero bg crop** or a different frame from the same source video/photo. Keep it dark enough that white text + chartreuse CTA button both read at AA contrast. | derivative of hero bg |
+| Footer | — | — | n/a |
+
+**Asset production order for V1:**
+
+1. Hero background image (founder picks a stock image or provides own shot → crop/compress).
+2. ResultsPage hero screenshot via Playwright MCP against spelix.app (real analysis, citation tooltip expanded).
+3. Three step icons — SVG, ~96×96, monochrome stroke at `--ink-primary`, optional `--brand-primary` fill for the current step.
+4. Citation tooltip crop — from the same screenshot #2, zoomed detail saved separately for Section D card 3.
+
+**Budget:** all 4 assets should take ≤ 60 min combined. No custom illustration needed for V1.
+
+### 16.5 Component Architecture — Additions to §10 Tree
+
+§10 already specifies `src/components/landing/*`. Template adaptation adds these primitives (all in the same folder):
+
+```
+src/components/landing/
+  SectionLabel.tsx          # Uppercase-ish 14px DM Sans label with tiny diamond icon ◆ on the left
+  SectionHeading.tsx        # H2 wrapper with the 40px / 44lh / -1.2px tracking
+  StatCard.tsx              # Big-number "8%" display — Section C
+  StepCard.tsx              # One of the 3 "How it works" cards — Section D
+  DifferentiatorAccordion.tsx  # The left-side accordion list — Section E
+  AccordionItem.tsx         # Single expandable item used by DifferentiatorAccordion + PrivacyAccordion
+  PrivacyAccordion.tsx      # Reuses AccordionItem — Section G
+  NavBar.tsx                # Sticky top nav on hero + light version on scroll
+  Footer.tsx                # Dark-on-light footer row
+  ScrollReveal.tsx          # IntersectionObserver + Web Animations API wrapper (see §16.7)
+```
+
+**Primitive reuse rules:**
+- `EmailCaptureForm` (already in §10) is used in both Hero and FinalCta. Don't duplicate.
+- `AccordionItem` is used in both Differentiators (Section E, 3 items) and Privacy (Section G, 3 items). Keep it styled once.
+- `SectionLabel` is used at the top of every section except Hero — centralise the "◆ Introduction" pattern so we don't duplicate CSS.
+
+**No carousel primitive for V1.** Section F (Testimonials) is skipped; Section D uses a non-scrolling grid. Defer Embla/keen-slider install to V2.
+
+### 16.6 Tailwind v4 Config Additions
+
+Tailwind 4 uses `@theme` in `globals.css` for tokens. Add (or merge into existing):
+
+```css
+/* frontend/src/styles/globals.css */
+@theme {
+  /* Brand — landing page */
+  --color-brand-primary:       #d5ff45;
+  --color-brand-primary-soft:  #e8ff9c;
+  --color-brand-primary-glow:  rgba(213, 255, 69, 0.2);
+  --color-surface-page:        #fafafa;
+  --color-surface-dark:        #121212;
+  --color-ink-primary:         #000000;
+  --color-ink-muted:           rgba(48, 48, 48, 0.7);
+  --color-ink-on-dark:         #ffffff;
+  --color-ink-on-dark-muted:   #ebebeb;
+  --color-border-subtle:       rgba(0, 0, 0, 0.16);
+
+  /* Typography — landing page */
+  --font-display:  "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-sans:     "DM Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Landing container width */
+  --container-landing: 1128px;
+}
+```
+
+Usage in JSX: `className="bg-[var(--color-brand-primary)] text-[var(--color-ink-primary)] font-[var(--font-display)]"` OR (cleaner) extend Tailwind's shorthand with arbitrary values: `bg-brand-primary`, `font-display`. Tailwind 4 auto-exposes `@theme` vars to the `-*` utility shorthand.
+
+**Existing app colour tokens stay untouched** — product routes (`/upload`, `/results/:id`, `/history`) keep the existing slate/blue palette. Only `LandingPage` + `BetaTermsPage` consume the brand tokens. Concretely: do not globalise `--color-brand-primary` into shadcn `Button` variants — use it as an explicit `className` override on landing components only.
+
+### 16.7 Motion & Scroll Reveal
+
+Template uses **vanilla IntersectionObserver + Web Animations API** (seen in `template-export/index.html` lines 320–489):
+
+- Duration: **600ms**
+- Easing: **ease-out**
+- Initial: `opacity: 0; transform: translateY(20px)` (fallback when data-attr not set)
+- Final: `opacity: 1; transform: none`
+- Fill mode: `forwards`
+- Respects `prefers-reduced-motion: reduce` → skips animation, sets final styles immediately
+
+**Implementation for Spelix**: a lean `ScrollReveal.tsx` hook + wrapper. Zero animation library dependency.
+
+```tsx
+// frontend/src/components/landing/ScrollReveal.tsx (sketch — do not copy verbatim)
+export function ScrollReveal({ children, delay = 0, translateY = 20 }: Props) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) { el.style.opacity = '1'; return; }
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        e.target.animate(
+          [
+            { opacity: 0, transform: `translateY(${translateY}px)` },
+            { opacity: 1, transform: 'translateY(0)' },
+          ],
+          { duration: 600, delay, easing: 'ease-out', fill: 'forwards' },
+        );
+        io.unobserve(e.target);
+      });
+    }, { threshold: 0.15 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [delay, translateY]);
+  return <div ref={ref} style={{ opacity: 0 }}>{children}</div>;
+}
+```
+
+**Where to apply**: wrap each major section's heading + first-paragraph block + each card. Stagger by 100–200ms between sibling cards for the classic "rolling in" feel. Do NOT wrap the hero — it's above the fold and must be visible instantly.
+
+**Hero-specific motion**: the template uses a subtle scale-in on the hero headline. Add optional `.animate-hero-in` class (500ms fade + 1.02→1.0 scale, 200ms delay after mount) — applied once with CSS `@starting-style` (Tailwind 4 / modern browsers) with a JS fallback that just sets final values on browsers without support.
+
+### 16.8 Forbidden-Language Remapping — Template Violates §3.1
+
+The template contains these strings we **must not copy**. Replacements come from §3.1 / §§6.x:
+
+| Template string | Lands where | Spelix replacement |
+|---|---|---|
+| "Injury Prevention" (§4 card #3 title) | AI in Action carousel card | **Never use.** Not applicable anyway — we're replacing the whole carousel with 3-step How-It-Works. No card on injury. |
+| "at risk" / "risky movements" (card description) | AI in Action card body | **Never use.** Same — whole card goes away. |
+| "Proven Accuracy" / "medical-grade sensors" / "ensures highly accurate data" (FAQ answer) | FAQ accordion | **Never use.** FAQ repurposed to Privacy — none of these phrases carry over. |
+| "95%" / specific accuracy numbers | (template FAQ wording implies precision) | **Never use.** §3.1 explicit ban on unverified accuracy claims. |
+| "the future of fitness", "next-gen", "revolutionary" | (none on this template, checked) | — |
+| "Push Your Limits with AI Precision" (hero H1) | Hero | Replace verbatim with §6.1 Option A: *"Barbell form coaching where every piece of feedback cites its source."* |
+| "Track every move, analyze your performance, and get real-time coaching, all from your wrist." (hero subhead) | Hero | Replace with §6.1 subhead about CV + peer-reviewed lit. |
+| "Join waitlist" / "Join the waitlist" (CTA button label) | Nav + Hero + Final CTA | Replace with **"Request private-beta access"** (hero) / **"Join the private beta"** (final CTA) per §6.1 / §6.8. Avoid "waitlist" — sounds commercial; Spelix is private beta. |
+| "Created by Arthur in Framer" | Footer byline | Replace with §12 D-2 recommended byline. Drop the "in Framer" credit. |
+
+**Greptest before merge:** run this command and expect zero matches in the landing components:
+
+```bash
+rg -i 'injur|safety score|medical advice|diagnos|revolutionary|next-gen|future of fitness|95% accurate|proven accuracy|medical-grade|waitlist' frontend/src/pages/LandingPage.tsx frontend/src/components/landing/ frontend/public/beta-terms.md frontend/public/landing/
+```
+
+### 16.9 Implementation Task Order — Next Prompt
+
+Exact order. Each step is a TDD gate or a reviewable commit. Matches the §10 spec + the template additions above.
+
+1. **Tailwind theme tokens** (`globals.css`): add `@theme` block from §16.6. Commit.
+2. **Google Fonts link** in `frontend/index.html`: Host Grotesk 400 + DM Sans 400/500. Commit.
+3. **Primitives first, in order** — no tests on pure layout wrappers; Vitest on anything with state or conditionals:
+   - `SectionWrapper.tsx`, `SectionLabel.tsx`, `SectionHeading.tsx` → commit together
+   - `ScrollReveal.tsx` + unit test (reduced-motion branch, IO trigger) → commit
+   - `AccordionItem.tsx` + unit test (expand/collapse, keyboard `Enter`/`Space`, ARIA `aria-expanded`) → commit
+   - `EmailCaptureForm.tsx` + unit tests from §10 (validate email, consent required, success state, error state) → commit
+4. **`api/beta.ts`** — thin client for `POST /api/v1/beta/requests`. Mock in tests. Commit.
+5. **Backend: `POST /api/v1/beta/requests`** — FastAPI router, rate-limited, email+consent validation, INSERTs into `beta_requests` (migration 008 already live). Pydantic schema + repo layer + unit test + integration test. Commit.
+6. **Section components in page order** — Hero, Problem (stat + 3 failure modes), HowItWorks (3 step cards), Differentiators (accordion + image), Privacy (accordion), FinalCta, Footer, NavBar. Each gets a snapshot test asserting the heading + any dynamic regions render. Commit per section.
+7. **Assemble `LandingPage.tsx`** — wire section composition, preserve existing auth-redirect behaviour (check `supabase.auth.getSession()` → redirect to `/upload`). Commit.
+8. **`BetaTermsPage.tsx` + `public/beta-terms.md`** — add `react-markdown` dep, render file. Commit.
+9. **Route swap** in `src/routes.tsx`: `/` → `LandingPage`, add `/beta-terms`. Commit.
+10. **Assets** — copy hero bg, ResultsPage screenshot, citation tooltip crop, 3 step icons into `frontend/public/landing/`. Commit.
+11. **PostHog instrumentation** — `landing_view`, `landing_email_submit_attempt/_success/_error`, `landing_beta_terms_click`, `landing_scroll_depth` (IO-based per §8). Config uses cookieless mode per §12 D-8. Commit.
+12. **Full vitest run + coverage check** ≥ 90% on new components. Commit if anything added.
+13. **Grep gate** per §16.8. If it finds anything, fix in-place. Commit.
+14. **Manual run** — `cd frontend && npm run dev`, walk Hero → Problem → HowItWorks → Differentiators (expand each accordion item) → Privacy (expand each) → FinalCta → submit test email → confirm thanks state. Screenshot each for self-QA into `landing-page/screenshots/built-v1-*.png`.
+15. **Open PR** `feat/landing-v1` → `main`. Include migration 008 reference (already merged). Security review request on `spelix-security-reviewer` for auth-adjacent surfaces (consent language, disclaimer presence).
+16. **After merge + Deploy to Production** — Playwright MCP E2E on live spelix.app per §10 merge-gate block. Record verification into the handoff.
+
+**Budget guardrail** (§11 strategy item): V1 total dev time under 6 hours. Template-based means most UI is assembly, not design. If any single task above exceeds 45 min, stop and ask.
+
+### 16.10 Template Reference Cleanup Before Merge
+
+The `landing-page/` folder exists for this sprint's work only. Decide at merge time:
+
+- `landing-page/screenshots/*.png` — **keep** if we want them as a v1-handoff artefact; otherwise gitignore and leave on the branch. Recommendation: keep until Sprint BETA closes (May 14), then delete.
+- `landing-page/template-export/index.html` — **delete before merge**. Licence uncertain (Framer template, free tier), 435 KB on main is unjustified once implementation is done.
+- `landing-page/design-tokens.json`, `landing-page/structure.json`, `landing-page/extract-*.js` — **keep** as historical reference. <10 KB total. Useful if we re-theme.
+- `landing-page/landing-page-plan.md` — **keep**. This becomes the V2 roadmap driver.
+
+---
+
+**End of template replication plan. Next prompt: begin implementation at §16.9 step 1.**
