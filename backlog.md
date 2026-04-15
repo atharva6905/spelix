@@ -392,3 +392,32 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 | P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | pending |
 | P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
 
+---
+
+## Completed — L2 Sprint Day 2 — Landing V1 (2026-04-15, session 29)
+
+Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2 hard gate met. No SRS FR IDs — growth/ops surface (see migration 008 docstring + ADR-049). Backend 1436 tests passing (15 new), frontend 256 tests passing (30 new), 91% coverage preserved. E2E verified on live `spelix.app/` — POST `/api/v1/beta/requests` returned 201 for anonymous submission. See ADR-049..ADR-052.
+
+| ID | Title | Size | Deps | Refs | Status | Commit |
+|----|-------|------|------|------|--------|--------|
+| L2-LANDING-01 | Migration 008 — `beta_requests` table + RLS anon INSERT policy | S | — | migration 008 | done | `c005665` (PR #44) |
+| L2-LANDING-02 | Backend beta-request API — `BetaRequest` model + Pydantic schemas + repository + service + `POST /api/v1/beta/requests` router (5/hr rate-limited, 15 tests) | M | L2-LANDING-01 | ADR-052 | done | `f3b8ac9`, `225f528`, `bffbd90`, `fb71fbe`, `4a5966c`, `1dce55b`, `3c19031`, `4cc34c0` |
+| L2-LANDING-03 | Frontend landing components — SectionWrapper/Label/Heading primitives, ScrollReveal, AccordionItem, EmailCaptureForm, BetaDisclaimer + 8 section components (NavBar, Hero, Problem, HowItWorks, Differentiators, Privacy, FinalCta, Footer) | L | L2-LANDING-04 | ADR-049 | done | `c04ef1e`, `a548f08`, `a810350`, `5ee7945`, `1238cc4`, `39f0802`, `25118d9`, `eda5d8d`, `6ca9c85`, `149eb2f`, `631bb1d`, `c0a990b`, `edd56f0`, `e10a307` |
+| L2-LANDING-04 | Tailwind v4 `@theme` brand tokens (chartreuse, DM Sans + Host Grotesk, container 1128px) + Google Fonts preconnect + `<title>` update | S | — | ADR-049 | done | `e5e10f8`, `7b2790b`, `ddf9f5e` |
+| L2-LANDING-05 | PostHog cookieless instrumentation (`persistence: "memory"`, `ip: false`, `autocapture: false`) + `landing_view` + `landing_email_submit_{attempt,success,error}` with `cta_location` + `email_domain` | S | L2-LANDING-03 | ADR-051 | done | `8d25e32` |
+| L2-LANDING-06 | Landing static assets — 3 SVG step icons, ResultsPage screenshot captured via Playwright MCP on prod, CSS radial-gradient hero bg (real photo deferred to V2) | S | — | ADR-049 | done | `1abe968` |
+| L2-LANDING-07 | Route swap — `/` → `LandingPage`, `HomePage.tsx` deleted, `/beta-terms` added → `BetaTermsPage` rendering `public/beta-terms.md` via `react-markdown` | S | L2-LANDING-03 | — | done | `e900697`, `119cb68`, `adccb64`, `c963a13` |
+| L2-LANDING-08 | `spelix-security-reviewer` pre-merge pass → C-1 fix: remove `email` from `BetaRequestResponse` 201 body (observability PII leak) | S | L2-LANDING-02 | ADR-052 | done | `3ee6f37` |
+| L2-LANDING-09 | CI fix: declare `uq_beta_requests_email` UNIQUE index on `BetaRequest.__table_args__` so CI's `create_all` picks it up + regression-guard unit test | S | L2-LANDING-02 | ADR-052 | done | `6197b14` |
+| L2-LANDING-10 | E2E on live `spelix.app/` via browse skill — anon load, 5 H2s present, no console errors, POST `/api/v1/beta/requests` 201 Created, "Thanks" success state rendered. Screenshots: `e2e/screenshots/landing-v1-prod/` | S | L2-LANDING-02, L2-LANDING-03 | — | done | (verification, no code commit) |
+
+### L2 Sprint items opened but NOT in V1 — deferred to Sprint BETA (May 4-14)
+
+| ID | Title | Size | Deps | Refs | Status |
+|----|-------|------|------|------|--------|
+| L2-LANDING-V2-01 | Section 5 "Four Dimensions" — 2×2 card grid (Movement Quality / Technique / Path & Balance / Control) with §6.5 verbatim copy | S | — | landing-page-plan §5 | pending |
+| L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) with §6.6 verbatim copy | S | — | landing-page-plan §5 | pending |
+| L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing-page-plan §16.4 | pending |
+| L2-LANDING-V2-04 | Admin beta-request approval UI + transactional-email invite flow — `/admin` card listing pending requests with approve/reject; single-use invite token → `/signup?invite=TOKEN` | M | L2-LANDING-02 | ADR-050 | pending |
+| L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | pending |
+

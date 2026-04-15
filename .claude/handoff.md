@@ -1,3 +1,42 @@
+# Session 29 Handoff → Session 30: L2 Sprint Day 1-2 complete — Landing V1 live on prod
+
+**Context refresh:** Session 29 shipped Landing V1 to prod on 2026-04-15 (end of Day 2 of the 19-day L2 sprint). STRATEGY.md v3 Day 1-2 hard gate met. Next up per STRATEGY v3 Day 3-5: Track A = expert PDF upload wiring; Track B starts the Phase 3 LangGraph pull-forward. `backlog.md` seeds the V2 polish items under the L2-LANDING-V2-* IDs (deferred to Sprint BETA, May 4-14).
+
+## E2E Verification — Landing V1 (2026-04-15 02:51 EDT)
+
+Merge commit: `ae3b4fb`. Deploy workflow run: `24440399064`, conclusion success. All 6 jobs green. Droplet on merge commit, containers healthy, health endpoint returns `{"status":"ok"}`.
+
+Canary walk via browse skill against live `https://www.spelix.app/` as anonymous:
+- **Title**: "Spelix — Barbell form coaching, grounded in research"
+- **H1**: "Barbell form coaching where every piece of feedback cites its source." (Option A verbatim)
+- **H2 count**: 5 (Problem, HowItWorks, Differentiators, Privacy, FinalCta)
+- **Interactive inventory** (via `$B snapshot -i`): NavBar link-to-Spelix + 3 anchor links (#how-it-works, #why-spelix, #privacy) + "Request beta access" pill, Hero email input + Request private-beta-access button (disabled until consent), consent checkbox + beta-terms link, Read-beta-terms-→ link in disclaimer, DifferentiatorsSection accordion 3 items (first expanded), PrivacySection accordion 3 items (first expanded), FinalCTA email input + Join-the-private-beta button (disabled until consent) + consent checkbox, Footer Beta-terms link.
+- **Perf**: TTFB 11ms, download 105ms, domParse 9ms.
+- **Console errors**: none.
+- **Form submission**: filled `qa-prod-landing-v1-1776235907@example.com`, checked consent, clicked submit. `POST https://api.spelix.app/api/v1/beta/requests` returned `201 Created` in 2295ms, body 107 bytes (no email echoed — C-1 security fix verified). Page transitioned to "Thanks — you're on the list. We'll email an invite within a few days." success state. Check Supabase SQL for the row: `SELECT email, source, status, created_at FROM beta_requests WHERE email LIKE 'qa-prod-%@example.com' ORDER BY created_at DESC LIMIT 1` (expect 1 row, status='pending').
+
+Prod-verification artefacts persisted to `e2e/screenshots/landing-v1-prod/`:
+- `hero-annotated.png` — full interactive snapshot with @ref labels (770 KB)
+- `hero-after-thanks.png` — hero viewport showing Thanks success state (307 KB)
+- `full-page.png` — full-page screenshot post-submission (734 KB)
+
+Local-render validation artefacts (Vite dev server via browse skill) persisted to `landing-page/screenshots/built-v1/`:
+- `00-full-page.png` + one viewport per section (01-hero through 07-footer) + `responsive-{mobile,tablet,desktop}.png`.
+
+## L2-LANDING PRs merged this session
+
+| PR | Title | Merge SHA | Notes |
+|----|-------|-----------|-------|
+| #45 | `feat(landing): private-beta landing page V1` | `ae3b4fb` | 23 commits. Backend beta-request endpoint + 8 landing sections + Tailwind 4 `@theme` brand tokens + PostHog cookieless + route swap. Security review C-1 resolved pre-merge. CI fix for `uq_beta_requests_email` model-side Index applied mid-flight. See ADR-049..ADR-052. |
+
+## Known follow-ups (non-blocking)
+
+- `frontend/src/api/__tests__/beta.test.ts` has a local-uncommitted cleanup (remove the mock's extra `email: "a@b.com"` field so the mock matches production) — stashed as `landing-v1 post-merge: beta.test.ts C-1 mock cleanup + local impl plan`. Harmless on remote (`JSON.stringify(any)` doesn't type-check extra fields), so low-priority to recover.
+- `landing-page/implementation-plan.md` is local-only (also stashed). It's a by-product of this session's subagent-driven execution; not core docs — decide whether to commit as historical reference or discard.
+- Node.js 20 deprecation warnings across all CI jobs ("The following actions target Node.js 20 but are being forced to run on Node.js 24") — unrelated tech debt, bump `actions/checkout@v4` etc. in a future CI maintenance PR.
+
+---
+
 # Session 28 Handoff → Session 29: Phase 2 stable; entering 19-day L2 sprint to 2026-05-03
 
 **Context refresh:** STRATEGY.md was rewritten as v3 on 2026-04-14 (same day as this handoff). Phase 3 is **no longer deferred** — it is pulled forward into a compressed 19-day sprint with a hard gate on **2026-05-03** (not May 9). Previous handoff framing around a May 9 freeze and post-Saturniq Phase 3 is obsolete. Read `STRATEGY.md` before acting on anything in §2 or §6 below.
