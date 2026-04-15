@@ -22,20 +22,40 @@ class TestGetStreaqWorker:
 
         analyses_mod._streaq_worker_cache = None
         analyses_mod._streaq_worker_cache_initialized = False
-
-        # Ensure REDIS_URL is set so the factory attempts to load the worker.
         monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
 
         fake_worker = MagicMock(name="streaq_worker")
-        # Patch the module-level `worker` symbol in streaq_worker so that
-        # analyses._get_streaq_worker's `from app.workers.streaq_worker import worker`
-        # returns our fake.
-        with patch("app.workers.streaq_worker.worker", new=fake_worker):
-            w1 = await analyses_mod._get_streaq_worker()
-            w2 = await analyses_mod._get_streaq_worker()
+        # Use a sys.modules shim with a call counter so we can prove the
+        # lazy import executes exactly once across N calls.
+        import sys
 
-        assert w1 is fake_worker
-        assert w2 is fake_worker  # cached
+        class _ProbeModule:
+            access_count = 0
+
+            def __getattr__(self, name: str) -> object:
+                type(self).access_count += 1
+                if name == "worker":
+                    return fake_worker
+                raise AttributeError(name)
+
+        probe = _ProbeModule()
+        monkeypatch.setitem(sys.modules, "app.workers.streaq_worker", probe)
+
+        w1 = await analyses_mod._get_streaq_worker()
+        # Capture import-machinery access count after first call (includes
+        # __spec__ and __path__ probes from Python's import system in addition
+        # to "worker" itself — typically 3 total, but may vary).
+        count_after_first = type(probe).access_count
+        assert count_after_first >= 1, "expected at least one attribute access on first call"
+
+        w2 = await analyses_mod._get_streaq_worker()
+        w3 = await analyses_mod._get_streaq_worker()
+
+        assert w1 is w2 is w3 is fake_worker
+        assert type(probe).access_count == count_after_first, (
+            "cache should not trigger additional attribute accesses after first call; "
+            f"got {type(probe).access_count - count_after_first} extra access(es)"
+        )
 
     @pytest.mark.asyncio
     async def test_returns_none_when_redis_url_missing(
@@ -49,6 +69,38 @@ class TestGetStreaqWorker:
         monkeypatch.delenv("REDIS_URL", raising=False)
         w = await analyses_mod._get_streaq_worker()
         assert w is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_worker_import_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: if the lazy `from app.workers.streaq_worker import worker`
+        inside `_get_streaq_worker` raises, the factory must swallow it and
+        return None (matching the old ARQ pool's silent-fail contract). The
+        API request path then treats None as 'enqueue disabled' instead of
+        crashing the request.
+        """
+        from app.api.v1 import analyses as analyses_mod
+
+        analyses_mod._streaq_worker_cache = None
+        analyses_mod._streaq_worker_cache_initialized = False
+
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+
+        # Force the lazy import statement itself to raise by shadowing the
+        # streaq_worker module with something that explodes on attribute access.
+        import sys
+
+        class _BrokenModule:
+            def __getattr__(self, name: str) -> object:
+                raise ImportError(f"simulated failure on {name}")
+
+        monkeypatch.setitem(sys.modules, "app.workers.streaq_worker", _BrokenModule())
+
+        w = await analyses_mod._get_streaq_worker()
+        assert w is None
+        # Cache should still be flagged initialized so subsequent calls don't retry.
+        assert analyses_mod._streaq_worker_cache_initialized is True
 
 
 class TestGetServicePassesStreaqWorker:

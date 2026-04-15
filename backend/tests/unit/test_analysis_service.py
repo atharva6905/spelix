@@ -406,13 +406,16 @@ class TestStartAnalysis:
         updated_analysis.id = analysis.id
         repo.update_status.return_value = updated_analysis
 
-        mock_streaq_worker = MagicMock()
         mock_storage = AsyncMock()
 
-        with patch("app.workers.streaq_worker.process_analysis") as mock_task:
-            mock_task.enqueue = AsyncMock()
+        # Use patch.object on the actual task reference to guarantee we override
+        # .enqueue on the specific attribute AnalysisService will read, regardless
+        # of whether the module was already imported earlier in the session.
+        from app.workers.streaq_worker import process_analysis as _process_analysis_ref
+
+        with patch.object(_process_analysis_ref, "enqueue", new_callable=AsyncMock) as mock_enqueue:
             service = AnalysisService(
-                repo=repo, storage=mock_storage, streaq_worker=mock_streaq_worker
+                repo=repo, storage=mock_storage, streaq_worker=MagicMock()
             )
 
             result = await service.start_analysis(
@@ -420,7 +423,7 @@ class TestStartAnalysis:
             )
 
         assert result.status == "quality_gate_pending"
-        mock_task.enqueue.assert_awaited_once_with(analysis.id)
+        mock_enqueue.assert_awaited_once_with(analysis.id)
 
     @pytest.mark.asyncio
     async def test_start_nonexistent_raises_404(self):
