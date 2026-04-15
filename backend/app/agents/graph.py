@@ -218,7 +218,7 @@ def build_adaptive_graph(
     ``reasoner_llm`` is injected for testability — production callers
     pass ``ChatAnthropic(model="claude-sonnet-4-6", temperature=0)``.
     """
-    from langchain_core.messages import HumanMessage, ToolMessage
+    from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
     from langchain_core.tools import StructuredTool
     from pydantic import BaseModel
 
@@ -309,7 +309,7 @@ def build_adaptive_graph(
     async def reasoner(state: AgentState) -> dict[str, Any]:
         state_box["state"] = dict(state)  # snapshot for tools
 
-        messages = list(state.get("messages") or [])
+        messages: list[BaseMessage] = list(state.get("messages") or [])
         if not messages:
             # Seed conversation with the task description.
             task_prompt = _build_adaptive_task_prompt(state)
@@ -332,7 +332,9 @@ def build_adaptive_graph(
                 )
                 continue
             try:
-                result = await tool_fn.coroutine()
+                # ainvoke dispatches to the bound coroutine with JSON args.
+                # Our _NoArgs schema has no fields, so {} is the correct payload.
+                result = await tool_fn.ainvoke({})
             except Exception as exc:
                 result = f"tool error: {exc}"
             messages.append(
