@@ -11,11 +11,7 @@ export default function Hero() {
     >
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-[url('/landing/hero-bg.webp')] bg-cover bg-center opacity-60"
-      />
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 bg-gradient-to-b from-surface-dark/30 to-surface-dark"
+        className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(213,255,69,0.08),transparent_60%),radial-gradient(ellipse_at_bottom_right,rgba(213,255,69,0.04),transparent_55%)]"
       />
       <div className="relative mx-auto grid max-w-[1128px] gap-12 px-6 pb-24 pt-24 md:grid-cols-12 md:px-12 md:pb-32 md:pt-32 lg:px-16">
         <div className="md:col-span-7">
