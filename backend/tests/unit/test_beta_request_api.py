@@ -58,7 +58,8 @@ async def test_valid_submission_returns_201() -> None:
 
     assert resp.status_code == 201
     body = resp.json()
-    assert body["email"] == "newuser@example.com"
+    # Response intentionally does NOT echo the email (PII in response surface).
+    assert "email" not in body
     assert body["status"] == "pending"
     assert "id" in body
     service.submit.assert_awaited_once()

@@ -15,7 +15,6 @@ export interface BetaRequestInput {
 
 export interface BetaRequestResponse {
   id: string;
-  email: string;
   status: string;
   created_at: string;
 }

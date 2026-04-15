@@ -34,11 +34,15 @@ class BetaRequestCreate(BaseModel):
 
 
 class BetaRequestResponse(BaseModel):
-    """Response body for POST /api/v1/beta/requests (201)."""
+    """Response body for POST /api/v1/beta/requests (201).
+
+    Email is intentionally omitted — echoing PII back to an anonymous caller
+    creates observability/logging PII surface (Sentry/Loki breadcrumbs index
+    response bodies). The client already has the email from form state.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
-    email: EmailStr
     status: str
     created_at: datetime

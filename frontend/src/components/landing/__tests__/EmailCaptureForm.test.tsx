@@ -48,7 +48,6 @@ describe("EmailCaptureForm", () => {
   test("successful submission shows thanks state", async () => {
     vi.mocked(requestBetaAccess).mockResolvedValue({
       id: "id1",
-      email: "a@b.com",
       status: "pending",
       created_at: "2026-04-15T00:00:00Z",
     });
