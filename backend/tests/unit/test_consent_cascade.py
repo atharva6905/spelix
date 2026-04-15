@@ -170,8 +170,9 @@ async def test_cascade_job_with_analyses(mock_engine_cls, mock_repo_cls):
 
 @pytest.mark.asyncio
 async def test_withdraw_coach_brain_enqueues_cascade():
-    """Withdrawing coach_brain_contribution consent enqueues ARQ cascade job."""
+    """Withdrawing coach_brain_contribution consent enqueues streaq cascade job."""
     from app.api.v1.consent import withdraw_consent
+    from app.workers.streaq_worker import cascade_consent_withdrawal as _cascade_task
 
     mock_repo = AsyncMock()
     mock_record = MagicMock()
@@ -188,15 +189,41 @@ async def test_withdraw_coach_brain_enqueues_cascade():
     body = MagicMock()
     body.consent_type = "coach_brain_contribution"
 
-    mock_pool = AsyncMock()
+    mock_worker = MagicMock()
 
-    with patch("app.api.v1.consent._get_arq_pool", return_value=mock_pool):
-        await withdraw_consent(body=body, user=user, repo=mock_repo)
+    with patch("app.api.v1.consent._get_streaq_worker", return_value=mock_worker):
+        with patch.object(_cascade_task, "enqueue", new_callable=AsyncMock) as mock_enqueue:
+            await withdraw_consent(body=body, user=user, repo=mock_repo)
+            mock_enqueue.assert_awaited_once_with(str(user["id"]))
 
-    mock_pool.enqueue_job.assert_awaited_once_with(
-        "cascade_consent_withdrawal",
-        user_id=str(user["id"]),
-    )
+
+@pytest.mark.asyncio
+async def test_withdraw_coach_brain_does_not_crash_when_streaq_import_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: if the lazy `from app.workers.streaq_worker import worker`
+    inside `_get_streaq_worker` raises, the factory returns None and the
+    handler silently skips the enqueue — the HTTP request still succeeds.
+
+    Matches the Task 6 pattern in test_streaq_enqueuer.py.
+    """
+    from app.api.v1 import consent as consent_mod
+
+    consent_mod._streaq_worker_cache = None
+    consent_mod._streaq_worker_cache_initialized = False
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+
+    import sys
+
+    class _BrokenModule:
+        def __getattr__(self, name: str) -> object:
+            raise ImportError(f"simulated failure on {name}")
+
+    monkeypatch.setitem(sys.modules, "app.workers.streaq_worker", _BrokenModule())
+
+    w = await consent_mod._get_streaq_worker()
+    assert w is None
+    assert consent_mod._streaq_worker_cache_initialized is True
 
 
 @pytest.mark.asyncio
@@ -219,6 +246,6 @@ async def test_withdraw_analytics_does_not_enqueue():
     body = MagicMock()
     body.consent_type = "analytics"
 
-    with patch("app.api.v1.consent._get_arq_pool") as mock_get_pool:
+    with patch("app.api.v1.consent._get_streaq_worker") as mock_get_worker:
         await withdraw_consent(body=body, user=user, repo=mock_repo)
-        mock_get_pool.assert_not_called()
+        mock_get_worker.assert_not_called()

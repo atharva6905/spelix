@@ -471,7 +471,7 @@ class TestAdminService:
     @pytest.mark.asyncio
     async def test_get_health_returns_queue_depth_and_heartbeat(self):
         mock_redis = AsyncMock()
-        mock_redis.llen = AsyncMock(return_value=7)
+        mock_redis.xlen = AsyncMock(return_value=7)
         mock_redis.get = AsyncMock(return_value=b"1")  # heartbeat exists
 
         service = _make_admin_service(redis=mock_redis)
@@ -484,7 +484,7 @@ class TestAdminService:
     @pytest.mark.asyncio
     async def test_get_health_heartbeat_missing(self):
         mock_redis = AsyncMock()
-        mock_redis.llen = AsyncMock(return_value=0)
+        mock_redis.xlen = AsyncMock(return_value=0)
         mock_redis.get = AsyncMock(return_value=None)  # heartbeat absent
 
         service = _make_admin_service(redis=mock_redis)
@@ -534,7 +534,7 @@ class TestAdminRedisInjection:
     async def test_admin_service_get_health_with_redis_injected(self):
         """AdminService.get_health reads actual queue depth when Redis is wired."""
         mock_redis = AsyncMock()
-        mock_redis.llen = AsyncMock(return_value=5)
+        mock_redis.xlen = AsyncMock(return_value=5)
         mock_redis.get = AsyncMock(return_value="1")
 
         service = _make_admin_service(redis=mock_redis)
@@ -542,7 +542,7 @@ class TestAdminRedisInjection:
 
         assert health["queue_depth"] == 5
         assert health["worker_heartbeat"] is True
-        mock_redis.llen.assert_called_once_with("arq:queue")
+        mock_redis.xlen.assert_called_once_with("streaq:spelix:queues:")
         mock_redis.get.assert_called_once_with("spelix:worker:heartbeat")
 
     @pytest.mark.asyncio
@@ -679,7 +679,7 @@ class TestAdminServiceUsesRepositories:
         mock_profile_repo = AsyncMock(spec=UserProfileRepository)
 
         mock_redis = AsyncMock()
-        mock_redis.llen = AsyncMock(return_value=3)
+        mock_redis.xlen = AsyncMock(return_value=3)
         mock_redis.get = AsyncMock(return_value=b"1")
 
         service = AdminService(

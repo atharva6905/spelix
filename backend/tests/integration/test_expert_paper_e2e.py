@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -52,13 +53,14 @@ class _InMemoryRagRepo:
         return True
 
 
-@patch("app.api.v1.expert.get_arq_pool")
+@patch("app.api.v1.expert.get_streaq_worker")
 @patch("app.api.v1.expert.get_service_role_client")
 @patch("app.api.v1.expert.PaperStorageService")
-def test_full_upload_flow_phase1_through_phase3(MockStorage, mock_svc, MockPool):
+def test_full_upload_flow_phase1_through_phase3(MockStorage, mock_svc, MockWorker):
     from app.api.deps import get_expert_reviewer_user
     from app.api.v1.expert import _get_rag_repo, router
     from app.services.paper_storage import SignedPaperUpload
+    from app.workers.streaq_worker import ingest_paper as _ingest_task
 
     repo = _InMemoryRagRepo()
 
@@ -81,32 +83,33 @@ def test_full_upload_flow_phase1_through_phase3(MockStorage, mock_svc, MockPool)
     storage.download_head_bytes = AsyncMock(return_value=b"%PDF-1.7")
     mock_svc.return_value = MagicMock()
 
-    pool = AsyncMock()
-    pool.enqueue_job = AsyncMock()
-    MockPool.return_value = pool  # patched fn is awaited by handler; AsyncMock matches
+    # get_streaq_worker() is awaited by the handler; return a non-None sentinel
+    # so the None-guard does not raise 503.
+    MockWorker.return_value = MagicMock()
 
     client = TestClient(app)
 
-    r1 = client.post("/api/v1/expert/papers", json=VALID_METADATA)
-    assert r1.status_code == 201, r1.text
-    body1 = r1.json()
-    paper_id = body1["id"]
-    storage_path = body1["storage_path"]
-    assert storage_path.startswith(f"papers/{paper_id}/")
-    assert storage_path.endswith("int_test.pdf")
-    assert body1["upload_url"] == "https://s/upload-tok"
+    with patch.object(_ingest_task, "enqueue", new_callable=AsyncMock) as mock_enqueue:
+        r1 = client.post("/api/v1/expert/papers", json=VALID_METADATA)
+        assert r1.status_code == 201, r1.text
+        body1 = r1.json()
+        paper_id = body1["id"]
+        storage_path = body1["storage_path"]
+        assert storage_path.startswith(f"papers/{paper_id}/")
+        assert storage_path.endswith("int_test.pdf")
+        assert body1["upload_url"] == "https://s/upload-tok"
 
-    stored = repo._rows[UUID(paper_id)]
-    assert stored.review_status == "uploading"
-    assert stored.storage_path == storage_path
+        stored = repo._rows[UUID(paper_id)]
+        assert stored.review_status == "uploading"
+        assert stored.storage_path == storage_path
 
-    r3 = client.post(f"/api/v1/expert/papers/{paper_id}/complete")
-    assert r3.status_code == 200, r3.text
-    body3 = r3.json()
-    assert body3["review_status"] == "pending"
-    assert body3["storage_path"] == storage_path
+        r3 = client.post(f"/api/v1/expert/papers/{paper_id}/complete")
+        assert r3.status_code == 200, r3.text
+        body3 = r3.json()
+        assert body3["review_status"] == "pending"
+        assert body3["storage_path"] == storage_path
 
-    pool.enqueue_job.assert_awaited_once_with("ingest_paper", paper_id)
+        mock_enqueue.assert_awaited_once_with(str(paper_id))
     assert repo._rows[UUID(paper_id)].review_status == "pending"
 
 
@@ -152,3 +155,34 @@ def test_invalid_pdf_bytes_rejected_and_row_deleted(MockStorage, mock_svc):
 
     storage.delete_object.assert_awaited_once_with(storage_path)
     assert UUID(paper_id) not in repo._rows
+
+
+
+
+@pytest.mark.asyncio
+async def test_get_streaq_worker_returns_none_when_import_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: if the lazy `from app.workers.streaq_worker import worker`
+    inside `get_streaq_worker` raises, the factory returns None and the
+    handler silently skips the enqueue — the HTTP request still succeeds.
+
+    Same pattern as test_streaq_enqueuer.py and test_consent_cascade.py.
+    """
+    from app.api.v1 import expert as expert_mod
+
+    expert_mod._streaq_worker_cache = None
+    expert_mod._streaq_worker_cache_initialized = False
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379")
+
+    import sys
+
+    class _BrokenModule:
+        def __getattr__(self, name: str) -> object:
+            raise ImportError(f"simulated failure on {name}")
+
+    monkeypatch.setitem(sys.modules, "app.workers.streaq_worker", _BrokenModule())
+
+    w = await expert_mod.get_streaq_worker()
+    assert w is None
+    assert expert_mod._streaq_worker_cache_initialized is True

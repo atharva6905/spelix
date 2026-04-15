@@ -41,41 +41,45 @@ from app.utils.pdf_upload import PDF_MAGIC_BYTES, FilenameValidationError, sanit
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level ARQ pool cache (same pattern as analyses.py / consent.py).
-# Exactly one pool per process; two-state cache so a failed init doesn't retry.
+# Module-level streaq worker cache (same pattern as analyses.py / consent.py).
+# Exactly one worker reference per process; two-state cache so a failed init
+# doesn't retry.
 # ---------------------------------------------------------------------------
-_arq_pool_cache: Any | None = None
-_arq_pool_cache_initialized: bool = False
+_streaq_worker_cache: Any | None = None
+_streaq_worker_cache_initialized: bool = False
 
 
-async def get_arq_pool() -> Any | None:
-    """Build and cache the ARQ Redis pool for enqueueing ingest_paper jobs.
+async def get_streaq_worker() -> Any | None:
+    """Return the cached streaq Worker for enqueueing paper-ingestion jobs.
 
-    Named ``get_arq_pool`` (not ``_get_arq_pool``) so that unit tests can
-    patch it at ``app.api.v1.expert.get_arq_pool``.
+    Named `get_streaq_worker` (no leading underscore) so that unit tests can
+    patch `app.api.v1.expert.get_streaq_worker`. Same two-state cache shape
+    as `analyses.py::_get_streaq_worker` and `consent.py::_get_streaq_worker`.
+    Returns None when REDIS_URL is unset or when the lazy import raises; the
+    enqueue site treats None as 'enqueue disabled' so HTTP requests succeed
+    even if the worker is unavailable.
     """
-    global _arq_pool_cache, _arq_pool_cache_initialized
+    global _streaq_worker_cache, _streaq_worker_cache_initialized
 
-    if _arq_pool_cache_initialized:
-        return _arq_pool_cache
+    if _streaq_worker_cache_initialized:
+        return _streaq_worker_cache
 
     redis_url = os.environ.get("REDIS_URL")
     if not redis_url:
-        _arq_pool_cache = None
-        _arq_pool_cache_initialized = True
+        _streaq_worker_cache = None
+        _streaq_worker_cache_initialized = True
         return None
 
     try:
-        import arq
-        from arq.connections import RedisSettings
+        from app.workers.streaq_worker import worker
 
-        _arq_pool_cache = await arq.create_pool(RedisSettings.from_dsn(redis_url))
-    except Exception as exc:
-        logger.warning("Failed to create ARQ pool in expert router: %s", exc)
-        _arq_pool_cache = None
+        _streaq_worker_cache = worker
+    except Exception as e:
+        logger.warning("Failed to import streaq worker: %s", e)
+        _streaq_worker_cache = None
 
-    _arq_pool_cache_initialized = True
-    return _arq_pool_cache
+    _streaq_worker_cache_initialized = True
+    return _streaq_worker_cache
 
 
 router = APIRouter(tags=["expert"])
@@ -333,9 +337,9 @@ async def complete_paper_upload(
 
     # Confirm the ingestion queue is reachable BEFORE flipping the row —
     # otherwise a missing REDIS_URL leaves the paper in 'pending' with no
-    # ARQ job enqueued (silent orphan, security review C-1).
-    pool = await get_arq_pool()
-    if pool is None:
+    # job enqueued (silent orphan, security review C-1).
+    streaq_worker = await get_streaq_worker()
+    if streaq_worker is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -368,7 +372,10 @@ async def complete_paper_upload(
             },
         )
 
-    await pool.enqueue_job("ingest_paper", str(paper_id))
+    # Lazy-imported to avoid api.v1 → worker → api.v1 cycle.
+    from app.workers.streaq_worker import ingest_paper
+
+    await ingest_paper.enqueue(str(paper_id))
 
     return RagDocumentCompleteResponse(
         id=updated.id,

@@ -58,13 +58,15 @@ def client(expert_app):
 
 
 class TestCompletePaperUpload:
-    @patch("app.api.v1.expert.get_arq_pool")
+    @patch("app.api.v1.expert.get_streaq_worker")
     @patch("app.api.v1.expert.get_service_role_client")
     @patch("app.api.v1.expert.PaperStorageService")
     @patch("app.api.v1.expert.RagDocumentRepository")
     def test_happy_path_flips_to_pending_and_enqueues(
-        self, MockRepo, MockStorage, mock_svc, MockPool, client
+        self, MockRepo, MockStorage, mock_svc, MockWorker, client
     ):
+        from app.workers.streaq_worker import ingest_paper as _ingest_task
+
         doc_id = uuid4()
         path = f"papers/{doc_id}/paper.pdf"
         uploading = _make_uploading_doc(doc_id, path)
@@ -79,18 +81,16 @@ class TestCompletePaperUpload:
         storage_instance.download_head_bytes = AsyncMock(return_value=b"%PDF-1.4")
 
         mock_svc.return_value = MagicMock()
+        MockWorker.return_value = MagicMock()
 
-        pool = AsyncMock()
-        pool.enqueue_job = AsyncMock()
-        MockPool.return_value = pool
+        with patch.object(_ingest_task, "enqueue", new_callable=AsyncMock) as mock_enqueue:
+            resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
 
-        resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
-
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["review_status"] == "pending"
-        assert body["storage_path"] == path
-        pool.enqueue_job.assert_awaited_once_with("ingest_paper", str(doc_id))
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["review_status"] == "pending"
+            assert body["storage_path"] == path
+            mock_enqueue.assert_awaited_once_with(str(doc_id))
         repo_instance.update_review_status.assert_awaited_once()
         storage_instance.download_head_bytes.assert_awaited_once_with(path, n=8)
 
@@ -143,15 +143,15 @@ class TestCompletePaperUpload:
         resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
         assert resp.status_code == 404
 
-    @patch("app.api.v1.expert.get_arq_pool")
+    @patch("app.api.v1.expert.get_streaq_worker")
     @patch("app.api.v1.expert.get_service_role_client")
     @patch("app.api.v1.expert.PaperStorageService")
     @patch("app.api.v1.expert.RagDocumentRepository")
-    def test_returns_503_when_arq_pool_is_none_and_does_not_flip_status(
-        self, MockRepo, MockStorage, mock_svc, MockPool, client
+    def test_returns_503_when_streaq_worker_is_none_and_does_not_flip_status(
+        self, MockRepo, MockStorage, mock_svc, MockWorker, client
     ):
-        """Security review C-1: if get_arq_pool() returns None (REDIS_URL
-        missing or pool creation failed), the DB row must NOT be flipped
+        """Security review C-1: if get_streaq_worker() returns None (REDIS_URL
+        missing or import failed), the DB row must NOT be flipped
         to 'pending'; otherwise we'd have a silent orphan with no
         ingestion job enqueued."""
         doc_id = uuid4()
@@ -166,7 +166,7 @@ class TestCompletePaperUpload:
         storage_instance.download_head_bytes = AsyncMock(return_value=b"%PDF-1.4")
 
         mock_svc.return_value = MagicMock()
-        MockPool.return_value = None  # missing REDIS_URL path
+        MockWorker.return_value = None  # missing REDIS_URL / import-failure path
 
         resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
 

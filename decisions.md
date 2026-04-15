@@ -453,3 +453,36 @@ P2-005 is open. The `ingest_paper` task in this scope downloads the PDF and logs
 - **Multipart/form-data on FastAPI** — rejected. Would make the backend a bandwidth bottleneck on the 4 GB droplet; violates ADR-048 memory budget. Signed-URL matches existing patterns.
 - **One-phase upload + worker polls** — rejected. Worker is ARQ, not a long-running poller; adding poll loops adds complexity. A cheap completion endpoint is clearer.
 - **Reuse `videos` bucket with `papers/` prefix** — rejected. Bucket-level RLS is clearer when one bucket = one purpose. Video RLS uses `user_id` path segments; papers RLS needs role claims.
+
+## ADR-BRAIN-04-reversal — streaq migration pulled into L2 sprint (Day 3-9)
+
+**Date:** 2026-04-15
+**Status:** Accepted. Supersedes the deferral clause in ADR-BRAIN-04 (ARQ stays for Phase 2, migrate in Phase 3).
+**Scope:** Drop-in replacement only — no streaq task graphs, middleware, priorities, or retry policies in this window.
+
+**Decision:** Migrate from ARQ ≥0.27.0 to streaq ≥6.4.0 within the 7-day window Apr 16-22, 2026. All 5 current job types (`process_analysis`, `cascade_consent_withdrawal`, `ingest_paper`, `cleanup_expired_artifacts`, `ping_qdrant_health`) move to streaq. ARQ dependency drops entirely at end of sprint.
+
+**Justification:**
+- ARQ is in maintenance-only mode (tracking issue: https://github.com/python-arq/arq/issues/510; v0.27.0 Feb 2026 was the last release).
+- streaq v6.4.0 shipped 2026-04-10 with anyio structured concurrency and self-reports 5× ARQ throughput.
+- Being on an unmaintained queue weakens the interview-narrative "production-grade infrastructure" signal.
+- Original ADR-BRAIN-04 budgeted 2 weeks; the L2 sprint compresses this to 7 days by limiting scope to drop-in replacement.
+
+**Preserved behaviors (non-negotiable — regression test any breakage):**
+- Idempotency at task level (terminal-state guard in `process_analysis`).
+- Heartbeat at `spelix:worker:heartbeat` with 90s TTL, 30s refresh cadence (NFR-OPER-02).
+- Concurrency=1 on the worker container (MediaPipe RAM peak ~350MB on 2GB droplet).
+- Coaching SSE pub/sub via independent `redis.asyncio` client (not queue-coupled).
+- Cron schedules: 02:00 UTC `ping_qdrant_health`, 03:00 UTC `cleanup_expired_artifacts`.
+
+**Fallback (stop-loss trigger per STRATEGY.md):** if migration blocks Phase 3 start by >5 days, revert to ARQ with `max_jobs=1`, `job_timeout=900` and migrate post-interviews. Revert commit kept at the branch's base SHA.
+
+**Files touched:**
+- `backend/pyproject.toml`, `backend/uv.lock` — dep swap
+- `backend/app/workers/streaq_worker.py` (new) — Worker + Context + task registry
+- `backend/app/workers/{analysis_worker,consent_cascade,paper_ingestion,cleanup,keepalive}.py` — unchanged bodies
+- `backend/app/api/v1/{analyses,consent,expert}.py` — enqueue-site rewrites
+- `backend/app/services/analysis.py` — param rename
+- `docker-compose.prod.yml` — CLI command change
+- `backend/CLAUDE.md` — docs update
+- `backend/app/workers/settings.py` — deleted at end

@@ -57,7 +57,9 @@ class AdminService:
         worker_heartbeat = False
         if self._redis is not None:
             try:
-                queue_depth = await self._redis.llen("arq:queue")
+                # streaq stores the task queue as a Redis Stream at `streaq:{queue_name}:queues:`,
+                # not a list — so we query via XLEN, not LLEN.
+                queue_depth = await self._redis.xlen("streaq:spelix:queues:")
             except Exception:
                 pass
             try:
