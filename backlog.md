@@ -377,7 +377,7 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| L2-PHASE3-BATCH1 | Phase 3 Batch 1 — LangGraph agent core (FR-AICP-18/19/20) | done at PR merge | XL | 2026-04-15 | — |
+| L2-PHASE3-BATCH1 | Phase 3 Batch 1 — LangGraph agent core (FR-AICP-18/19/20) | XL | — | FR-AICP-18, FR-AICP-19, FR-AICP-20 | done (PR #52 → `5df0921`) |
 | P3-001 | LangGraph StateGraph definition — AgentState with tools: get_rep_metrics, retrieve_papers, retrieve_coach_brain, flag_form_deviation, compare_to_user_history, generate_correction_plan. Conditional edges for deterministic flow initially. | XL | — | FR-AICP-18 | done — covered by L2-PHASE3-BATCH1 |
 | P3-002 | Adaptive agent reasoning — agent reasons based on observations, not fixed script. Tool selection via LLM with descriptive docstrings. | L | P3-001 | FR-AICP-19 | done — covered by L2-PHASE3-BATCH1 |
 | P3-003 | LangSmith tracing integration — full agent reasoning trace logged per analysis | M | P3-001 | FR-AICP-20 | done — covered by L2-PHASE3-BATCH1 |
@@ -395,6 +395,48 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 |----|-------|------|------|---------|--------|
 | P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | pending |
 | P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
+
+---
+
+## Completed — L2 Sprint Day 5 — Phase 3 Batch 1 LangGraph Agent (2026-04-15, session 32)
+
+Phase 3 Batch 1 pulled forward from the scheduled Day 10-13 window into the Day 5-9 buffer freed by the streaq migration shipping on Day 4 (per ADR-TIMELINE-01). Three SRS Must requirements landed in a single PR: FR-AICP-18 (deterministic `StateGraph` with 6 composable tools + conditional edges), FR-AICP-19 (adaptive tool-calling graph via `ChatAnthropic.bind_tools` + docstring-driven selection), FR-AICP-20 (LangSmith tracing + enriched `agent_trace_json` JSONB payload). The entire agent path lives in `backend/app/agents/` as a new package; existing imperative coaching orchestration in `analysis_worker.py` was extracted into `_run_coaching_imperative` and kept as a fallback behind `SPELIX_PHASE3_AGENT_ENABLED=0` default, so the merge itself changed no prod behavior. Post-merge infra op flipped the flag to `1` + restarted worker; Playwright MCP E2E against live `spelix.app` confirmed analysis `d42f33ea-b464-4c9b-bd3d-c775547d52c2` ran all 10 graph nodes with `mode=deterministic`, `retrieval_source=papers_only_fallback`, 0 console errors. Backend 1520 tests passing (baseline 1477 + 43 new agent tests), coverage 90%, ruff + pyright clean. 21 commits merged via PR #52 (`5df0921`) — 17 planned tasks + 4 CI-feedback fixups (e2e patch paths post-extraction, pyright TypedDict `total=True` per ADR-AGENTSTATE-01, `ChatAnthropic` signature alignment, coverage uplift). Final code review by superpowers:code-reviewer surfaced 2 Important issues pre-merge (both fixed in `85f27fc`): `_wrap_trace` exception path now propagates the failed-node trace entry; `retrieve_coach_brain` classifies `retrieval_source` per FR-BRAIN-05 thresholds (0.82 primary, 0.65 hybrid floor, else papers-only fallback).
+
+| ID | Title | Size | Deps | Refs | Status | Commit |
+|----|-------|------|------|------|--------|--------|
+| L2-PHASE3-01 | deps: langgraph, langchain-anthropic, langchain-core, langsmith | S | — | — | done | `eeb8732` |
+| L2-PHASE3-02 | ADR-LANGGRAPH-01 + ADR-TIMELINE-01 | S | — | — | done | `18b78fa` |
+| L2-PHASE3-03 | `AgentState` TypedDict + `NodeEvent` + `make_initial_state` | S | L2-PHASE3-01 | FR-AICP-18 | done | `d5d168f` |
+| L2-PHASE3-04 | Six composable tools — `get_rep_metrics`, `retrieve_papers`, `retrieve_coach_brain`, `flag_form_deviation`, `compare_to_user_history`, `generate_correction_plan` (+ `AnalysisRepository.list_recent_by_user`) | L | L2-PHASE3-03 | FR-AICP-18 | done | `9bc5866`, `7e74973`, `0eb486f`, `1b9c284`, `0a1df6d`, `1002c55` |
+| L2-PHASE3-05 | Post-generation nodes — `validate_output`, `cove_verify`, `safety_filter`, `faithfulness_gate` (wrap existing Phase 2 services) | M | L2-PHASE3-03 | FR-AICP-10, FR-AICP-14, FR-AICP-08, FR-BRAIN-14 | done | `0cef358` |
+| L2-PHASE3-06 | Deterministic `StateGraph` — 10 nodes, conditional edges, `_wrap_trace` helper appending `NodeEvent` per node | M | L2-PHASE3-04, L2-PHASE3-05 | FR-AICP-18 | done | `4d91e5a` |
+| L2-PHASE3-07 | LangSmith tracing helpers — `langsmith_enabled`, `run_config_for_analysis`, `serialize_trace_for_storage` (8KB JSONB cap) | S | L2-PHASE3-06 | FR-AICP-20 | done | `08be771` |
+| L2-PHASE3-08 | Adaptive tool-calling graph — `ChatAnthropic.bind_tools` + `StructuredTool.from_function` + `state_box` mutable-handle pattern | L | L2-PHASE3-06 | FR-AICP-19 | done | `0f702bb` |
+| L2-PHASE3-09 | `run_coaching_graph` entry point + enriched `agent_trace_json` payload shape (`mode`, `nodes_executed[]`, `eval_scores`, `cove_iterations`, `converged`, `retrieval_source`, `degraded_mode`) | S | L2-PHASE3-06..08 | FR-AICP-18, FR-AICP-19, FR-AICP-20 | done | `2313148` |
+| L2-PHASE3-10 | Worker dispatcher — extract `_run_coaching_imperative` from `_run_pipeline`; add `_run_coaching_graph`; route via `SPELIX_PHASE3_AGENT_ENABLED` env flag; return tuple propagated to PDF pipeline | L | L2-PHASE3-09 | FR-AICP-18 | done | `7917761` |
+| L2-PHASE3-11 | Full deterministic E2E integration test — real graph, mocked LLM; asserts tool ordering + `trace_payload` shape + eval_scores | S | L2-PHASE3-10 | — | done | `95ace59` |
+| L2-PHASE3-12 | `backend/CLAUDE.md` "Phase 3 Agent Architecture" section + env-flag table + rollout procedure + backlog row seed | S | all above | — | done | `18e2c50` |
+| L2-PHASE3-13 | Code-review fixes — `_wrap_trace` propagates failed-node trace via `state["trace"]` mutation before re-raise; `retrieve_coach_brain` classifies `retrieval_source` per FR-BRAIN-05 thresholds (0.82 primary, 0.65 hybrid floor, else `papers_only_fallback`) | S | L2-PHASE3-12 | FR-AICP-20, FR-BRAIN-05 | done | `85f27fc` |
+| L2-PHASE3-14 | CI fixes — e2e `test_full_flow.py` patch paths redirected to source modules post-extraction; `AgentState` `total=True` (ADR-AGENTSTATE-01); `ChatAnthropic` signature alignment (`model_name`, `max_tokens_to_sample`, `timeout`, `stop`); typed `BaseMessage` list + `StructuredTool.ainvoke({})` for adaptive graph | M | L2-PHASE3-13 | ADR-AGENTSTATE-01 | done | `f7d5094`, `d36e581` |
+| L2-PHASE3-15 | Coverage uplift — 6 integration tests for `_run_coaching_graph` branches (happy path, flagged-review, Qdrant available, Qdrant degraded, keyframe, no-profile, coaching_output=None RuntimeError). Restored 88.51% → 90% | S | L2-PHASE3-10 | — | done | `13287de` |
+| L2-PHASE3-16 | Open PR #52, green CI round 4, merge via `mcp__github__merge_pull_request` `merge_method="merge"` (never squash per memory) | S | all above | — | done | PR #52 `5df0921` |
+| L2-PHASE3-17 | Post-merge infra op — `.env.prod` → `SPELIX_PHASE3_AGENT_ENABLED=1` + `SPELIX_AGENT_MODE=deterministic`; worker recreated via `docker compose up -d worker`. Playwright MCP E2E against analysis `d42f33ea-b464-4c9b-bd3d-c775547d52c2` on `spelix.app`: all 10 graph nodes executed, `mode=deterministic`, `retrieval_source=papers_only_fallback`, all 7 trace keys persisted to `agent_trace_json`, 0 console errors | S | L2-PHASE3-16 | FR-AICP-18, FR-AICP-19, FR-AICP-20 | done | (infra op, no code commit) |
+
+**ADRs added this session:**
+- **ADR-LANGGRAPH-01** — LangGraph as agent orchestration framework (Phase 3)
+- **ADR-TIMELINE-01** — Phase 3 pulled forward into the May 3 L2 sprint
+- **ADR-AGENTSTATE-01** — `AgentState` TypedDict uses `total=True` for pyright-safe reads
+
+**Files touched:**
+- `backend/app/agents/{__init__,state,tools,nodes,graph,tracing}.py` (new package)
+- `backend/app/workers/analysis_worker.py` — imperative extraction + graph dispatcher
+- `backend/app/repositories/analysis.py` — `list_recent_by_user` method
+- `backend/tests/unit/test_agents_{state,tools,nodes,graph_deterministic,graph_adaptive,tracing}.py` (new)
+- `backend/tests/integration/{test_agents_coaching_e2e,test_agents_coaching_graph_path}.py` (new)
+- `backend/tests/unit/test_analysis_repository.py` (new)
+- `backend/pyproject.toml`, `backend/uv.lock` — +4 deps
+- `backend/CLAUDE.md` — Phase 3 Agent Architecture section
+- `decisions.md` — 3 ADRs (LANGGRAPH-01, TIMELINE-01, AGENTSTATE-01)
 
 ---
 
