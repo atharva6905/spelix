@@ -317,16 +317,15 @@ def check_framing(
     if metric < min_threshold:
         passed = False
         user_message = _FRAMING_TOO_SMALL_MSG
+        threshold = min_threshold
     elif metric > _FRAMING_MAX_FRACTION:
         passed = False
         user_message = _FRAMING_TOO_LARGE_MSG
+        threshold = _FRAMING_MAX_FRACTION
     else:
         passed = True
         user_message = _FRAMING_PASS_MSG
-
-    threshold = (
-        min_threshold if metric <= min_threshold else _FRAMING_MAX_FRACTION
-    )
+        threshold = min_threshold
 
     return GateCheckResult(
         passed=passed,
