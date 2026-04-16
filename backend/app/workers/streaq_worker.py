@@ -140,11 +140,14 @@ def _adapt_ctx(context: WorkerContext) -> dict[str, Any]:
     }
 
 
-# timeout=900 per ADR-BRAIN-04 Phase-2 + ADR-055 — MediaPipe BlazePose Heavy on
-# the 2-vCPU droplet costs ~150–180 ms/frame, so a 20–30 s 1080p@59fps clip takes
-# 3–7 minutes just for pose extraction (atharva-bench.mov hit the old 300 s ceiling
-# in session 33). Other tasks stay at 300 s — they are sub-second in the common case.
-@worker.task(timeout=900)
+# timeout=1800 per ADR-058 (D-035 instrumentation tier) — bench-vs-prod gap left
+# the 900 s ceiling unsafe for full-length 1080p@59fps clips even after the 720p
+# pose cap (PR #61) and streaming barbell tracking (PR #59). Doubled to 1800 s
+# as a safety net while telemetry (analyses.timing_json) reveals where the prod
+# pipeline actually spends its budget. Other tasks stay at 300 s — sub-second
+# in the common case. Re-tighten once Tier 2 (ffmpeg fps normalize / GPU offload)
+# lands and a 22.8 s clip routinely completes under ~600 s.
+@worker.task(timeout=1800)
 async def process_analysis(
     analysis_id: UUID,
     context: WorkerContext = WorkerDepends(),
