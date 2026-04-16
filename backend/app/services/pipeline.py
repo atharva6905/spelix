@@ -454,6 +454,7 @@ async def run_cv_pipeline(
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 3: Quality gates
@@ -487,6 +488,7 @@ async def run_cv_pipeline(
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     if not gate_result.passed:
         analysis.status = transition(analysis.status, "quality_gate_rejected")
@@ -504,15 +506,18 @@ async def run_cv_pipeline(
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
     # Step 4: Angle timeseries + smoothing (CPU-bound)
     # ------------------------------------------------------------------ #
-    angle_timeseries = await loop.run_in_executor(
-        None, compute_angle_timeseries, landmarks_per_frame, exercise_type,
-    )
+    with timer.stage("angle_timeseries"):
+        angle_timeseries = await loop.run_in_executor(
+            None, compute_angle_timeseries, landmarks_per_frame, exercise_type,
+        )
     result.angle_timeseries = angle_timeseries
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 5: Rep detection (CPU-bound)
@@ -525,33 +530,37 @@ async def run_cv_pipeline(
 
     primary_series = angle_timeseries.get(primary_key, np.array([]))
 
-    reps = await loop.run_in_executor(
-        None,
-        detect_reps,
-        primary_series,
-        landmarks_per_frame,
-        exercise_type,
-        exercise_variant,
-        fps,
-    )
+    with timer.stage("rep_detection"):
+        reps = await loop.run_in_executor(
+            None,
+            detect_reps,
+            primary_series,
+            landmarks_per_frame,
+            exercise_type,
+            exercise_variant,
+            fps,
+        )
     result.reps = reps
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
     # Step 6: Per-rep metric extraction (CPU-bound)
     # ------------------------------------------------------------------ #
-    rep_metrics = await loop.run_in_executor(
-        None,
-        extract_rep_metrics,
-        reps,
-        landmarks_per_frame,
-        angle_timeseries,
-        exercise_type,
-        exercise_variant,
-        fps,
-    )
+    with timer.stage("metric_extraction"):
+        rep_metrics = await loop.run_in_executor(
+            None,
+            extract_rep_metrics,
+            reps,
+            landmarks_per_frame,
+            angle_timeseries,
+            exercise_type,
+            exercise_variant,
+            fps,
+        )
     result.rep_metrics = rep_metrics
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 7: Tier 1–5 confidence scoring (FR-CVPL-20–25, replaces Phase 0)
@@ -560,38 +569,40 @@ async def run_cv_pipeline(
     from app.cv.confidence import compute_confidence_result
 
     cfg = ThresholdConfig()
-    confidence_results = []
-    for rm in rep_metrics:
-        # Find depth frame: frame with min primary angle within the rep range
-        primary_angles = primary_series[rm.start_frame:rm.end_frame + 1]
-        if len(primary_angles) > 0:
-            depth_frame_idx = rm.start_frame + int(np.argmin(primary_angles))
-        else:
-            depth_frame_idx = (rm.start_frame + rm.end_frame) // 2
+    with timer.stage("confidence_scoring"):
+        confidence_results = []
+        for rm in rep_metrics:
+            # Find depth frame: frame with min primary angle within the rep range
+            primary_angles = primary_series[rm.start_frame:rm.end_frame + 1]
+            if len(primary_angles) > 0:
+                depth_frame_idx = rm.start_frame + int(np.argmin(primary_angles))
+            else:
+                depth_frame_idx = (rm.start_frame + rm.end_frame) // 2
 
-        conf_result = compute_confidence_result(
-            landmarks_per_frame=landmarks_per_frame,
-            start_frame=rm.start_frame,
-            end_frame=rm.end_frame,
-            exercise_type=exercise_type,
-            depth_frame_idx=depth_frame_idx,
-            cfg=cfg,
-            rep_index=rm.rep_index,
-        )
-        confidence_results.append(conf_result)
-        # Backfill DetectedRep.confidence_score with Tier 5 value
-        if rm.rep_index < len(reps):
-            reps[rm.rep_index].confidence_score = conf_result.tier5
+            conf_result = compute_confidence_result(
+                landmarks_per_frame=landmarks_per_frame,
+                start_frame=rm.start_frame,
+                end_frame=rm.end_frame,
+                exercise_type=exercise_type,
+                depth_frame_idx=depth_frame_idx,
+                cfg=cfg,
+                rep_index=rm.rep_index,
+            )
+            confidence_results.append(conf_result)
+            # Backfill DetectedRep.confidence_score with Tier 5 value
+            if rm.rep_index < len(reps):
+                reps[rm.rep_index].confidence_score = conf_result.tier5
 
-    result.confidence_results = confidence_results
-    rep_confidences = [cr.tier5 for cr in confidence_results]
-    session_confidence = compute_session_confidence(rep_confidences)
-    result.session_confidence = session_confidence
+        result.confidence_results = confidence_results
+        rep_confidences = [cr.tier5 for cr in confidence_results]
+        session_confidence = compute_session_confidence(rep_confidences)
+        result.session_confidence = session_confidence
 
     analysis.confidence_score = session_confidence
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 8: Write rep metrics to DB
@@ -617,10 +628,12 @@ async def run_cv_pipeline(
     # ------------------------------------------------------------------ #
     from app.cv.keyframe_extraction import extract_keyframes
 
-    keyframes = await loop.run_in_executor(
-        None, extract_keyframes, video_local, reps, primary_series,
-    )
+    with timer.stage("keyframe_extraction"):
+        keyframes = await loop.run_in_executor(
+            None, extract_keyframes, video_local, reps, primary_series,
+        )
     result.keyframes = keyframes
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
 
@@ -629,45 +642,48 @@ async def run_cv_pipeline(
     # Streams frames from disk one at a time to avoid ~8.4 GB peak on
     # 1080p clips. See D-034 / ADR-056.
     # ------------------------------------------------------------------ #
-    centroids = await loop.run_in_executor(
-        None, track_barbell_from_video, video_local,
-    )
+    with timer.stage("barbell_tracking"):
+        centroids = await loop.run_in_executor(
+            None, track_barbell_from_video, video_local,
+        )
 
-    # Determine detection rate
-    detected_count = sum(1 for c in centroids if c is not None)
-    detection_rate = detected_count / len(centroids) if centroids else 0.0
+        # Determine detection rate
+        detected_count = sum(1 for c in centroids if c is not None)
+        detection_rate = detected_count / len(centroids) if centroids else 0.0
 
-    if detection_rate > 0.50:
-        bar_path = await loop.run_in_executor(
-            None,
-            compute_bar_path,
-            centroids,
-            result.frame_width,
-            result.frame_height,
-        )
-    else:
-        logger.warning(
-            "Barbell detected in only %.0f%% of frames for %s — using landmark proxy",
-            detection_rate * 100,
-            analysis_id,
-        )
-        bar_path = await loop.run_in_executor(
-            None,
-            compute_bar_path_from_landmarks,
-            landmarks_per_frame,
-            exercise_type,
-        )
+        if detection_rate > 0.50:
+            bar_path = await loop.run_in_executor(
+                None,
+                compute_bar_path,
+                centroids,
+                result.frame_width,
+                result.frame_height,
+            )
+        else:
+            logger.warning(
+                "Barbell detected in only %.0f%% of frames for %s — using landmark proxy",
+                detection_rate * 100,
+                analysis_id,
+            )
+            bar_path = await loop.run_in_executor(
+                None,
+                compute_bar_path_from_landmarks,
+                landmarks_per_frame,
+                exercise_type,
+            )
     result.bar_path = bar_path
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 9b: Form scoring (FR-SCOR-01–08) — needs bar_path from Step 9
     # ------------------------------------------------------------------ #
     from app.cv.scoring import OverallFormScore
 
-    scorer = OverallFormScore()
-    # Aggregate per-rep metrics into a single dict (mean across reps)
-    agg_metrics = _aggregate_rep_metrics(rep_metrics, reps, session_confidence)
-    score_result = scorer.compute(agg_metrics, bar_path, cfg, exercise_type)
+    with timer.stage("form_scoring"):
+        scorer = OverallFormScore()
+        # Aggregate per-rep metrics into a single dict (mean across reps)
+        agg_metrics = _aggregate_rep_metrics(rep_metrics, reps, session_confidence)
+        score_result = scorer.compute(agg_metrics, bar_path, cfg, exercise_type)
     result.score_result = score_result
 
     # Write form scores to analysis row
@@ -684,6 +700,7 @@ async def run_cv_pipeline(
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
 
@@ -693,25 +710,29 @@ async def run_cv_pipeline(
     annotated_path = os.path.join(tmp_dir, "annotated.mp4")
     plot_path = os.path.join(tmp_dir, "angles.png")
 
-    await loop.run_in_executor(
-        None,
-        generate_annotated_video,
-        video_local,
-        landmarks_per_frame,
-        reps,
-        exercise_type,
-        angle_timeseries,
-        annotated_path,
-    )
+    with timer.stage("generate_annotated_video"):
+        await loop.run_in_executor(
+            None,
+            generate_annotated_video,
+            video_local,
+            landmarks_per_frame,
+            reps,
+            exercise_type,
+            angle_timeseries,
+            annotated_path,
+        )
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
-    await loop.run_in_executor(
-        None,
-        generate_angle_plot,
-        angle_timeseries,
-        fps,
-        exercise_type,
-        plot_path,
-    )
+    with timer.stage("generate_angle_plot"):
+        await loop.run_in_executor(
+            None,
+            generate_angle_plot,
+            angle_timeseries,
+            fps,
+            exercise_type,
+            plot_path,
+        )
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
 
@@ -719,17 +740,20 @@ async def run_cv_pipeline(
     # Step 11: Upload artifacts to Supabase Storage
     # ------------------------------------------------------------------ #
     if storage_client is not None:
-        annotated_storage = get_artifact_storage_path(analysis_id, "annotated.mp4")
-        plot_storage = get_artifact_storage_path(analysis_id, "angles.png")
+        with timer.stage("upload_artifacts"):
+            annotated_storage = get_artifact_storage_path(analysis_id, "annotated.mp4")
+            plot_storage = get_artifact_storage_path(analysis_id, "angles.png")
 
-        await upload_artifact(storage_client, _BUCKET, annotated_path, annotated_storage)
-        await upload_artifact(storage_client, _BUCKET, plot_path, plot_storage)
+            await upload_artifact(storage_client, _BUCKET, annotated_path, annotated_storage)
+            await upload_artifact(storage_client, _BUCKET, plot_path, plot_storage)
 
-        analysis.annotated_video_path = annotated_storage
-        analysis.plot_path = plot_storage
+            analysis.annotated_video_path = annotated_storage
+            analysis.plot_path = plot_storage
+
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
         await repo.db.commit()
+        await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
         result.annotated_video_storage_path = annotated_storage
         result.plot_storage_path = plot_storage
@@ -749,6 +773,7 @@ async def run_cv_pipeline(
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     return result
 
