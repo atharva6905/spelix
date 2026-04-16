@@ -351,13 +351,13 @@ class TestTrackBarbellFromVideo:
         list_result = track_barbell(frames)
 
         assert len(streaming_result) == len(list_result) == 3
-        for s, l in zip(streaming_result, list_result):
+        for s, ref in zip(streaming_result, list_result):
             if s is None:
-                assert l is None
+                assert ref is None
             else:
-                assert l is not None
-                assert abs(s[0] - l[0]) < 1.0
-                assert abs(s[1] - l[1]) < 1.0
+                assert ref is not None
+                assert abs(s[0] - ref[0]) < 1.0
+                assert abs(s[1] - ref[1]) < 1.0
 
     def test_returns_empty_list_for_missing_video(self, tmp_path):
         """Missing video returns empty list, not exception."""
