@@ -342,6 +342,7 @@ class TestGetAnalysisDetail:
         obj.quality_gate_result = None
         obj.summary_json = None
         obj.detection_result = None
+        obj.timing_json = None
         obj.form_score_safety = None
         obj.form_score_technique = None
         obj.form_score_path_balance = None
@@ -554,6 +555,7 @@ class TestGetAnalysisStatus:
         obj = _make_mock_analysis(status=status)
         obj.detection_result = None
         obj.quality_gate_result = None
+        obj.timing_json = None
         return obj
 
     def test_get_status_returns_200_with_status_fields(self):

@@ -55,7 +55,7 @@ class Analysis(TimestampMixin, Base):
     detection_result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     retrieval_context: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     eval_scores: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    timing_json: Mapped[dict | None] = mapped_column(
+    timing_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=True,
         comment="Per-stage wall durations in milliseconds (D-035). "
