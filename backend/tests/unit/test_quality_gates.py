@@ -14,6 +14,8 @@ import numpy as np
 from app.cv.quality_gates import (
     GateCheckResult,
     QualityGateResult,
+    _is_no_pose_frame,
+    _sample_indices,
     check_body_visibility,
     check_framing,
     check_minimum_resolution,
@@ -118,6 +120,46 @@ class TestSigmoid:
         assert abs(sigmoid(val) - 0.5) < 1e-6
 
 
+class TestIsNoPoseFrame:
+    def test_detects_zero_filled_frame(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        assert _is_no_pose_frame(frame) is True
+
+    def test_rejects_frame_with_real_landmarks(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        frame[0, 0] = 0.5
+        frame[0, 1] = 0.3
+        assert _is_no_pose_frame(frame) is False
+
+    def test_zero_xy_but_nonzero_visibility_is_still_no_pose(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        frame[:, 3] = 0.9
+        assert _is_no_pose_frame(frame) is True
+
+
+class TestSampleIndices:
+    def test_returns_all_when_under_max(self):
+        assert _sample_indices(5, 30) == [0, 1, 2, 3, 4]
+
+    def test_returns_max_samples_when_over(self):
+        result = _sample_indices(1000, 30)
+        assert len(result) == 30
+        assert result[0] == 0
+        assert result[-1] == 999
+
+    def test_evenly_spaced(self):
+        result = _sample_indices(100, 10)
+        assert len(result) == 10
+        diffs = [result[i + 1] - result[i] for i in range(len(result) - 1)]
+        assert max(diffs) - min(diffs) <= 1
+
+    def test_empty_input(self):
+        assert _sample_indices(0, 30) == []
+
+    def test_single_frame(self):
+        assert _sample_indices(1, 30) == [0]
+
+
 # ---------------------------------------------------------------------------
 # check_body_visibility
 # ---------------------------------------------------------------------------
@@ -156,13 +198,15 @@ class TestBodyVisibility:
         result = check_body_visibility(frames)
         assert result.passed is True
 
-    def test_uses_only_first_five_frames(self):
-        # First 5 frames: high visibility. Remaining: low. Must still pass.
+    def test_samples_full_clip_not_only_first_frames(self):
+        # With full-clip sampling, all 15 frames are sampled (15 < 20).
+        # 5 good (sigmoid(0.9)≈0.711) + 10 bad (sigmoid(-5.0)≈0.007) → mean ≈ 0.241 → FAIL.
+        # This verifies bad tail frames ARE included (unlike the old [:5] behaviour).
         good_frames = _make_n_frames(5, visibility=0.9)
         bad_frames = _make_n_frames(10, visibility=-5.0)
         combined = good_frames + bad_frames
         result = check_body_visibility(combined)
-        assert result.passed is True
+        assert result.passed is False
 
     def test_correct_reject_user_message(self):
         frames = _make_n_frames(visibility=-2.0)
@@ -194,13 +238,23 @@ class TestBodyVisibility:
         result = check_body_visibility(frames)
         assert "visibility" in result.name.lower() or "body" in result.name.lower()
 
+    def test_samples_beyond_first_five_frames(self):
+        """Early frames with poor visibility shouldn't reject if later frames are good."""
+        poor = _make_n_frames(n=5, visibility=-1.0)
+        good = _make_n_frames(n=15, visibility=0.9)
+        result = check_body_visibility(poor + good)
+        assert result.passed is True
+
     def test_only_target_landmarks_affect_metric(self):
         # Make all non-target landmarks invisible (logit -10 → sigmoid ≈ 0),
         # and target landmarks high visibility. Gate must pass.
+        # Set non-zero x/y so _is_no_pose_frame does not skip these frames.
         frames = []
         for _ in range(5):
             frame = np.zeros((33, 5), dtype=np.float32)
-            frame[:, 3] = -10.0  # all very low
+            frame[:, 0] = 0.5  # non-zero x — prevents NO_POSE skip
+            frame[:, 1] = 0.5  # non-zero y — prevents NO_POSE skip
+            frame[:, 3] = -10.0  # all very low visibility
             for idx in VISIBILITY_LANDMARKS:
                 frame[idx, 3] = 5.0  # high sigmoid visibility
             frames.append(frame)
@@ -272,36 +326,32 @@ class TestFraming:
             f"Got: {result.user_message!r}"
         )
 
-    def test_uses_only_first_five_frames(self):
-        # First 5 frames: proper framing. Next 10: tiny box. Should pass.
+    def test_passes_with_minority_bad_frames(self):
+        """With full-clip sampling and 90th percentile, a minority of bad
+        frames does not cause rejection."""
         good = _make_framing_frames(
-            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=5
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=12,
         )
         bad = _make_framing_frames(
-            x_min=0.49, y_min=0.49, x_max=0.51, y_max=0.51, visibility=0.9, n=10
+            x_min=0.49, y_min=0.49, x_max=0.51, y_max=0.51, visibility=0.9, n=3,
         )
         result = check_framing(good + bad, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is True
 
-    def test_only_visible_landmarks_count_for_bounding_box(self):
-        # Set all landmarks to invisible (visibility logit -10),
-        # then place two visible ones inside the 30–80% range.
+    def test_all_landmarks_contribute_to_bbox_regardless_of_visibility(self):
+        """All 33 landmarks contribute to bounding box — low-visibility
+        landmarks from plate occlusion are NOT excluded (D-032 fix)."""
         frames = []
         for _ in range(5):
             frame = np.zeros((33, 5), dtype=np.float32)
             frame[:, 0] = 0.5
             frame[:, 1] = 0.5
-            frame[:, 3] = -10.0  # sigmoid ≈ 0, invisible
+            frame[:, 3] = -10.0
 
-            # Two visible landmarks forming a reasonable box
             frame[0, 0] = 0.2
             frame[0, 1] = 0.1
-            frame[0, 3] = 5.0   # sigmoid ≈ 1.0, visible
-
             frame[32, 0] = 0.8
             frame[32, 1] = 0.9
-            frame[32, 3] = 5.0
-
             frames.append(frame)
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is True
@@ -343,6 +393,50 @@ class TestFraming:
         )
         # 0.30 × 0.70 = 0.21 area — should still FAIL at 0.30 for landscape
         result = check_framing(frames, frame_width=1920, frame_height=1080)
+        assert result.passed is False
+
+    def test_passes_when_early_frames_bad_but_later_good(self):
+        """D-032 Bug 1: deadlift bent-over setup in early frames."""
+        bad_early = _make_framing_frames(
+            x_min=0.45, y_min=0.40, x_max=0.55, y_max=0.60, visibility=0.9, n=5,
+        )
+        good_later = _make_framing_frames(
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=25,
+        )
+        result = check_framing(bad_early + good_later, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_skips_no_pose_frames_in_framing(self):
+        """D-032 Bug 2: NO_POSE warmup frames don't drag down metric."""
+        no_pose = [np.zeros((33, 5), dtype=np.float32) for _ in range(10)]
+        good = _make_framing_frames(
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=20,
+        )
+        result = check_framing(no_pose + good, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_uses_all_landmarks_for_bbox(self):
+        """D-032 Bug 3: plate-occluded landmarks still contribute to bbox."""
+        frames = []
+        for _ in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[0, :] = [0.2, 0.1, 0.0, -5.0, 0.9]
+            frame[32, :] = [0.8, 0.9, 0.0, -5.0, 0.9]
+            frame[15, :] = [0.5, 0.5, 0.0, 3.0, 0.9]
+            frames.append(frame)
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_rejects_when_all_frames_no_pose(self):
+        frames = [np.zeros((33, 5), dtype=np.float32) for _ in range(10)]
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is False
+
+    def test_rejects_genuinely_distant_full_clip(self):
+        frames = _make_framing_frames(
+            x_min=0.45, y_min=0.40, x_max=0.55, y_max=0.60, visibility=0.9, n=30,
+        )
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is False
 
 
@@ -531,6 +625,41 @@ class TestCheckSinglePerson:
         frames = _make_n_frames(1)
         result = check_single_person(frames, FRAME_WIDTH)
         assert isinstance(result, GateCheckResult)
+
+    def test_no_pose_interleaved_dont_cause_false_jumps(self):
+        """Interleaved NO_POSE frames shouldn't register as person switches."""
+        frames = []
+        for i in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            if i % 3 != 0:
+                frame[:, 0] = 0.5
+                frame[:, 1] = 0.5
+                frame[:, 3] = 0.9
+            frames.append(frame)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.passed is True
+
+    def test_early_instability_diluted_in_long_clip(self):
+        """With 300+ frames, brief early bystander tracking is diluted."""
+        unstable: list[np.ndarray] = []
+        for i in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5
+            frame[:, 1] = 0.5
+            frame[:, 3] = 0.9
+            hip_x = 0.1 if i % 2 == 0 else 0.5
+            frame[23, 0] = hip_x
+            frame[24, 0] = hip_x
+            unstable.append(frame)
+        stable: list[np.ndarray] = []
+        for _ in range(290):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5
+            frame[:, 1] = 0.5
+            frame[:, 3] = 0.9
+            stable.append(frame)
+        result = check_single_person(unstable + stable, FRAME_WIDTH)
+        assert result.passed is True
 
 
 # ---------------------------------------------------------------------------
