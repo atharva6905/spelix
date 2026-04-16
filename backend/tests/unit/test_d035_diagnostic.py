@@ -17,13 +17,22 @@ def fake_extract_landmarks(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
         np.zeros((33, 5), dtype=np.float64) for _ in range(50)
     ]
     fake = MagicMock(return_value=(fake_frames, 30.0, 1080, 1920))
+    # Give the mock a real __name__ so run_in_executor name-recording works.
+    fake.__name__ = "extract_landmarks"
 
-    # Patch at definition module only — the diagnostic must import
-    # extract_landmarks from app.cv.pose_extraction (same as pipeline.py).
+    # Patch at definition module AND the diagnostic module's already-bound
+    # local name (module may have been imported before the fixture runs, in
+    # which case `from app.cv.pose_extraction import extract_landmarks` already
+    # bound the original function and the source-module patch won't reach it).
     monkeypatch.setattr(
         "app.cv.pose_extraction.extract_landmarks",
         fake,
     )
+    # Force-import so the module exists in sys.modules, then patch its binding.
+    import importlib
+    import app.services.d035_diagnostic as _diag_mod  # noqa: PLC0415
+    importlib.import_module("app.services.d035_diagnostic")
+    monkeypatch.setattr(_diag_mod, "extract_landmarks", fake)
     return fake
 
 
@@ -60,14 +69,18 @@ async def test_executor_variant_uses_run_in_executor(
     from app.services import d035_diagnostic
 
     executor_calls: list[str] = []
-    real_run = asyncio.AbstractEventLoop.run_in_executor
+    # Patch the concrete BaseEventLoop — AbstractEventLoop.run_in_executor is
+    # shadowed by BaseEventLoop on every platform (Linux SelectorEventLoop,
+    # Windows ProactorEventLoop both inherit from BaseEventLoop, not directly
+    # from AbstractEventLoop for this method).
+    real_run = asyncio.BaseEventLoop.run_in_executor
 
     async def recording_run_in_executor(self, executor, func, *args):  # type: ignore[no-untyped-def]
         executor_calls.append(getattr(func, "__name__", repr(func)))
         return await real_run(self, executor, func, *args)
 
     monkeypatch.setattr(
-        asyncio.AbstractEventLoop,
+        asyncio.BaseEventLoop,
         "run_in_executor",
         recording_run_in_executor,
     )
