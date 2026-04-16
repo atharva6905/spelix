@@ -1,3 +1,115 @@
+# Session 36 Handoff → Session 37: D-035 Priorities 1 + 3 shipped (PR #64), diagnostic result REFUTES the bench-vs-prod gap — pose extraction in streaq container is ~280s, not >1800s
+
+**Context refresh:** Session 36 shipped PR #64 — Priorities 1 + 3 from the session 35.5 handoff per plan `docs/superpowers/plans/2026-04-16-d035-priorities-1-2-3.md`. Priority 1: three new `analysis.timing_json` flushes after `download`, `duration_probe` (non-rejection path), and `extract_landmarks` in `run_cv_pipeline`. Priority 3: new `pose_extraction_diagnostic` streaq task + `_run_pose_extraction_diagnostic` pure helper + `scripts/enqueue_d035_diagnostic.py` CLI trigger. All 1526 unit tests pass, CI green, droplet HEAD = `89bb58b`.
+
+**Diagnostic result on prod (2026-04-16 ~11:35-11:45 UTC) on `atharva-bench-no-weight.mov` (22.8s 1080p@59fps, 37 MB, SAME fixture that prior sessions observed timing out at 1800s):**
+
+| Variant | Wall time | Per-frame ms | Frame count | Notes |
+|---|---|---|---|---|
+| **Bench** (bare Python, session 35 `bench_video_mode.py`) | **287.7s** | ~215 | ~1345 | baseline |
+| **Direct-call async, via `run_in_executor`** | **283.8s** | 212 | 1338 | "executor" variant — matches `pipeline.py:348` call path |
+| **Direct-call async, inline** (blocks event loop) | **272.1s** | 203 | 1338 | "inline" variant |
+| **Via streaq worker task** | 8m48s wall (both variants) = ~264s each | — | — | streaq-logged completion, result dict truncated in streaq's default logger |
+| **Prod pipeline `extract_landmarks`** prior observation | **reported >1800s** | reported >1345 | — | session 35.5 handoff claim |
+
+**The bench-vs-prod gap the handoff described does NOT exist.** Pose extraction on prod, running inside the same streaq worker container, completes in ~5 minutes — within 5% of bench. The `executor` and `inline` variants are also within 5% of each other, so asyncio/`run_in_executor`/XNNPACK-thread overhead is NOT the bottleneck.
+
+**Implications for the prior 1800s-timeout observation:**
+
+1. The 1800s task timeout in prod was either
+   - hitting something OTHER than `extract_landmarks` — a different stage that doesn't have a timer today, OR
+   - workload-transient (e.g., another concurrent task, memory pressure, disk I/O, transient network issue on Supabase Storage download) that cleared after the worker restart that came with deploying PR #62 and PR #64.
+2. Priority 1's early `timing_json` writes now cover download, duration_probe, and extract_landmarks. Any future stuck prod run will write per-stage times to `analyses.timing_json` well BEFORE the 1800s timeout fires, making the stuck stage unambiguously visible.
+3. D-036 (GPU offload) is NOT required by the current measurement — bare-Python pose extraction comfortably fits under the 900s original task timeout. The Tier 1 doubling to 1800s (session 35.5) was a margin of safety, not a required scaling for the CPU work.
+
+**What wasn't run this session:** Prod E2E upload via Playwright. Kicked off the direct-call diagnostic as Priority 3's data, but did not additionally drive a fresh `POST /analyses` → upload → run cycle on spelix.app. Sanity-checking via the full web flow is pending for session 37.
+
+## 1. Completed
+
+### PR #64 — `fix(pipeline): D-035 early timing_json writes + diagnostic harness`
+- Merge commit: `89bb58b`
+- CI: all checks pass (Backend Lint/Tests, Frontend Lint/Tests, Secret Scanning, Vercel, Deploy to Production)
+- Droplet verified: `HEAD = 89bb58b`, all containers healthy post-deploy
+
+Commits:
+- `27e441e` test(pipeline): incremental timing_json write assertion (RED)
+- `9ad4279` feat(pipeline): flush timing_json after each early stage (GREEN)
+- `8d6e72e` test(worker): pose_extraction_diagnostic helper tests (RED)
+- `c5ede3f` feat(worker): pose extraction diagnostic helper (GREEN, with Windows test patching fix for BaseEventLoop vs AbstractEventLoop)
+- `8d0176b` feat(worker): streaq task + CLI enqueue script
+
+**Test count:** backend 1526 passing (+3 from 1523 pre-task), 19 skipped. Frontend unchanged.
+
+### Diagnostic run
+- Fixture: `atharva-bench-no-weight.mov` uploaded via `scp spelix-droplet:/tmp/bench.mov` then `docker cp` into `spelix-worker-1:/tmp/bench.mov`.
+- streaq variant enqueued via `docker exec -w /app -e PYTHONPATH=/app spelix-worker-1 uv run --no-dev python /tmp/enqueue_d035_diagnostic.py /tmp/bench.mov`.
+- Direct-call variant via one-off `/tmp/run_d035_direct.py` script (written session-local, not committed).
+- Result captured via stdout: executor=283.8s, inline=272.1s.
+
+## 2. Remaining
+
+### Highest priority for session 37
+1. **Prod E2E via Playwright MCP** on `atharva-bench-no-weight.mov` now that early writes are in place. If the pipeline completes in ~5min, confirms the bench-vs-prod gap was transient. If it still stalls, check `timing_json` — it will now show which stage ate the time. DO NOT start Tier 2 work before this run.
+2. **Query Supabase** for any new analyses rows since the 89bb58b deploy — `SELECT id, status, timing_json, created_at FROM analyses ORDER BY created_at DESC LIMIT 10` — surface whatever real user or smoke-test pipeline runs have logged so far.
+
+### Known deferred
+- D-028, D-029, D-030, D-031 — unchanged from session 33 handoff.
+- D-034 (pipeline OOM on full 1080p annotation) — unchanged.
+- D-032 (quality gate false rejections on framed-with-plates clips) — unchanged.
+- D-036 (GPU offload) — remains **deferred post-beta**. Current measurement says CPU is fine for 22.8s clips.
+
+## 3. Test counts
+
+- **Backend:** 1526 passing, 19 skipped, 0 failing (+3 from pre-PR).
+- **Frontend:** 268 of 269 (1 pre-existing flaky unchanged).
+- Coverage: 90%+ no regression.
+
+## 4. E2E verification
+
+**Not performed this session.** The session focused on the diagnostic run. Prod E2E should be the first step of session 37.
+
+## 5. Blockers
+
+**None.** D-035 is effectively closed for the original hypothesis (6× bench-vs-prod gap) — the hypothesis was wrong. The new early-write instrumentation ensures any future stuck pipeline will leave its per-stage times on the DB row. Re-open the ticket only if a fresh prod E2E actually stalls again.
+
+## 6. Next session start
+
+```bash
+/status
+
+# PRIORITY 1: prod E2E via Playwright MCP to validate the direct-call finding
+#   - Upload atharva-bench-no-weight.mov through https://spelix.app
+#   - Watch status: queued → quality_gate_pending → processing → coaching → completed
+#   - Target: ~5-8 min total pipeline time (down from the prior 1800s observation)
+#   - If stalled: query analyses.timing_json to see which stage is stuck
+
+# PRIORITY 2: Supabase diff pull
+#   - SELECT id, status, timing_json, created_at FROM analyses
+#     WHERE created_at > '2026-04-16T11:27:00Z'
+#     ORDER BY created_at DESC;
+#   - Confirms early writes are actually populating on real traffic
+
+# PRIORITY 3 (only if PRIORITY 1 stalls): use timing_json to decide Tier 2 direction
+#   - If download_ms >> extract_landmarks_ms: network or Supabase Storage is the bottleneck
+#   - If extract_landmarks_ms is now ~300s: the prior 1800s was a one-off, do nothing
+#   - If something between stages eats time: look at gap between last timing_json write
+#     and next — possibly quality_gates, barbell detection, or artifact upload
+```
+
+## 7. Session timing
+
+- 10:58 UTC: plan written (`docs/superpowers/plans/2026-04-16-d035-priorities-1-2-3.md`)
+- 11:00-11:15 UTC: Tasks 1+2 (early writes) — via spelix-tdd subagent
+- 11:05-11:15 UTC: Tasks 3+4 (diagnostic helper + tests) — via spelix-tdd subagent + manual follow-up for Windows patching
+- 11:20 UTC: Task 5 (streaq wiring + CLI) — direct implementation
+- 11:24 UTC: PR #64 opened
+- 11:27 UTC: PR #64 merged (merge method, NOT squash)
+- 11:29 UTC: Deploy to Production green, droplet HEAD = 89bb58b
+- 11:35-11:44 UTC: streaq-enqueued diagnostic run (result truncated in logs)
+- 11:54-12:04 UTC: direct-call diagnostic run — clean JSON result captured
+
+---
+
 # Session 35.5 Handoff → Session 36: D-035 Tier 1 shipped but E2E STILL times out at 1800s — bench-vs-prod gap is >6×, telemetry blind spot surfaced
 
 **Context refresh:** Session 35.5 shipped PR #62 — the D-035 Tier 1 bundle per ADR-058 (instrumentation + VIDEO mode + 1800s timeout + 60s/120s upload cap + D-036/ADR-059 docs). PR merged cleanly, deployed to prod, migration `010_add_timing_json` applied. Then re-ran E2E with `atharva-bench-no-weight.mov` (the 22.8s 1080p@59fps clip that has been the canonical failing case since session 34). **Result: task hit the bumped 1800s timeout without finishing pose extraction.** No `timing_json` written because the first flush point in `pipeline.py` is AFTER Step 2b detection, which is unreachable if pose extraction alone exceeds 1800s.
