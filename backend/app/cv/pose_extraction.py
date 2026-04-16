@@ -16,6 +16,13 @@ Tasks API is the recommended replacement and is available on every platform.
 
 MediaPipe gotcha: visibility/presence may be pre-sigmoid logits (outside
 ``[0, 1]``). Always guard with sigmoid before storing. See GitHub #4411, #4462.
+
+Performance note: frames larger than ``_MAX_POSE_DIM`` on the long side are
+``cv2.resize``-downscaled per-frame before inference — BlazePose Heavy is
+CPU-linear in pixel count and a 900 s task budget cannot absorb 1080p on the
+2-vCPU droplet. Landmarks are returned in normalized ``[0, 1]`` coords so
+downstream pixel-space consumers multiply by the original width/height as
+before. See D-035 and ADR-057.
 """
 
 from __future__ import annotations
