@@ -58,6 +58,12 @@ _LIGHTING_MAX_BRIGHTNESS: float = 240.0
 # Camera stability gate — optical flow magnitude threshold (FR-CVPL-09)
 _STABILITY_FLOW_THRESHOLD: float = 3.0
 
+# Frame sampling — replaces hardcoded [:5] and [:10] slicing (ADR-053)
+_FRAMING_SAMPLE_COUNT: int = 30
+_FRAMING_PERCENTILE: float = 90.0
+_VISIBILITY_SAMPLE_COUNT: int = 20
+_SINGLE_PERSON_SAMPLE_COUNT: int = 30
+
 # Occlusion warning — per-exercise landmark map
 _EXERCISE_LANDMARKS: dict[str, dict[int, str]] = {
     "squat": {
@@ -121,6 +127,18 @@ class QualityGateResult:
 def sigmoid(x: float) -> float:
     """Numerically stable logistic sigmoid: 1 / (1 + exp(-x))."""
     return 1.0 / (1.0 + math.exp(-float(x)))
+
+
+def _is_no_pose_frame(frame: np.ndarray) -> bool:
+    """Detect the NO_POSE zero-fill sentinel from pose extraction."""
+    return bool(np.all(frame[:, :2] == 0.0))
+
+
+def _sample_indices(total: int, max_samples: int) -> list[int]:
+    """Return up to *max_samples* evenly-spaced indices from [0, total)."""
+    if total <= max_samples:
+        return list(range(total))
+    return np.linspace(0, total - 1, max_samples, dtype=int).tolist()
 
 
 # ---------------------------------------------------------------------------

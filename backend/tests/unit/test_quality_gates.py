@@ -14,6 +14,8 @@ import numpy as np
 from app.cv.quality_gates import (
     GateCheckResult,
     QualityGateResult,
+    _is_no_pose_frame,
+    _sample_indices,
     check_body_visibility,
     check_framing,
     check_minimum_resolution,
@@ -116,6 +118,46 @@ class TestSigmoid:
     def test_works_on_numpy_scalar(self):
         val = np.float32(0.0)
         assert abs(sigmoid(val) - 0.5) < 1e-6
+
+
+class TestIsNoPoseFrame:
+    def test_detects_zero_filled_frame(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        assert _is_no_pose_frame(frame) is True
+
+    def test_rejects_frame_with_real_landmarks(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        frame[0, 0] = 0.5
+        frame[0, 1] = 0.3
+        assert _is_no_pose_frame(frame) is False
+
+    def test_zero_xy_but_nonzero_visibility_is_still_no_pose(self):
+        frame = np.zeros((33, 5), dtype=np.float32)
+        frame[:, 3] = 0.9
+        assert _is_no_pose_frame(frame) is True
+
+
+class TestSampleIndices:
+    def test_returns_all_when_under_max(self):
+        assert _sample_indices(5, 30) == [0, 1, 2, 3, 4]
+
+    def test_returns_max_samples_when_over(self):
+        result = _sample_indices(1000, 30)
+        assert len(result) == 30
+        assert result[0] == 0
+        assert result[-1] == 999
+
+    def test_evenly_spaced(self):
+        result = _sample_indices(100, 10)
+        assert len(result) == 10
+        diffs = [result[i + 1] - result[i] for i in range(len(result) - 1)]
+        assert max(diffs) - min(diffs) <= 1
+
+    def test_empty_input(self):
+        assert _sample_indices(0, 30) == []
+
+    def test_single_frame(self):
+        assert _sample_indices(1, 30) == [0]
 
 
 # ---------------------------------------------------------------------------
