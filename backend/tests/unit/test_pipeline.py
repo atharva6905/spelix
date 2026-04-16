@@ -126,6 +126,27 @@ def _make_bar_path() -> dict:
 _PKG = "app.services.pipeline"
 
 
+@pytest.fixture(autouse=True)
+def _stub_persist_timing_telemetry(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default no-op stub for the fresh-session telemetry helper.
+
+    Without this, pipeline tests that don't explicitly patch the helper
+    would open real DB connections (and fail noisily in CI with no DB).
+    Tests that need to observe the helper's calls opt out via the
+    `real_persist_helper` marker (see `test_persist_timing_telemetry_*`).
+    """
+    if request.node.get_closest_marker("real_persist_helper") is not None:
+        return
+    import app.services.pipeline as pipeline_mod
+
+    async def _noop(_analysis_id, _timing_dict):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(pipeline_mod, "_persist_timing_telemetry", _noop)
+
+
 # ---------------------------------------------------------------------------
 # Test: Happy path
 # ---------------------------------------------------------------------------
@@ -922,14 +943,65 @@ class TestPipelineTimingInstrumentation:
             assert isinstance(analysis.timing_json[stage], float)
             assert analysis.timing_json[stage] >= 0.0
 
+    @pytest.mark.real_persist_helper
     @pytest.mark.asyncio
-    async def test_timing_json_flushed_after_each_early_stage(self):
-        """timing_json is flushed to the DB after download, duration_probe, and extract_landmarks.
+    async def test_persist_timing_telemetry_uses_fresh_session_and_commits(
+        self, monkeypatch
+    ):
+        """D-035 fix: telemetry writes go through a dedicated session that
+        commits immediately, so they survive a rollback of the main pipeline
+        session on timeout/error.
 
-        D-035 Priority 1: a pipeline that dies during pose extraction must still
-        leave partial per-stage timing data persisted on the analysis row.
-        We verify this by capturing the keyset of analysis.timing_json at every
-        repo.update() call and asserting that the three early snapshots appear.
+        Without this, the main analysis_worker.py except handler's
+        ``session.rollback()`` wipes every in-flight timing_json write —
+        exactly the case Priority 1 was meant to observe. This test nails
+        the fresh-session + commit contract directly.
+        """
+        from uuid import uuid4
+
+        captured: dict = {}
+        commit_count = 0
+        enter_count = 0
+
+        class FakeSession:
+            async def __aenter__(self_inner):
+                nonlocal enter_count
+                enter_count += 1
+                return self_inner
+
+            async def __aexit__(self_inner, *exc):
+                return False
+
+            async def execute(self_inner, stmt):
+                captured["stmt"] = stmt
+
+            async def commit(self_inner):
+                nonlocal commit_count
+                commit_count += 1
+
+        def fake_factory():
+            return FakeSession()
+
+        from app.services import pipeline as pipeline_mod
+
+        monkeypatch.setattr(pipeline_mod, "async_session", fake_factory)
+
+        analysis_id = uuid4()
+        timings = {"download": 42.5, "duration_probe": 1.1}
+        await pipeline_mod._persist_timing_telemetry(analysis_id, timings)
+
+        assert enter_count == 1, "must open exactly one session"
+        assert commit_count == 1, "must commit exactly once"
+        assert captured.get("stmt") is not None, "must execute an UPDATE"
+
+    @pytest.mark.asyncio
+    async def test_timing_json_survives_main_session_rollback(
+        self, monkeypatch
+    ):
+        """D-035 fix: verify the pipeline uses _persist_timing_telemetry for the
+        3 early stages (download, duration_probe, extract_landmarks), not
+        ``repo.update`` — ensuring these writes survive the
+        analysis_worker.py rollback path on timeout.
         """
         landmarks = _make_landmarks()
         reps = _make_reps()
@@ -942,16 +1014,19 @@ class TestPipelineTimingInstrumentation:
         redis = MagicMock()
         write_heartbeat = AsyncMock()
 
-        snapshots: list[frozenset] = []
+        persist_calls: list[tuple] = []
 
-        async def _capture_update(a: Analysis) -> Analysis:
-            snapshots.append(frozenset((a.timing_json or {}).keys()))
-            return a
+        async def _fake_persist(aid, timing):
+            persist_calls.append((aid, dict(timing)))
 
-        repo.update = AsyncMock(side_effect=_capture_update)
+        from app.services import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod, "_persist_timing_telemetry", _fake_persist
+        )
 
         with (
-            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),  # under 60s cap
+            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
             patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
             patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
             patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
@@ -978,22 +1053,27 @@ class TestPipelineTimingInstrumentation:
                 openai_client=None,
             )
 
-        after_download = frozenset({"download"})
-        after_duration_probe = frozenset({"download", "duration_probe"})
-        after_extract = frozenset({"download", "duration_probe", "extract_landmarks"})
+        assert len(persist_calls) >= 3, (
+            f"_persist_timing_telemetry must be called at least 3 times "
+            f"(after download, duration_probe, extract_landmarks); got {len(persist_calls)}"
+        )
 
-        assert after_download in snapshots, (
-            f"Expected post-download flush with keyset {after_download!r} "
-            f"but it was not found. Captured snapshots: {snapshots}"
+        stage_sets = [set(t.keys()) for _aid, t in persist_calls]
+        assert {"download"} in stage_sets, (
+            f"no post-download-only persist; got {stage_sets}"
         )
-        assert after_duration_probe in snapshots, (
-            f"Expected post-duration_probe flush with keyset {after_duration_probe!r} "
-            f"but it was not found. Captured snapshots: {snapshots}"
+        assert {"download", "duration_probe"} in stage_sets, (
+            f"no post-duration-probe persist; got {stage_sets}"
         )
-        assert after_extract in snapshots, (
-            f"Expected post-extract_landmarks flush with keyset {after_extract!r} "
-            f"but it was not found. Captured snapshots: {snapshots}"
+        assert {"download", "duration_probe", "extract_landmarks"} in stage_sets, (
+            f"no post-extract-landmarks persist (before exercise_detection); got {stage_sets}"
         )
+
+    # Note: the prior test_timing_json_flushed_after_each_early_stage was
+    # superseded by test_timing_json_survives_main_session_rollback above.
+    # It captured repo.update calls, but post-fix the three early writes
+    # bypass repo.update and go through _persist_timing_telemetry (fresh
+    # session) so the main pipeline's rollback on timeout can't wipe them.
 
 
 # ---------------------------------------------------------------------------
