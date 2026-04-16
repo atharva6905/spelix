@@ -367,6 +367,7 @@ async def run_cv_pipeline(
         analysis.status = transition(analysis.status, "quality_gate_rejected")
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
         raise QualityGateRejection(
             f"Clip duration {duration_s:.1f}s exceeds {cap_s:.0f}s cap"
         )
@@ -452,6 +453,7 @@ async def run_cv_pipeline(
     }
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
@@ -485,12 +487,14 @@ async def run_cv_pipeline(
     }
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     if not gate_result.passed:
         analysis.status = transition(analysis.status, "quality_gate_rejected")
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
         raise QualityGateRejection(
             f"Quality gate rejected: {gate_result.status}"
         )
@@ -501,6 +505,7 @@ async def run_cv_pipeline(
     analysis.status = transition(analysis.status, "processing")
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
     await write_heartbeat(redis)
 
@@ -596,6 +601,7 @@ async def run_cv_pipeline(
     analysis.confidence_score = session_confidence
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
@@ -693,6 +699,7 @@ async def run_cv_pipeline(
     analysis.form_score_overall = score_result.overall
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
@@ -745,6 +752,7 @@ async def run_cv_pipeline(
 
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
         await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
         result.annotated_video_storage_path = annotated_storage
@@ -764,6 +772,7 @@ async def run_cv_pipeline(
 
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     return result
