@@ -15,9 +15,12 @@ import asyncio
 import logging
 import os
 from typing import Any
+from uuid import UUID
 
 import numpy as np
+from sqlalchemy import update as sa_update
 
+from app.db import async_session
 from app.cv.artifact_generation import (
     generate_angle_plot,
     generate_annotated_video,
@@ -55,6 +58,27 @@ _BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "videos")
 # Frontend enforces the same cap; this is defense-in-depth.
 _MAX_DURATION_FREE_TIER_S = 60.0
 _MAX_DURATION_EXTENDED_S = 120.0
+
+
+async def _persist_timing_telemetry(
+    analysis_id: UUID, timing_dict: dict[str, Any]
+) -> None:
+    """Write timing_json in a fresh session that commits immediately.
+
+    D-035 fix: the main pipeline session rolls back on timeout/error (see
+    analysis_worker.py::process_analysis except handler), which wipes every
+    in-session write — including any telemetry we meant to persist. Using
+    a dedicated short-lived session here means per-stage timing survives
+    that rollback, which is the entire point of the early-write
+    instrumentation.
+    """
+    async with async_session() as session:
+        await session.execute(
+            sa_update(Analysis)
+            .where(Analysis.id == analysis_id)
+            .values(timing_json=timing_dict)
+        )
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -304,10 +328,11 @@ async def run_cv_pipeline(
             if analysis.video_path and os.path.isfile(analysis.video_path):
                 video_local = analysis.video_path
 
-    # D-035 Priority 1: flush after each early stage so a pipeline dying
-    # in pose extraction still leaves per-stage timing on the analysis row.
+    # D-035 Priority 1 + rollback fix: use a fresh session that commits
+    # immediately so per-stage telemetry survives the main pipeline
+    # session's rollback on timeout (see analysis_worker.py error handler).
     analysis.timing_json = timer.as_dict()
-    await repo.update(analysis)
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # D-035: defense-in-depth duration check after download
@@ -347,7 +372,7 @@ async def run_cv_pipeline(
         )
 
     analysis.timing_json = timer.as_dict()
-    await repo.update(analysis)
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # ------------------------------------------------------------------ #
     # Step 2: Pose extraction (CPU-bound)
@@ -362,7 +387,7 @@ async def run_cv_pipeline(
     result.frame_height = frame_height
 
     analysis.timing_json = timer.as_dict()
-    await repo.update(analysis)
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     await write_heartbeat(redis)
 
