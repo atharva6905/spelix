@@ -228,26 +228,18 @@ _BODY_VISIBILITY_PASS_MSG: str = "Body visibility is sufficient."
 
 
 def check_body_visibility(landmarks_per_frame: list[np.ndarray]) -> GateCheckResult:
+    """Gate P0-01: body visibility.
+
+    Samples up to 20 evenly-spaced frames, skips NO_POSE sentinels,
+    rejects if mean sigmoid-visibility of key landmarks is below 0.30.
     """
-    Gate P0-01: body visibility.
+    indices = _sample_indices(len(landmarks_per_frame), _VISIBILITY_SAMPLE_COUNT)
 
-    Reject if mean sigmoid-visibility of key landmarks across the first 5
-    frames is below 0.30.
-
-    Parameters
-    ----------
-    landmarks_per_frame:
-        List of (33, 5) arrays, one per frame.  Only the first 5 are used.
-
-    Returns
-    -------
-    GateCheckResult
-    """
-    frames = landmarks_per_frame[:5]
-
-    # Collect visibility values for target landmarks across all used frames
     vis_values: list[float] = []
-    for frame in frames:
+    for i in indices:
+        frame = landmarks_per_frame[i]
+        if _is_no_pose_frame(frame):
+            continue
         for idx in _VISIBILITY_LANDMARK_INDICES:
             raw_vis = float(frame[idx, _COL_VISIBILITY])
             vis_values.append(sigmoid(raw_vis))

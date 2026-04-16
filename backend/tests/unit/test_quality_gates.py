@@ -198,13 +198,15 @@ class TestBodyVisibility:
         result = check_body_visibility(frames)
         assert result.passed is True
 
-    def test_uses_only_first_five_frames(self):
-        # First 5 frames: high visibility. Remaining: low. Must still pass.
+    def test_samples_full_clip_not_only_first_frames(self):
+        # With full-clip sampling, all 15 frames are sampled (15 < 20).
+        # 5 good (sigmoid(0.9)≈0.711) + 10 bad (sigmoid(-5.0)≈0.007) → mean ≈ 0.241 → FAIL.
+        # This verifies bad tail frames ARE included (unlike the old [:5] behaviour).
         good_frames = _make_n_frames(5, visibility=0.9)
         bad_frames = _make_n_frames(10, visibility=-5.0)
         combined = good_frames + bad_frames
         result = check_body_visibility(combined)
-        assert result.passed is True
+        assert result.passed is False
 
     def test_correct_reject_user_message(self):
         frames = _make_n_frames(visibility=-2.0)
@@ -236,13 +238,23 @@ class TestBodyVisibility:
         result = check_body_visibility(frames)
         assert "visibility" in result.name.lower() or "body" in result.name.lower()
 
+    def test_samples_beyond_first_five_frames(self):
+        """Early frames with poor visibility shouldn't reject if later frames are good."""
+        poor = _make_n_frames(n=5, visibility=-1.0)
+        good = _make_n_frames(n=15, visibility=0.9)
+        result = check_body_visibility(poor + good)
+        assert result.passed is True
+
     def test_only_target_landmarks_affect_metric(self):
         # Make all non-target landmarks invisible (logit -10 → sigmoid ≈ 0),
         # and target landmarks high visibility. Gate must pass.
+        # Set non-zero x/y so _is_no_pose_frame does not skip these frames.
         frames = []
         for _ in range(5):
             frame = np.zeros((33, 5), dtype=np.float32)
-            frame[:, 3] = -10.0  # all very low
+            frame[:, 0] = 0.5  # non-zero x — prevents NO_POSE skip
+            frame[:, 1] = 0.5  # non-zero y — prevents NO_POSE skip
+            frame[:, 3] = -10.0  # all very low visibility
             for idx in VISIBILITY_LANDMARKS:
                 frame[idx, 3] = 5.0  # high sigmoid visibility
             frames.append(frame)
