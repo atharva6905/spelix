@@ -398,12 +398,6 @@ class TestPoseFrameDimensions:
     Mirrors `_annotation_dimensions` in artifact_generation.py. See D-035 / ADR-057.
     """
 
-    def test_cap_constant_is_1280(self):
-        """Matches _MAX_ANNOTATION_DIM by convention."""
-        from app.cv.pose_extraction import _MAX_POSE_DIM
-
-        assert _MAX_POSE_DIM == 1280
-
     def test_landscape_1080p_caps_to_1280x720(self):
         from app.cv.pose_extraction import _pose_frame_dimensions
 

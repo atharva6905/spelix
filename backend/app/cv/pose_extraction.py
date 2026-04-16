@@ -91,7 +91,7 @@ def _resolve_model_path() -> str:
 
 
 def _pose_frame_dimensions(src_width: int, src_height: int) -> tuple[int, int]:
-    """Compute pose-extraction input dimensions, capping the long side at 1280.
+    """Compute pose-extraction input dimensions, capping at 720p equivalent.
 
     Mirrors ``_annotation_dimensions`` in ``app/cv/artifact_generation.py``.
     Never upscales (``scale`` is clamped to ``1.0``). Rounds both dimensions
