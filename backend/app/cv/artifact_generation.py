@@ -38,6 +38,16 @@ _PLOT_HEIGHT_INCHES = 6
 
 _STORAGE_ARTIFACT_PREFIX = "artifacts"
 
+_MAX_ANNOTATION_DIM: int = 1280
+
+
+def _annotation_dimensions(src_width: int, src_height: int) -> tuple[int, int]:
+    """Compute annotation output dimensions, capping at 720p equivalent."""
+    scale = min(1.0, _MAX_ANNOTATION_DIM / max(src_width, src_height))
+    w = round(src_width * scale)
+    h = round(src_height * scale)
+    return w - w % 2, h - h % 2
+
 
 # ---------------------------------------------------------------------------
 # Annotated video generation (CPU-bound, sync)
@@ -84,8 +94,10 @@ def generate_annotated_video(
     cap = cv2.VideoCapture(video_path)
     try:
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        src_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        width, height = _annotation_dimensions(src_width, src_height)
+        needs_resize = (width != src_width) or (height != src_height)
         fourcc = cv2.VideoWriter.fourcc(*"mp4v")
 
         writer = cv2.VideoWriter(raw_path, fourcc, fps, (width, height))
@@ -100,6 +112,9 @@ def generate_annotated_video(
                 ret, frame = cap.read()
                 if not ret:
                     break
+
+                if needs_resize:
+                    frame = cv2.resize(frame, (width, height))
 
                 if frame_idx < len(landmarks_per_frame):
                     landmarks = landmarks_per_frame[frame_idx]

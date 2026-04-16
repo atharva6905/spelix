@@ -27,6 +27,7 @@ from app.cv.video_annotator import (
     draw_skeleton,
 )
 from app.cv.artifact_generation import (
+    _annotation_dimensions,
     cleanup_temp_files,
     generate_angle_plot,
     generate_annotated_video,
@@ -375,3 +376,35 @@ class TestUploadArtifact:
         call_args = mock_bucket.upload.call_args
         assert call_args[0][0] == "artifacts/123/annotated.mp4"
         assert call_args[0][1] == b"fake video data"
+
+
+# ---------------------------------------------------------------------------
+# Annotation dimension tests
+# ---------------------------------------------------------------------------
+
+
+class TestAnnotationDimensions:
+    def test_caps_1080p_portrait_to_720p(self):
+        w, h = _annotation_dimensions(1080, 1920)
+        assert (w, h) == (720, 1280)
+
+    def test_caps_1080p_landscape_to_720p(self):
+        w, h = _annotation_dimensions(1920, 1080)
+        assert (w, h) == (1280, 720)
+
+    def test_no_change_for_720p_portrait(self):
+        w, h = _annotation_dimensions(720, 1280)
+        assert (w, h) == (720, 1280)
+
+    def test_no_change_for_sub_720p(self):
+        w, h = _annotation_dimensions(640, 480)
+        assert (w, h) == (640, 480)
+
+    def test_caps_4k_to_720p_equivalent(self):
+        w, h = _annotation_dimensions(3840, 2160)
+        assert max(w, h) <= 1280
+        assert w % 2 == 0 and h % 2 == 0
+
+    def test_output_dimensions_are_even(self):
+        w, h = _annotation_dimensions(1081, 1921)
+        assert w % 2 == 0 and h % 2 == 0
