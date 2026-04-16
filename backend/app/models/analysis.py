@@ -55,6 +55,12 @@ class Analysis(TimestampMixin, Base):
     detection_result: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     retrieval_context: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     eval_scores: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    timing_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Per-stage wall durations in milliseconds (D-035). "
+                "Shape: {stage_name: elapsed_ms}. Written incrementally.",
+    )
 
     # Metadata
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

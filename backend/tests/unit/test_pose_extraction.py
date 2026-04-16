@@ -73,13 +73,10 @@ def _make_mock_cap(num_frames=2, fps=30.0, width=1280.0, height=720.0):
 
 
 def _make_mock_landmarker(detect_results: list):
-    """Create a mock PoseLandmarker context manager.
-
-    ``detect_results`` is a list — one entry per call to ``detect()``.
-    Each entry is the value to assign to the returned object's
-    ``pose_landmarks`` attribute (the Tasks API's per-frame result shape:
-    list-of-poses, each pose a list of 33 landmarks; or empty list if
-    no pose detected).
+    """Mock PoseLandmarker. Mocks both detect() and detect_for_video()
+    so the same helper supports IMAGE and VIDEO mode tests. Records
+    timestamps passed to detect_for_video into _detect_for_video_timestamps
+    (cleared at top of every _run_extract call alongside _constructor_args).
     """
     landmarker = MagicMock()
     landmarker.__enter__ = MagicMock(return_value=landmarker)
@@ -91,7 +88,16 @@ def _make_mock_landmarker(detect_results: list):
         result_obj.pose_landmarks = r
         detect_call_results.append(result_obj)
 
-    landmarker.detect.side_effect = detect_call_results
+    img_iter = iter(detect_call_results)
+    vid_iter = iter(list(detect_call_results))  # independent copy for VIDEO mode
+
+    landmarker.detect.side_effect = lambda *a, **kw: next(img_iter)
+
+    def _detect_for_video_side_effect(image, timestamp_ms):
+        _detect_for_video_timestamps.append(timestamp_ms)
+        return next(vid_iter)
+
+    landmarker.detect_for_video.side_effect = _detect_for_video_side_effect
     return landmarker
 
 
@@ -102,6 +108,10 @@ _constructor_args: dict = {}
 # single ``_run_extract`` call so tests can assert that resize happened (or
 # didn't) before MediaPipe inference. Cleared at the start of each call.
 _mp_image_call_shapes: list[tuple[int, ...]] = []
+
+# Captures the timestamp_ms argument passed to detect_for_video on every call,
+# in order. Cleared at the top of each _run_extract call. (D-035 / VIDEO mode.)
+_detect_for_video_timestamps: list[int] = []
 
 
 def _run_extract(
@@ -123,6 +133,7 @@ def _run_extract(
     """
     _constructor_args.clear()
     _mp_image_call_shapes.clear()
+    _detect_for_video_timestamps.clear()
 
     landmarker = _make_mock_landmarker(detect_results)
     landmarker_cls = MagicMock(return_value=landmarker)
@@ -137,6 +148,7 @@ def _run_extract(
     base_options_cls = MagicMock()
     running_mode = MagicMock()
     running_mode.IMAGE = "IMAGE"
+    running_mode.VIDEO = "VIDEO"
 
     def _mp_image_side_effect(image_format, data):
         # ``data`` is the BGR→RGB-converted numpy frame passed into
@@ -323,7 +335,7 @@ class TestMediaPipeConfig:
 
         # The PoseLandmarkerOptions constructor should have been called
         # with the canonical Spelix config.
-        assert _constructor_args["running_mode"] == "IMAGE"
+        assert _constructor_args["running_mode"] == "VIDEO"
         assert _constructor_args["num_poses"] == 1
         assert _constructor_args["min_pose_detection_confidence"] == 0.5
         assert _constructor_args["min_pose_presence_confidence"] == 0.5
@@ -542,3 +554,55 @@ class TestFrameDownsampling:
         assert len(_mp_image_call_shapes) == 2
         assert _mp_image_call_shapes[0] == (720, 1280, 3)
         assert _mp_image_call_shapes[1] == (720, 1280, 3)
+
+
+class TestRunningModeVideo:
+    """`extract_landmarks` uses RunningMode.VIDEO with monotonically increasing timestamps (D-035)."""
+
+    def test_running_mode_is_video(self):
+        cap = _make_mock_cap(num_frames=1)
+        _run_extract(cap, [_make_pose_landmarks_list()])
+
+        assert _constructor_args["running_mode"] == "VIDEO"
+
+    def test_detect_for_video_called_per_frame(self):
+        cap = _make_mock_cap(num_frames=3, fps=30.0, width=640.0, height=480.0)
+        _run_extract(
+            cap,
+            [
+                _make_pose_landmarks_list(),
+                _make_pose_landmarks_list(),
+                _make_pose_landmarks_list(),
+            ],
+        )
+
+        assert len(_detect_for_video_timestamps) == 3
+
+    def test_timestamps_monotonically_increase(self):
+        """Each subsequent timestamp_ms must be strictly greater than the previous."""
+        cap = _make_mock_cap(num_frames=4, fps=30.0, width=640.0, height=480.0)
+        _run_extract(
+            cap,
+            [_make_pose_landmarks_list() for _ in range(4)],
+        )
+
+        ts = _detect_for_video_timestamps
+        assert ts == sorted(ts)
+        assert all(ts[i + 1] > ts[i] for i in range(len(ts) - 1))
+
+    def test_timestamps_reflect_30fps(self):
+        """At 30fps, consecutive frames are ~33ms apart."""
+        cap = _make_mock_cap(num_frames=2, fps=30.0, width=640.0, height=480.0)
+        _run_extract(cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()])
+
+        ts = _detect_for_video_timestamps
+        assert ts[0] == 0
+        assert 30 <= ts[1] <= 35  # ~1000/30 = 33ms
+
+    def test_timestamps_reflect_60fps(self):
+        cap = _make_mock_cap(num_frames=2, fps=60.0, width=640.0, height=480.0)
+        _run_extract(cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()])
+
+        ts = _detect_for_video_timestamps
+        assert ts[0] == 0
+        assert 15 <= ts[1] <= 18  # ~1000/60 = 16ms

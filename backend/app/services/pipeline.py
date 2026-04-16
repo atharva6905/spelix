@@ -38,16 +38,23 @@ from app.cv.pose_extraction import extract_landmarks
 from app.cv.quality_gates import run_quality_gates
 from app.cv.rep_detection import detect_reps
 from app.cv.signal_processing import compute_angle_timeseries
+from app.cv.video_probe import probe_duration_seconds
 from app.models.analysis import Analysis
 from app.models.rep_metric import RepMetric
 from app.repositories.analysis import AnalysisRepository
 from app.repositories.rep_metric import RepMetricRepository
 from app.services.status import transition
+from app.services.timing import StageTimer
 
 logger = logging.getLogger(__name__)
 
 # Storage bucket name
 _BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "videos")
+
+# D-035: hard cap on clip duration to avoid timeout DoS via long uploads.
+# Frontend enforces the same cap; this is defense-in-depth.
+_MAX_DURATION_FREE_TIER_S = 60.0
+_MAX_DURATION_EXTENDED_S = 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +273,7 @@ async def run_cv_pipeline(
     """
     loop = asyncio.get_event_loop()
     result = PipelineResult()
+    timer = StageTimer()
     analysis_id = analysis.id
     exercise_type = analysis.exercise_type
     exercise_variant = analysis.exercise_variant
@@ -286,21 +294,60 @@ async def run_cv_pipeline(
     tmp_dir = get_temp_dir(analysis_id)
     video_local = os.path.join(tmp_dir, f"{analysis_id}.mp4")
 
-    if storage_client is not None and analysis.video_path:
-        await download_video(
-            storage_client, _BUCKET, analysis.video_path, video_local,
+    with timer.stage("download"):
+        if storage_client is not None and analysis.video_path:
+            await download_video(
+                storage_client, _BUCKET, analysis.video_path, video_local,
+            )
+        else:
+            # In test mode, video_path may already be a local path
+            if analysis.video_path and os.path.isfile(analysis.video_path):
+                video_local = analysis.video_path
+
+    # ------------------------------------------------------------------ #
+    # D-035: defense-in-depth duration check after download
+    # ------------------------------------------------------------------ #
+    with timer.stage("duration_probe"):
+        duration_s = await loop.run_in_executor(
+            None, probe_duration_seconds, video_local,
         )
-    else:
-        # In test mode, video_path may already be a local path
-        if analysis.video_path and os.path.isfile(analysis.video_path):
-            video_local = analysis.video_path
+    cap_s = (
+        _MAX_DURATION_EXTENDED_S
+        if getattr(analysis, "extended_mode", False)
+        else _MAX_DURATION_FREE_TIER_S
+    )
+    if duration_s > cap_s:
+        analysis.quality_gate_result = {
+            "passed": False,
+            "status": "rejected",
+            "checks": [
+                {
+                    "passed": False,
+                    "name": "duration",
+                    "level": "error",
+                    "metric_value": duration_s,
+                    "threshold": cap_s,
+                    "user_message": (
+                        f"Video is {duration_s:.1f}s — please trim to under {cap_s:.0f}s. "
+                        "Long clips can take many minutes to analyse on the current tier."
+                    ),
+                }
+            ],
+        }
+        analysis.status = transition(analysis.status, "quality_gate_rejected")
+        analysis.timing_json = timer.as_dict()
+        await repo.update(analysis)
+        raise QualityGateRejection(
+            f"Clip duration {duration_s:.1f}s exceeds {cap_s:.0f}s cap"
+        )
 
     # ------------------------------------------------------------------ #
     # Step 2: Pose extraction (CPU-bound)
     # ------------------------------------------------------------------ #
-    landmarks_per_frame, fps, frame_width, frame_height = await loop.run_in_executor(
-        None, extract_landmarks, video_local,
-    )
+    with timer.stage("extract_landmarks"):
+        landmarks_per_frame, fps, frame_width, frame_height = await loop.run_in_executor(
+            None, extract_landmarks, video_local,
+        )
     result.landmarks_per_frame = landmarks_per_frame
     result.fps = fps
     result.frame_width = frame_width
@@ -313,48 +360,49 @@ async def run_cv_pipeline(
     # ------------------------------------------------------------------ #
     from app.cv.exercise_detection import DetectionResult, detect_exercise_heuristic
 
-    detection = await loop.run_in_executor(
-        None, detect_exercise_heuristic, landmarks_per_frame,
-    )
-    logger.info(
-        "Heuristic detection: %s (conf=%.2f) for analysis %s",
-        detection.detected_type, detection.confidence, analysis_id,
-    )
+    with timer.stage("exercise_detection"):
+        detection = await loop.run_in_executor(
+            None, detect_exercise_heuristic, landmarks_per_frame,
+        )
+        logger.info(
+            "Heuristic detection: %s (conf=%.2f) for analysis %s",
+            detection.detected_type, detection.confidence, analysis_id,
+        )
 
-    # GPT-4o vision fallback when heuristic confidence is low (FR-XDET-04)
-    if detection.confidence < _FALLBACK_CONFIDENCE_THRESHOLD and openai_client is not None:
-        try:
-            from app.services.keyframe_analysis import KeyframeAnalysisService
+        # GPT-4o vision fallback when heuristic confidence is low (FR-XDET-04)
+        if detection.confidence < _FALLBACK_CONFIDENCE_THRESHOLD and openai_client is not None:
+            try:
+                from app.services.keyframe_analysis import KeyframeAnalysisService
 
-            frame_images = await loop.run_in_executor(
-                None, _extract_sample_frames_b64, video_local, 3,
-            )
-            if frame_images:
-                kf_svc = KeyframeAnalysisService(openai_client)
-                classification = await kf_svc.classify_exercise(
-                    frame_images_b64=frame_images,
+                frame_images = await loop.run_in_executor(
+                    None, _extract_sample_frames_b64, video_local, 3,
                 )
-                detection = DetectionResult(
-                    detected_type=classification.exercise_type,  # type: ignore[arg-type]
-                    detected_variant=classification.exercise_variant,
-                    confidence=classification.confidence,
-                    method="vision_fallback",
-                    details={
-                        "reasoning": classification.reasoning,
-                        "heuristic_confidence": detection.confidence,
-                        "heuristic_type": detection.detected_type,
-                    },
+                if frame_images:
+                    kf_svc = KeyframeAnalysisService(openai_client)
+                    classification = await kf_svc.classify_exercise(
+                        frame_images_b64=frame_images,
+                    )
+                    detection = DetectionResult(
+                        detected_type=classification.exercise_type,  # type: ignore[arg-type]
+                        detected_variant=classification.exercise_variant,
+                        confidence=classification.confidence,
+                        method="vision_fallback",
+                        details={
+                            "reasoning": classification.reasoning,
+                            "heuristic_confidence": detection.confidence,
+                            "heuristic_type": detection.detected_type,
+                        },
+                    )
+                    logger.info(
+                        "GPT-4o fallback: %s (conf=%.2f) for analysis %s",
+                        detection.detected_type, detection.confidence, analysis_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "GPT-4o exercise classification failed for %s — using heuristic result",
+                    analysis_id,
+                    exc_info=True,
                 )
-                logger.info(
-                    "GPT-4o fallback: %s (conf=%.2f) for analysis %s",
-                    detection.detected_type, detection.confidence, analysis_id,
-                )
-        except Exception:
-            logger.warning(
-                "GPT-4o exercise classification failed for %s — using heuristic result",
-                analysis_id,
-                exc_info=True,
-            )
 
     result.detection_result = detection
 
@@ -366,20 +414,22 @@ async def run_cv_pipeline(
         "method": detection.method,
         "details": detection.details,
     }
+    analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
 
     # ------------------------------------------------------------------ #
     # Step 3: Quality gates
     # ------------------------------------------------------------------ #
-    gate_result = await loop.run_in_executor(
-        None,
-        run_quality_gates,
-        landmarks_per_frame,
-        frame_width,
-        frame_height,
-        video_local,
-        exercise_type,
-    )
+    with timer.stage("quality_gates"):
+        gate_result = await loop.run_in_executor(
+            None,
+            run_quality_gates,
+            landmarks_per_frame,
+            frame_width,
+            frame_height,
+            video_local,
+            exercise_type,
+        )
 
     analysis.quality_gate_result = {
         "passed": gate_result.passed,
@@ -396,10 +446,12 @@ async def run_cv_pipeline(
             for c in gate_result.checks
         ],
     }
+    analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
 
     if not gate_result.passed:
         analysis.status = transition(analysis.status, "quality_gate_rejected")
+        analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
         raise QualityGateRejection(
             f"Quality gate rejected: {gate_result.status}"
@@ -409,6 +461,7 @@ async def run_cv_pipeline(
     # Transition: quality_gate_pending → processing
     # ------------------------------------------------------------------ #
     analysis.status = transition(analysis.status, "processing")
+    analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await write_heartbeat(redis)
 
@@ -495,6 +548,7 @@ async def run_cv_pipeline(
     result.session_confidence = session_confidence
 
     analysis.confidence_score = session_confidence
+    analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
 
     # ------------------------------------------------------------------ #
@@ -585,6 +639,7 @@ async def run_cv_pipeline(
     analysis.form_score_path_balance = path_dim.score if path_dim else None
     analysis.form_score_control = control_dim.score if control_dim else None
     analysis.form_score_overall = score_result.overall
+    analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
 
     await write_heartbeat(redis)
@@ -629,6 +684,7 @@ async def run_cv_pipeline(
 
         analysis.annotated_video_path = annotated_storage
         analysis.plot_path = plot_storage
+        analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
 
         result.annotated_video_storage_path = annotated_storage
@@ -645,6 +701,9 @@ async def run_cv_pipeline(
 
     # Local temp files are cleaned up by the worker's finally block,
     # not here — PDF generation needs the local plot file after pipeline returns.
+
+    analysis.timing_json = timer.as_dict()
+    await repo.update(analysis)
 
     return result
 

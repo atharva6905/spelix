@@ -857,3 +857,106 @@ async def test_gpt4o_fallback_error_falls_back_to_heuristic():
     # Falls back to heuristic
     assert result.detection_result.method == "heuristic"
     assert result.detection_result.confidence == 0.45
+
+
+# ---------------------------------------------------------------------------
+# Test: Pipeline timing instrumentation (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineTimingInstrumentation:
+    """Pipeline records per-stage wall durations to analysis.timing_json (D-035)."""
+
+    @pytest.mark.asyncio
+    async def test_timing_json_populated_with_expected_stages(self):
+        """After successful pipeline run, timing_json has every documented stage."""
+        landmarks = _make_landmarks()
+        reps = _make_reps()
+        rep_metrics = _make_rep_metrics(reps)
+        angle_ts = _make_angle_timeseries()
+
+        analysis = _make_analysis()
+        repo = AsyncMock()
+        rep_metric_repo = AsyncMock()
+        redis = MagicMock()
+        write_heartbeat = AsyncMock()
+
+        with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),  # under 60s cap
+            patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+            patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+            patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
+            patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+            patch(f"{_PKG}.detect_reps", return_value=reps),
+            patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+            patch(f"{_PKG}.compute_session_confidence", return_value=0.85),
+            patch(f"{_PKG}.track_barbell_from_video", return_value=[None] * _NUM_FRAMES),
+            patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+            patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+            patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+            patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock, return_value="public/url"),
+            patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+            patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+            patch("os.path.isfile", return_value=False),
+        ):
+            await run_cv_pipeline(
+                analysis=analysis,
+                repo=repo,
+                rep_metric_repo=rep_metric_repo,
+                storage_client=None,
+                redis=redis,
+                write_heartbeat=write_heartbeat,
+                openai_client=None,
+            )
+
+        assert isinstance(analysis.timing_json, dict)
+        for stage in [
+            "download",
+            "extract_landmarks",
+            "exercise_detection",
+            "quality_gates",
+        ]:
+            assert stage in analysis.timing_json, (
+                f"Missing stage {stage!r} in timing_json: {analysis.timing_json}"
+            )
+            assert isinstance(analysis.timing_json[stage], float)
+            assert analysis.timing_json[stage] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Test: Duration gate rejection (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineDurationGate:
+    """Pipeline rejects clips longer than the configured cap (D-035)."""
+
+    @pytest.mark.asyncio
+    async def test_pipeline_rejects_too_long_clip(self):
+        analysis = _make_analysis()
+        repo = AsyncMock()
+        rep_metric_repo = AsyncMock()
+        redis = MagicMock()
+        write_heartbeat = AsyncMock()
+
+        with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=180.0),  # 3 min, exceeds 60s cap
+            patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+            patch("os.path.isfile", return_value=False),
+        ):
+            with pytest.raises(QualityGateRejection):
+                await run_cv_pipeline(
+                    analysis=analysis,
+                    repo=repo,
+                    rep_metric_repo=rep_metric_repo,
+                    storage_client=None,
+                    redis=redis,
+                    write_heartbeat=write_heartbeat,
+                )
+
+        assert analysis.status == "quality_gate_rejected"
+        gate = analysis.quality_gate_result
+        assert gate["passed"] is False
+        check = next(c for c in gate["checks"] if c["name"] == "duration")
+        assert check["metric_value"] == 180.0
+        assert check["threshold"] == 60.0

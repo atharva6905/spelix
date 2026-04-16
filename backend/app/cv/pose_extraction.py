@@ -146,9 +146,11 @@ def extract_landmarks(
       Heavy model (``pose_landmarker_heavy.task``). The legacy
       ``mediapipe.solutions.pose.Pose`` API is intentionally NOT used —
       see the module docstring.
-    * Configured for ``RunningMode.IMAGE`` (each frame processed
-      independently — no inter-frame tracking), matching the legacy
-      ``static_image_mode=True`` behaviour.
+    * Configured for ``RunningMode.VIDEO`` — uses inter-frame bbox tracking
+      so the detection branch only runs on the first frame and on
+      tracking-loss events (D-035, ADR-058). ~20% faster than IMAGE mode
+      for continuous single-subject lift video on the 2-vCPU droplet.
+      Within the existing ±1° angle tolerance.
     * Visibility/presence values outside ``[0, 1]`` are treated as
       pre-sigmoid logits and clamped via ``sigmoid()`` before storage.
     * This function is synchronous (blocking). Call it from an executor
@@ -172,7 +174,7 @@ def extract_landmarks(
 
     options = PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=_resolve_model_path()),
-        running_mode=RunningMode.IMAGE,
+        running_mode=RunningMode.VIDEO,
         num_poses=1,
         min_pose_detection_confidence=0.5,
         min_pose_presence_confidence=0.5,
@@ -181,6 +183,11 @@ def extract_landmarks(
 
     target_w, target_h = _pose_frame_dimensions(width, height)
     needs_resize = (target_w != width) or (target_h != height)
+
+    # VIDEO mode requires monotonically-increasing timestamps. Source fps
+    # may be 0.0 for some containers; fall back to 30 fps in that case.
+    frame_interval_ms = int(1000.0 / fps) if fps and fps > 0 else 33
+    timestamp_ms = 0
 
     with PoseLandmarker.create_from_options(options) as landmarker:
         while True:
@@ -195,7 +202,8 @@ def extract_landmarks(
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-            result = landmarker.detect(mp_image)
+            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+            timestamp_ms += frame_interval_ms
 
             # result.pose_landmarks is a list of detected poses; each entry
             # is a list of 33 NormalizedLandmark objects. With num_poses=1

@@ -184,18 +184,17 @@ describe("validateDuration", () => {
     expect(result).toMatch(/too short/i);
   });
 
-  it("rejects video longer than 40s in normal mode", async () => {
-    const { video } = mockVideoElement(45);
+  it("rejects video longer than 60s in normal mode", async () => {
+    const { video } = mockVideoElement(90);
     const file = makeVideoFile();
     const promise = validateDuration(file, false);
     video._trigger("loadedmetadata");
     const result = await promise;
-    expect(result).toMatch(/too long/i);
-    expect(result).toMatch(/40/);
+    expect(result).toMatch(/exceeds the 60 second limit/i);
   });
 
-  it("accepts video up to 40s in normal mode", async () => {
-    const { video } = mockVideoElement(40);
+  it("accepts video up to 60s in normal mode", async () => {
+    const { video } = mockVideoElement(60);
     const file = makeVideoFile();
     const promise = validateDuration(file, false);
     video._trigger("loadedmetadata");
@@ -218,7 +217,7 @@ describe("validateDuration", () => {
     const promise = validateDuration(file, true);
     video._trigger("loadedmetadata");
     const result = await promise;
-    expect(result).toMatch(/2 minutes/i);
+    expect(result).toMatch(/exceeds the 120 second limit/i);
   });
 
   it("accepts video between 40s and 120s in extended mode", async () => {
@@ -398,8 +397,8 @@ describe("UploadPage", () => {
     expect(screen.getByText(/my-squat\.mp4/i)).toBeInTheDocument();
   });
 
-  // B-050: duration errors are displayed
-  it("shows duration error for a >40s video and button stays disabled", async () => {
+  // D-035: duration errors are displayed (hard-block at >60s in normal mode)
+  it("shows duration error for a >60s video and button stays disabled", async () => {
     renderUploadPage();
 
     // Select type + variant first
@@ -412,7 +411,7 @@ describe("UploadPage", () => {
 
     const listeners: Record<string, (() => void)[]> = {};
     const mockVideo = {
-      duration: 45,
+      duration: 90,
       src: "",
       addEventListener: vi.fn((event: string, cb: () => void) => {
         listeners[event] = listeners[event] ?? [];
@@ -437,7 +436,7 @@ describe("UploadPage", () => {
       listeners["loadedmetadata"]?.forEach((cb) => cb());
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/too long/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/exceeds the 60 second limit/i);
     expect(screen.getByRole("button", { name: /upload/i })).toBeDisabled();
   });
 
@@ -633,5 +632,101 @@ describe("UploadPage", () => {
     });
     expect(mockStartAnalysis).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // D-035: client-side duration UX — warn at >30s, hard-block at >60s/120s
+  // ---------------------------------------------------------------------------
+
+  it("D-035: shows soft warning for 45s clip but submit is still enabled", async () => {
+    const { listeners } = setupVideoElementMock(45);
+    renderUploadPage();
+
+    fireEvent.change(screen.getByLabelText(/exercise type/i), {
+      target: { value: "squat" },
+    });
+    fireEvent.change(screen.getByLabelText(/exercise variant/i), {
+      target: { value: "high_bar" },
+    });
+
+    const fileInput = screen.getByLabelText(/video file/i);
+    Object.defineProperty(fileInput, "files", {
+      value: [makeVideoFile("medium.mp4")],
+      configurable: true,
+    });
+
+    await act(async () => { fireEvent.change(fileInput); });
+    await act(async () => {
+      listeners["loadedmetadata"]?.forEach((cb) => cb());
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/longer than 30 seconds/i)).toBeInTheDocument();
+    });
+    // Warning is shown but submit should NOT be disabled (file is accepted)
+    expect(screen.getByRole("button", { name: /upload video/i })).not.toBeDisabled();
+  });
+
+  it("D-035: hard-blocks submit for 90s clip in standard mode", async () => {
+    const { listeners } = setupVideoElementMock(90);
+    renderUploadPage();
+
+    fireEvent.change(screen.getByLabelText(/exercise type/i), {
+      target: { value: "squat" },
+    });
+    fireEvent.change(screen.getByLabelText(/exercise variant/i), {
+      target: { value: "high_bar" },
+    });
+
+    const fileInput = screen.getByLabelText(/video file/i);
+    Object.defineProperty(fileInput, "files", {
+      value: [makeVideoFile("long.mp4")],
+      configurable: true,
+    });
+
+    await act(async () => { fireEvent.change(fileInput); });
+    await act(async () => {
+      listeners["loadedmetadata"]?.forEach((cb) => cb());
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/exceeds the 60 second limit/i);
+    });
+    expect(screen.getByRole("button", { name: /upload video/i })).toBeDisabled();
+  });
+
+  it("D-035: 100s clip is accepted (not blocked) when Extended Mode is checked", async () => {
+    const { listeners } = setupVideoElementMock(100);
+    renderUploadPage();
+
+    // Enable extended mode first
+    const extendedCheckbox = screen.getByLabelText(/extended mode/i);
+    fireEvent.click(extendedCheckbox);
+
+    fireEvent.change(screen.getByLabelText(/exercise type/i), {
+      target: { value: "squat" },
+    });
+    fireEvent.change(screen.getByLabelText(/exercise variant/i), {
+      target: { value: "high_bar" },
+    });
+
+    const fileInput = screen.getByLabelText(/video file/i);
+    Object.defineProperty(fileInput, "files", {
+      value: [makeVideoFile("extended.mp4")],
+      configurable: true,
+    });
+
+    await act(async () => { fireEvent.change(fileInput); });
+    await act(async () => {
+      listeners["loadedmetadata"]?.forEach((cb) => cb());
+    });
+
+    await waitFor(() => {
+      // File accepted — no hard-block error, submit enabled
+      expect(screen.getByRole("button", { name: /upload video/i })).not.toBeDisabled();
+    });
+    // No "exceeds" error should be present
+    expect(screen.queryByText(/exceeds the 60 second limit/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/exceeds the 120 second limit/i)).not.toBeInTheDocument();
   });
 });

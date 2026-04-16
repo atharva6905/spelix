@@ -61,6 +61,7 @@ def _make_mock_analysis(
     obj.quality_gate_result = {"passed": True}
     obj.summary_json = {"reps": 5}
     obj.detection_result = None
+    obj.timing_json = None
     obj.form_score_safety = None
     obj.form_score_technique = None
     obj.form_score_path_balance = None
