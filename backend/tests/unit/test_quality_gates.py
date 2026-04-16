@@ -626,6 +626,41 @@ class TestCheckSinglePerson:
         result = check_single_person(frames, FRAME_WIDTH)
         assert isinstance(result, GateCheckResult)
 
+    def test_no_pose_interleaved_dont_cause_false_jumps(self):
+        """Interleaved NO_POSE frames shouldn't register as person switches."""
+        frames = []
+        for i in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            if i % 3 != 0:
+                frame[:, 0] = 0.5
+                frame[:, 1] = 0.5
+                frame[:, 3] = 0.9
+            frames.append(frame)
+        result = check_single_person(frames, FRAME_WIDTH)
+        assert result.passed is True
+
+    def test_early_instability_diluted_in_long_clip(self):
+        """With 300+ frames, brief early bystander tracking is diluted."""
+        unstable: list[np.ndarray] = []
+        for i in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5
+            frame[:, 1] = 0.5
+            frame[:, 3] = 0.9
+            hip_x = 0.1 if i % 2 == 0 else 0.5
+            frame[23, 0] = hip_x
+            frame[24, 0] = hip_x
+            unstable.append(frame)
+        stable: list[np.ndarray] = []
+        for _ in range(290):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[:, 0] = 0.5
+            frame[:, 1] = 0.5
+            frame[:, 3] = 0.9
+            stable.append(frame)
+        result = check_single_person(unstable + stable, FRAME_WIDTH)
+        assert result.passed is True
+
 
 # ---------------------------------------------------------------------------
 # check_minimum_resolution (B-062)

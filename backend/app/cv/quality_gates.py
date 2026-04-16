@@ -347,11 +347,10 @@ def check_single_person(
     landmarks_per_frame: list[np.ndarray],
     frame_width: int,
 ) -> GateCheckResult:
-    """Reject if hip landmark centroids show discontinuous jumps suggesting
-    multiple people.
+    """Reject if hip centroids show discontinuous jumps suggesting multiple people.
 
-    MediaPipe processes one person at a time — large centroid jumps indicate
-    tracking switched subjects.
+    Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels, then
+    checks consecutive valid frames for large hip jumps.
 
     Parameters
     ----------
@@ -364,12 +363,18 @@ def check_single_person(
     -------
     GateCheckResult
     """
-    max_frames = min(10, len(landmarks_per_frame))
+    indices = _sample_indices(len(landmarks_per_frame), _SINGLE_PERSON_SAMPLE_COUNT)
+
+    valid_frames = [
+        landmarks_per_frame[i]
+        for i in indices
+        if not _is_no_pose_frame(landmarks_per_frame[i])
+    ]
 
     jump_count = 0
-    for i in range(1, max_frames):
-        prev = landmarks_per_frame[i - 1]
-        curr = landmarks_per_frame[i]
+    for i in range(1, len(valid_frames)):
+        prev = valid_frames[i - 1]
+        curr = valid_frames[i]
         for lm_idx in _HIP_LANDMARKS:
             prev_x = prev[lm_idx, _COL_X] * frame_width
             curr_x = curr[lm_idx, _COL_X] * frame_width
