@@ -16,6 +16,7 @@ import cv2
 from app.cv.barbell_detection import (
     detect_barbell_in_frame,
     track_barbell,
+    track_barbell_from_video,
     compute_bar_path,
     compute_bar_path_from_landmarks,
 )
@@ -320,3 +321,61 @@ class TestComputeBarPathFromLandmarks:
         result = compute_bar_path_from_landmarks(lm_frames, exercise_type="bench")
         assert result is not None
         assert result["path_consistency"] == pytest.approx(1.0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# track_barbell_from_video
+# ---------------------------------------------------------------------------
+
+
+class TestTrackBarbellFromVideo:
+    def test_streams_centroids_matching_track_barbell(self, tmp_path):
+        """Streaming version must return identical centroids to list version."""
+        import cv2
+        import numpy as np
+
+        # Synthesize a 3-frame video with a white circle at known positions
+        w, h, fps = 640, 480, 30
+        video_path = str(tmp_path / "test.mp4")
+        fourcc = cv2.VideoWriter.fourcc(*"mp4v")
+        writer = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
+        frames = []
+        for cx in [100, 200, 300]:
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+            cv2.circle(frame, (cx, 240), 30, (255, 255, 255), -1)
+            frames.append(frame)
+            writer.write(frame)
+        writer.release()
+
+        streaming_result = track_barbell_from_video(video_path)
+        list_result = track_barbell(frames)
+
+        assert len(streaming_result) == len(list_result) == 3
+        for s, ref in zip(streaming_result, list_result):
+            if s is None:
+                assert ref is None
+            else:
+                assert ref is not None
+                assert abs(s[0] - ref[0]) < 1.0
+                assert abs(s[1] - ref[1]) < 1.0
+
+    def test_returns_empty_list_for_missing_video(self, tmp_path):
+        """Missing video returns empty list, not exception."""
+        result = track_barbell_from_video(str(tmp_path / "does-not-exist.mp4"))
+        assert result == []
+
+    def test_handles_single_frame_video(self, tmp_path):
+        import cv2
+        import numpy as np
+
+        w, h = 320, 240
+        video_path = str(tmp_path / "single.mp4")
+        fourcc = cv2.VideoWriter.fourcc(*"mp4v")
+        writer = cv2.VideoWriter(video_path, fourcc, 30, (w, h))
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        cv2.circle(frame, (160, 120), 20, (255, 255, 255), -1)
+        writer.write(frame)
+        writer.release()
+
+        result = track_barbell_from_video(video_path)
+        assert len(result) == 1
