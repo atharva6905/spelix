@@ -379,3 +379,55 @@ class TestTrackBarbellFromVideo:
 
         result = track_barbell_from_video(video_path)
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# _downscale_for_detection  (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestDownscaleForDetection:
+    def test_noop_for_small_frames(self):
+        """480x270 input: no downscale, scale_factor == 1.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((270, 480, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scale_factor == 1.0
+        assert scaled.shape == (270, 480, 3)
+
+    def test_noop_at_exactly_max_dim(self):
+        """Frame whose longest side equals max_dim is not resized."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((480, 480, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scale_factor == 1.0
+        assert scaled.shape == (480, 480, 3)
+
+    def test_1080p_to_480p(self):
+        """1920x1080 input: longest side becomes 480, scale_factor == 4.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (270, 480, 3)
+        assert scale_factor == pytest.approx(4.0, rel=1e-3)
+
+    def test_4k_to_480p(self):
+        """3840x2160 (4K) input: longest side becomes 480, scale_factor == 8.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((2160, 3840, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (270, 480, 3)
+        assert scale_factor == pytest.approx(8.0, rel=1e-3)
+
+    def test_portrait_orientation(self):
+        """Portrait 1080x1920 input: longest side (1920) becomes 480."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (480, 270, 3)
+        assert scale_factor == pytest.approx(4.0, rel=1e-3)
