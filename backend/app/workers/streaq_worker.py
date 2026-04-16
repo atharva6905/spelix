@@ -140,8 +140,11 @@ def _adapt_ctx(context: WorkerContext) -> dict[str, Any]:
     }
 
 
-# timeout=300 matches ARQ's WorkerSettings.job_timeout (drop-in parity).
-@worker.task(timeout=300)
+# timeout=900 per ADR-BRAIN-04 Phase-2 + ADR-055 — MediaPipe BlazePose Heavy on
+# the 2-vCPU droplet costs ~150–180 ms/frame, so a 20–30 s 1080p@59fps clip takes
+# 3–7 minutes just for pose extraction (atharva-bench.mov hit the old 300 s ceiling
+# in session 33). Other tasks stay at 300 s — they are sub-second in the common case.
+@worker.task(timeout=900)
 async def process_analysis(
     analysis_id: UUID,
     context: WorkerContext = WorkerDepends(),
