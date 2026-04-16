@@ -533,6 +533,7 @@ async def run_cv_pipeline(
     # ------------------------------------------------------------------ #
     frames = await loop.run_in_executor(None, extract_frames, video_local)
     centroids = await loop.run_in_executor(None, track_barbell, frames)
+    del frames
 
     # Determine detection rate
     detected_count = sum(1 for c in centroids if c is not None)
