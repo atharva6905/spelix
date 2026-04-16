@@ -159,6 +159,30 @@ async def process_analysis(
     await _run(_adapt_ctx(context), analysis_id)
 
 
+# D-035 Priority 3: diagnostic harness to triangulate bench-vs-prod gap.
+# timeout=900 covers two extract_landmarks passes on a 22.8s 1080p@59fps
+# clip at observed prod speed. Results land in the worker log under the
+# D035_DIAG prefix for easy `docker logs | grep` retrieval.
+@worker.task(timeout=900)
+async def pose_extraction_diagnostic(
+    video_path: str,
+    context: WorkerContext = WorkerDepends(),
+) -> dict[str, dict[str, float]]:
+    """Run pose extraction in executor + inline variants; log timings."""
+    # Lazy-imported to match other task wrappers and avoid cycles.
+    from app.services.d035_diagnostic import _run_pose_extraction_diagnostic
+
+    logger.info("D035_DIAG_START video_path=%s", video_path)
+    result = await _run_pose_extraction_diagnostic(video_path)
+    logger.info(
+        "D035_DIAG_RESULT video_path=%s executor=%s inline=%s",
+        video_path,
+        result["executor"],
+        result["inline"],
+    )
+    return result
+
+
 @worker.task(timeout=300)
 async def cascade_consent_withdrawal(
     user_id: str,

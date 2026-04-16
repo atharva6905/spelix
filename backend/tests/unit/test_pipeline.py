@@ -922,6 +922,79 @@ class TestPipelineTimingInstrumentation:
             assert isinstance(analysis.timing_json[stage], float)
             assert analysis.timing_json[stage] >= 0.0
 
+    @pytest.mark.asyncio
+    async def test_timing_json_flushed_after_each_early_stage(self):
+        """timing_json is flushed to the DB after download, duration_probe, and extract_landmarks.
+
+        D-035 Priority 1: a pipeline that dies during pose extraction must still
+        leave partial per-stage timing data persisted on the analysis row.
+        We verify this by capturing the keyset of analysis.timing_json at every
+        repo.update() call and asserting that the three early snapshots appear.
+        """
+        landmarks = _make_landmarks()
+        reps = _make_reps()
+        rep_metrics = _make_rep_metrics(reps)
+        angle_ts = _make_angle_timeseries()
+
+        analysis = _make_analysis()
+        repo = AsyncMock()
+        rep_metric_repo = AsyncMock()
+        redis = MagicMock()
+        write_heartbeat = AsyncMock()
+
+        snapshots: list[frozenset] = []
+
+        async def _capture_update(a: Analysis) -> Analysis:
+            snapshots.append(frozenset((a.timing_json or {}).keys()))
+            return a
+
+        repo.update = AsyncMock(side_effect=_capture_update)
+
+        with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),  # under 60s cap
+            patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+            patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+            patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
+            patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+            patch(f"{_PKG}.detect_reps", return_value=reps),
+            patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+            patch(f"{_PKG}.compute_session_confidence", return_value=0.85),
+            patch(f"{_PKG}.track_barbell_from_video", return_value=[None] * _NUM_FRAMES),
+            patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+            patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+            patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+            patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock, return_value="public/url"),
+            patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+            patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+            patch("os.path.isfile", return_value=False),
+        ):
+            await run_cv_pipeline(
+                analysis=analysis,
+                repo=repo,
+                rep_metric_repo=rep_metric_repo,
+                storage_client=None,
+                redis=redis,
+                write_heartbeat=write_heartbeat,
+                openai_client=None,
+            )
+
+        after_download = frozenset({"download"})
+        after_duration_probe = frozenset({"download", "duration_probe"})
+        after_extract = frozenset({"download", "duration_probe", "extract_landmarks"})
+
+        assert after_download in snapshots, (
+            f"Expected post-download flush with keyset {after_download!r} "
+            f"but it was not found. Captured snapshots: {snapshots}"
+        )
+        assert after_duration_probe in snapshots, (
+            f"Expected post-duration_probe flush with keyset {after_duration_probe!r} "
+            f"but it was not found. Captured snapshots: {snapshots}"
+        )
+        assert after_extract in snapshots, (
+            f"Expected post-extract_landmarks flush with keyset {after_extract!r} "
+            f"but it was not found. Captured snapshots: {snapshots}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test: Duration gate rejection (D-035)
