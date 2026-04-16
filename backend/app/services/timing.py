@@ -12,8 +12,8 @@ manager body may itself be async or sync; we measure wall time via
 from __future__ import annotations
 
 import time
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Iterator
 
 
 class StageTimer:
@@ -21,13 +21,15 @@ class StageTimer:
 
     Last-write-wins on duplicate stage names — pipelines that re-enter the
     same logical stage (e.g. a retry loop) record the final attempt only.
+
+    Not thread-safe; instantiate one timer per pipeline run.
     """
 
     def __init__(self) -> None:
         self._records: dict[str, float] = {}
 
     @contextmanager
-    def stage(self, name: str) -> Iterator[None]:
+    def stage(self, name: str) -> Generator[None, None, None]:
         """Context manager that records wall time of the enclosed block.
 
         Records elapsed even if the block raises, so failed stages still
