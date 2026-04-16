@@ -431,3 +431,60 @@ class TestDownscaleForDetection:
         scaled, scale_factor = _downscale_for_detection(frame)
         assert scaled.shape == (480, 270, 3)
         assert scale_factor == pytest.approx(4.0, rel=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# detect_barbell_in_frame after D-035 downscale (post-fix behaviour)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectBarbellAfterDownscale:
+    def test_detect_returns_source_coords_on_1080p(self):
+        """Circle drawn at (1000, 500) in a 1920x1080 frame is detected near
+        (1000, 500) after internal downscale-to-480 + scale-back."""
+        w, h = 1920, 1080
+        cx, cy = 1000, 500
+        radius = 60
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (cx, cy), radius, (200, 200, 200), thickness=-1)
+
+        result = detect_barbell_in_frame(frame)
+        assert result is not None, "Expected centroid on clean 1080p circle"
+        dx = abs(result[0] - cx)
+        dy = abs(result[1] - cy)
+        # Error budget: ~1 source px per 0.25 scaled px. Allow ±20 source px.
+        assert dx <= 20, f"x off by {dx} px (detected {result[0]})"
+        assert dy <= 20, f"y off by {dy} px (detected {result[1]})"
+
+    def test_detect_returns_source_coords_on_portrait_1080p(self):
+        """Same test in portrait orientation — longest side 1920 (height)."""
+        w, h = 1080, 1920
+        cx, cy = 540, 900
+        radius = 60
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (cx, cy), radius, (200, 200, 200), thickness=-1)
+
+        result = detect_barbell_in_frame(frame)
+        assert result is not None
+        dx = abs(result[0] - cx)
+        dy = abs(result[1] - cy)
+        assert dx <= 20, f"x off by {dx} px"
+        assert dy <= 20, f"y off by {dy} px"
+
+    def test_detect_on_1080p_is_fast(self):
+        """Per-frame detection on 1080p completes in < 200 ms (budget check).
+
+        This is a unit-level smoke test that the downscale is wired through;
+        the rigorous stage budget check is the slow integration test.
+        """
+        import time
+
+        w, h = 1920, 1080
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (1000, 500), 60, (200, 200, 200), thickness=-1)
+
+        t0 = time.perf_counter()
+        for _ in range(3):  # warm-up smoothed median-ish
+            detect_barbell_in_frame(frame)
+        elapsed = (time.perf_counter() - t0) / 3
+        assert elapsed < 0.2, f"per-frame detection took {elapsed*1000:.0f} ms (budget 200 ms)"
