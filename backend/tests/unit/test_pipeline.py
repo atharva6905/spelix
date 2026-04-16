@@ -1069,11 +1069,91 @@ class TestPipelineTimingInstrumentation:
             f"no post-extract-landmarks persist (before exercise_detection); got {stage_sets}"
         )
 
-    # Note: the prior test_timing_json_flushed_after_each_early_stage was
-    # superseded by test_timing_json_survives_main_session_rollback above.
-    # It captured repo.update calls, but post-fix the three early writes
-    # bypass repo.update and go through _persist_timing_telemetry (fresh
-    # session) so the main pipeline's rollback on timeout can't wipe them.
+    @pytest.mark.asyncio
+    async def test_timing_json_persists_every_post_extract_stage(
+        self, monkeypatch
+    ):
+        """D-035 full-stage telemetry: every pipeline stage after
+        extract_landmarks must be flushed via _persist_timing_telemetry so
+        the 24-min gap observed in session 37 becomes visible. Prior fix
+        covered only download/duration_probe/extract_landmarks; this extends
+        to every stage so we can pinpoint the real bottleneck.
+        """
+        landmarks = _make_landmarks()
+        reps = _make_reps()
+        rep_metrics = _make_rep_metrics(reps)
+        angle_ts = _make_angle_timeseries()
+
+        analysis = _make_analysis()
+        repo = AsyncMock()
+        rep_metric_repo = AsyncMock()
+        redis = MagicMock()
+        write_heartbeat = AsyncMock()
+
+        persist_calls: list[tuple] = []
+
+        async def _fake_persist(aid, timing):
+            persist_calls.append((aid, dict(timing)))
+
+        from app.services import pipeline as pipeline_mod
+
+        monkeypatch.setattr(
+            pipeline_mod, "_persist_timing_telemetry", _fake_persist
+        )
+
+        with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
+            patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+            patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+            patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
+            patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+            patch(f"{_PKG}.detect_reps", return_value=reps),
+            patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+            patch(f"{_PKG}.compute_session_confidence", return_value=0.85),
+            patch(f"{_PKG}.track_barbell_from_video", return_value=[None] * _NUM_FRAMES),
+            patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+            patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+            patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+            patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock, return_value="public/url"),
+            patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+            patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+            patch("os.path.isfile", return_value=False),
+        ):
+            await run_cv_pipeline(
+                analysis=analysis,
+                repo=repo,
+                rep_metric_repo=rep_metric_repo,
+                storage_client=None,
+                redis=redis,
+                write_heartbeat=write_heartbeat,
+                openai_client=None,
+            )
+
+        # Final telemetry call must contain the full stage set.
+        assert persist_calls, "expected at least one _persist_timing_telemetry call"
+        final_stages = set(persist_calls[-1][1].keys())
+
+        expected_stages = {
+            "download",
+            "duration_probe",
+            "extract_landmarks",
+            "exercise_detection",
+            "quality_gates",
+            "angle_timeseries",
+            "rep_detection",
+            "metric_extraction",
+            "confidence_scoring",
+            "keyframe_extraction",
+            "barbell_tracking",
+            "form_scoring",
+            "generate_annotated_video",
+            "generate_angle_plot",
+        }
+        missing = expected_stages - final_stages
+        assert not missing, (
+            f"timing_json missing stages by pipeline end: {sorted(missing)}. "
+            f"Got: {sorted(final_stages)}"
+        )
 
 
 # ---------------------------------------------------------------------------
