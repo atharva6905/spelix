@@ -285,86 +285,62 @@ def check_framing(
     frame_width: int,
     frame_height: int,
 ) -> GateCheckResult:
+    """Gate P0-02: subject framing (ADR-053, ADR-054).
+
+    Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels,
+    computes bbox of all 33 landmarks, checks 90th-percentile area
+    fraction against [30 %, 80 %].
     """
-    Gate P0-02: subject framing.
-
-    Reject if the mean bounding-box area (over the first 5 frames) is
-    outside [30%, 80%] of the total frame area.
-
-    The bounding box is derived from landmarks whose sigmoid-visibility
-    exceeds 0.50.  Coordinates are normalised [0, 1]; multiply by
-    frame_width / frame_height to get pixel space — but since we work
-    entirely in normalised coordinates, the absolute pixel dimensions
-    only matter for computing the *ratio*, and they cancel out when both
-    the box and the frame are expressed in the same normalised space.
-
-    Parameters
-    ----------
-    landmarks_per_frame:
-        List of (33, 5) arrays, one per frame.  Only the first 5 are used.
-    frame_width, frame_height:
-        Pixel dimensions of the source video frame (unused in ratio
-        computation but accepted for API consistency and future use).
-
-    Returns
-    -------
-    GateCheckResult
-    """
-    frames = landmarks_per_frame[:5]
+    indices = _sample_indices(len(landmarks_per_frame), _FRAMING_SAMPLE_COUNT)
 
     fractions: list[float] = []
-    for frame in frames:
-        # Identify landmarks visible enough to contribute to the bounding box
-        vis_col = frame[:, _COL_VISIBILITY]
-        sig_vis = np.array([sigmoid(v) for v in vis_col], dtype=np.float64)
-        visible_mask = sig_vis > _LANDMARK_VISIBLE_THRESHOLD
-
-        if not np.any(visible_mask):
-            # No visible landmarks — treat bounding box as zero area
-            fractions.append(0.0)
+    for i in indices:
+        frame = landmarks_per_frame[i]
+        if _is_no_pose_frame(frame):
             continue
 
-        xs = frame[visible_mask, _COL_X]
-        ys = frame[visible_mask, _COL_Y]
-
+        xs = frame[:, _COL_X]
+        ys = frame[:, _COL_Y]
         bbox_width = float(np.max(xs) - np.min(xs))
         bbox_height = float(np.max(ys) - np.min(ys))
+        fractions.append(bbox_width * bbox_height)
 
-        # Normalised coordinates → fraction of frame area is simply
-        # bbox_width * bbox_height (both already in [0, 1]).
-        fraction = bbox_width * bbox_height
-        fractions.append(fraction)
+    if not fractions:
+        return GateCheckResult(
+            passed=False,
+            name="framing",
+            level="error",
+            metric_value=0.0,
+            threshold=_FRAMING_MIN_FRACTION,
+            user_message=_FRAMING_TOO_SMALL_MSG,
+        )
 
-    mean_fraction = float(np.mean(fractions)) if fractions else 0.0
+    metric = float(np.percentile(fractions, _FRAMING_PERCENTILE))
 
-    # Portrait videos (height > width) naturally have smaller bbox area
-    # fractions because the body's landmark width is a smaller fraction of
-    # the tall frame.  Scale the minimum threshold by aspect ratio so
-    # well-framed portrait footage isn't rejected.
     aspect = frame_width / frame_height if frame_height > 0 else 1.0
-    min_threshold = _FRAMING_MIN_FRACTION * aspect if aspect < 1.0 else _FRAMING_MIN_FRACTION
+    min_threshold = (
+        _FRAMING_MIN_FRACTION * aspect if aspect < 1.0 else _FRAMING_MIN_FRACTION
+    )
 
-    if mean_fraction < min_threshold:
+    if metric < min_threshold:
         passed = False
         user_message = _FRAMING_TOO_SMALL_MSG
-    elif mean_fraction > _FRAMING_MAX_FRACTION:
+    elif metric > _FRAMING_MAX_FRACTION:
         passed = False
         user_message = _FRAMING_TOO_LARGE_MSG
     else:
         passed = True
         user_message = _FRAMING_PASS_MSG
 
-    # threshold reported as the violated bound (or the min bound when passing)
     threshold = (
-        min_threshold if mean_fraction <= min_threshold
-        else _FRAMING_MAX_FRACTION
+        min_threshold if metric <= min_threshold else _FRAMING_MAX_FRACTION
     )
 
     return GateCheckResult(
         passed=passed,
         name="framing",
         level="error",
-        metric_value=mean_fraction,
+        metric_value=metric,
         threshold=threshold,
         user_message=user_message,
     )

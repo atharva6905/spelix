@@ -314,36 +314,32 @@ class TestFraming:
             f"Got: {result.user_message!r}"
         )
 
-    def test_uses_only_first_five_frames(self):
-        # First 5 frames: proper framing. Next 10: tiny box. Should pass.
+    def test_passes_with_minority_bad_frames(self):
+        """With full-clip sampling and 90th percentile, a minority of bad
+        frames does not cause rejection."""
         good = _make_framing_frames(
-            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=5
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=12,
         )
         bad = _make_framing_frames(
-            x_min=0.49, y_min=0.49, x_max=0.51, y_max=0.51, visibility=0.9, n=10
+            x_min=0.49, y_min=0.49, x_max=0.51, y_max=0.51, visibility=0.9, n=3,
         )
         result = check_framing(good + bad, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is True
 
-    def test_only_visible_landmarks_count_for_bounding_box(self):
-        # Set all landmarks to invisible (visibility logit -10),
-        # then place two visible ones inside the 30–80% range.
+    def test_all_landmarks_contribute_to_bbox_regardless_of_visibility(self):
+        """All 33 landmarks contribute to bounding box — low-visibility
+        landmarks from plate occlusion are NOT excluded (D-032 fix)."""
         frames = []
         for _ in range(5):
             frame = np.zeros((33, 5), dtype=np.float32)
             frame[:, 0] = 0.5
             frame[:, 1] = 0.5
-            frame[:, 3] = -10.0  # sigmoid ≈ 0, invisible
+            frame[:, 3] = -10.0
 
-            # Two visible landmarks forming a reasonable box
             frame[0, 0] = 0.2
             frame[0, 1] = 0.1
-            frame[0, 3] = 5.0   # sigmoid ≈ 1.0, visible
-
             frame[32, 0] = 0.8
             frame[32, 1] = 0.9
-            frame[32, 3] = 5.0
-
             frames.append(frame)
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is True
@@ -385,6 +381,50 @@ class TestFraming:
         )
         # 0.30 × 0.70 = 0.21 area — should still FAIL at 0.30 for landscape
         result = check_framing(frames, frame_width=1920, frame_height=1080)
+        assert result.passed is False
+
+    def test_passes_when_early_frames_bad_but_later_good(self):
+        """D-032 Bug 1: deadlift bent-over setup in early frames."""
+        bad_early = _make_framing_frames(
+            x_min=0.45, y_min=0.40, x_max=0.55, y_max=0.60, visibility=0.9, n=5,
+        )
+        good_later = _make_framing_frames(
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=25,
+        )
+        result = check_framing(bad_early + good_later, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_skips_no_pose_frames_in_framing(self):
+        """D-032 Bug 2: NO_POSE warmup frames don't drag down metric."""
+        no_pose = [np.zeros((33, 5), dtype=np.float32) for _ in range(10)]
+        good = _make_framing_frames(
+            x_min=0.2, y_min=0.1, x_max=0.8, y_max=0.9, visibility=0.9, n=20,
+        )
+        result = check_framing(no_pose + good, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_uses_all_landmarks_for_bbox(self):
+        """D-032 Bug 3: plate-occluded landmarks still contribute to bbox."""
+        frames = []
+        for _ in range(10):
+            frame = np.zeros((33, 5), dtype=np.float32)
+            frame[0, :] = [0.2, 0.1, 0.0, -5.0, 0.9]
+            frame[32, :] = [0.8, 0.9, 0.0, -5.0, 0.9]
+            frame[15, :] = [0.5, 0.5, 0.0, 3.0, 0.9]
+            frames.append(frame)
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is True
+
+    def test_rejects_when_all_frames_no_pose(self):
+        frames = [np.zeros((33, 5), dtype=np.float32) for _ in range(10)]
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
+        assert result.passed is False
+
+    def test_rejects_genuinely_distant_full_clip(self):
+        frames = _make_framing_frames(
+            x_min=0.45, y_min=0.40, x_max=0.55, y_max=0.60, visibility=0.9, n=30,
+        )
+        result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is False
 
 
