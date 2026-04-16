@@ -98,6 +98,11 @@ def _make_mock_landmarker(detect_results: list):
 # Capture-and-return helper so tests can assert on the constructor args.
 _constructor_args: dict = {}
 
+# Captures the shape of every ``data`` array passed to ``mp.Image`` during a
+# single ``_run_extract`` call so tests can assert that resize happened (or
+# didn't) before MediaPipe inference. Cleared at the start of each call.
+_mp_image_call_shapes: list[tuple[int, ...]] = []
+
 
 def _run_extract(
     mock_cap,
@@ -117,6 +122,7 @@ def _run_extract(
     actually need a real .task file on disk.
     """
     _constructor_args.clear()
+    _mp_image_call_shapes.clear()
 
     landmarker = _make_mock_landmarker(detect_results)
     landmarker_cls = MagicMock(return_value=landmarker)
@@ -132,7 +138,15 @@ def _run_extract(
     running_mode = MagicMock()
     running_mode.IMAGE = "IMAGE"
 
-    mp_image_cls = MagicMock()
+    def _mp_image_side_effect(image_format, data):
+        # ``data`` is the BGR→RGB-converted numpy frame passed into
+        # MediaPipe's Image constructor. We record its shape so the
+        # TestFrameDownsampling suite can assert resize behavior without
+        # mocking cv2.resize itself.
+        _mp_image_call_shapes.append(tuple(data.shape))
+        return MagicMock()
+
+    mp_image_cls = MagicMock(side_effect=_mp_image_side_effect)
     mp_image_format = MagicMock()
     mp_image_format.SRGB = "SRGB"
 
@@ -437,3 +451,94 @@ class TestPoseFrameDimensions:
 
         # 2000×2000 → scale = 1280/2000 = 0.64 → (1280, 1280)
         assert _pose_frame_dimensions(2000, 2000) == (1280, 1280)
+
+
+class TestFrameDownsampling:
+    """`extract_landmarks` resizes frames above _MAX_POSE_DIM before inference (D-035)."""
+
+    def test_1080p_landscape_source_resized_to_1280x720_for_mediapipe(self):
+        cap = _make_mock_cap(num_frames=1, fps=30.0, width=1920.0, height=1080.0)
+        _, fps, width, height = _run_extract(cap, [_make_pose_landmarks_list()])
+
+        # extract_landmarks returns SOURCE dimensions — landmarks are
+        # normalized [0,1] so downstream pixel math must use the original
+        # frame size, not the downscaled one.
+        assert width == 1920
+        assert height == 1080
+        assert fps == 30.0
+
+        # But MediaPipe received a resized frame.
+        assert len(_mp_image_call_shapes) == 1
+        # cv2.cvtColor preserves shape → (h, w, 3). After resize to 1280×720:
+        assert _mp_image_call_shapes[0] == (720, 1280, 3)
+
+    def test_1080p_portrait_source_resized_to_720x1280_for_mediapipe(self):
+        cap = _make_mock_cap(num_frames=1, fps=30.0, width=1080.0, height=1920.0)
+        _, _, width, height = _run_extract(cap, [_make_pose_landmarks_list()])
+
+        assert width == 1080
+        assert height == 1920
+        assert _mp_image_call_shapes[0] == (1280, 720, 3)
+
+    def test_720p_source_not_resized(self):
+        """Exactly at the cap — cv2.resize should NOT be called (no-op path)."""
+        cap = _make_mock_cap(num_frames=1, fps=30.0, width=1280.0, height=720.0)
+        _run_extract(cap, [_make_pose_landmarks_list()])
+
+        assert _mp_image_call_shapes[0] == (720, 1280, 3)
+
+    def test_sub_720p_source_not_upscaled(self):
+        """480p → still 480p into MediaPipe; the cap never upscales."""
+        cap = _make_mock_cap(num_frames=1, fps=30.0, width=640.0, height=480.0)
+        _, _, width, height = _run_extract(cap, [_make_pose_landmarks_list()])
+
+        assert width == 640
+        assert height == 480
+        assert _mp_image_call_shapes[0] == (480, 640, 3)
+
+    def test_all_frames_downsampled_when_above_cap(self):
+        """Multi-frame clip: every frame gets resized, not just the first."""
+        cap = _make_mock_cap(num_frames=3, fps=30.0, width=1920.0, height=1080.0)
+        _run_extract(
+            cap,
+            [
+                _make_pose_landmarks_list(),
+                _make_pose_landmarks_list(),
+                _make_pose_landmarks_list(),
+            ],
+        )
+
+        assert len(_mp_image_call_shapes) == 3
+        for shape in _mp_image_call_shapes:
+            assert shape == (720, 1280, 3)
+
+    def test_landmark_shape_still_33x5_after_downsample(self):
+        """Sanity — downsampling does not break the landmark output contract."""
+        cap = _make_mock_cap(num_frames=2, fps=30.0, width=1920.0, height=1080.0)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap, [_make_pose_landmarks_list(), _make_pose_landmarks_list()]
+        )
+
+        assert len(landmarks_per_frame) == 2
+        for arr in landmarks_per_frame:
+            assert arr.shape == (33, 5)
+
+    def test_no_pose_frame_still_zero_filled_after_downsample(self):
+        """NO_POSE handling is unchanged when downsampling is active."""
+        cap = _make_mock_cap(num_frames=2, fps=30.0, width=1920.0, height=1080.0)
+        landmarks_per_frame, _, _, _ = _run_extract(
+            cap,
+            [
+                _make_pose_landmarks_list(visibility=0.8, presence=0.8),
+                [],  # no pose detected on frame 2
+            ],
+        )
+
+        import numpy as np
+
+        assert not np.all(landmarks_per_frame[0] == 0.0)
+        assert np.all(landmarks_per_frame[1] == 0.0)
+        # Both frames were still handed to MediaPipe after resize
+        assert len(_mp_image_call_shapes) == 2
+        assert _mp_image_call_shapes[0] == (720, 1280, 3)
+        assert _mp_image_call_shapes[1] == (720, 1280, 3)

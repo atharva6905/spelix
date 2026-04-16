@@ -172,11 +172,19 @@ def extract_landmarks(
         min_tracking_confidence=0.5,
     )
 
+    target_w, target_h = _pose_frame_dimensions(width, height)
+    needs_resize = (target_w != width) or (target_h != height)
+
     with PoseLandmarker.create_from_options(options) as landmarker:
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
+
+            if needs_resize:
+                # MediaPipe landmarks are normalized [0, 1], so downsampling
+                # here is invisible to downstream consumers. See D-035.
+                frame = cv2.resize(frame, (target_w, target_h))
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
