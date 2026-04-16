@@ -1,3 +1,134 @@
+# Session 37 Handoff → Session 38: D-035 culprit narrowed — pose extraction is ~5min (NOT the bottleneck), real bug is in a stage AFTER extract_landmarks (exercise_detection / quality_gates / artifact_generation)
+
+**Context refresh:** Session 37 tried to validate session 36's "bench-vs-prod gap was a workload-transient" hypothesis by running a prod E2E. **The gap reproduces 100%.** First attempt (analysis `31d06d13-8aa7-46f7-98d0-7b64e292651b`) showed `quality_gate_pending` stuck for the full 1800s, `timing_json` still NULL — because session 36's Priority 1 writes went through the main pipeline session, which `analysis_worker.py:1030` rolls back on timeout, wiping every pending write. Root-cause-of-root-cause: telemetry invisible whenever the pipeline actually needs telemetry.
+
+**Fix shipped (PR #66, merge commit `a1a092e`):** new `_persist_timing_telemetry(analysis_id, timing_dict)` helper in `app.services.pipeline` opens a fresh `async_session()`, UPDATEs `analyses.timing_json`, commits immediately. The three early-stage writes (after download, duration_probe, extract_landmarks) now go through this helper — survive rollback. Later 6 writes kept on main-session flow (they're paired with other state changes that commit together).
+
+**Second prod E2E run (analysis `fe64d814-6fe0-4feb-832b-3629f06c9be0`, 2026-04-16 18:03:00 UTC on `atharva-bench-no-weight.mov`):** this time `timing_json` populated in real time. Full result at 1800s task timeout:
+
+```json
+{
+  "download":          2866.99,    // 2.87 s  - negligible
+  "duration_probe":    149.85,     // 0.15 s  - negligible
+  "extract_landmarks": 306940.24   // 306.94 s - 5.12 min, within 8% of 287.7s bench baseline
+}
+```
+
+**Pose extraction is NOT the bottleneck.** It finished at 18:08:26, and the pipeline then spent **24.85 minutes (1800s - 307s = 1493s)** in a stage BETWEEN extract_landmarks and the timeout, with CPU pinned at ~172-192% the entire time. No Python progress log lines visible during that 25-minute gap (worker's log-level filter suppresses INFO from `app.services.pipeline`).
+
+The stages that MUST live in that 25-min black box, in order:
+1. `exercise_detection` — heuristic (~100 ms, pure math) + optional GPT-4o fallback (3 vision calls, each ~1-2 min if OpenAI is slow — network-bound, shouldn't pin CPU)
+2. `quality_gates` — pure landmark math, fast
+3. `compute_angle_timeseries`, `detect_reps`, `extract_rep_metrics`, `compute_session_confidence`, `track_barbell_from_video`, `compute_bar_path_from_landmarks`, `extract_keyframes` — all sub-second each
+4. Form scoring (`ScoreComponent` subclasses) — pure math, sub-second
+5. **`generate_annotated_video`** — H.264 encoding of 1345 frames @ 1080p with skeleton overlay. Known CPU-heavy per D-034 (the OOM case). Plausible 10-15 minutes on 2-vCPU droplet.
+6. `upload_artifact` — network
+7. `session.commit()` at line 1020 — never reached
+
+**Prime suspect: `generate_annotated_video`.** It explains both the 24-min wall time AND the CPU pinning. The pipeline likely reached annotation and got stuck encoding frames.
+
+**Additional finding: streaq error handling is broken on timeout.** When streaq cancels a coroutine mid-blocking-call (MediaPipe/OpenCV/H.264 native code), the Python `except` handler in `analysis_worker.py:1025-1057` never runs. Both prod E2E attempts this session ended with `error_message=NULL`, `status='quality_gate_pending'`, `detection_result=NULL`, `quality_gate_result=NULL`. Only the fresh-session `timing_json` writes survived, because they committed before the cancellation.
+
+## 1. Completed
+
+### PR #66 — `fix(pipeline): D-035 telemetry writes survive main-session rollback`
+- Merge commit: `a1a092e`
+- CI: all 7 checks green including "Deploy to Production"
+- Droplet verified: HEAD = `a1a092e`, worker restarted, all containers healthy post-deploy
+
+Commits:
+- `4405fd8` fix(pipeline): `_persist_timing_telemetry` helper + 3 call sites + autouse test fixture
+
+**Test count:** backend 1527 passing (+1 from 1526), 19 skipped. No regression.
+
+### Plan for session 37: `docs/superpowers/plans/2026-04-16-session-37-d035-validation-and-triage.md`
+- Task 1 (pre-flight) — done
+- Task 2 (prod E2E) — done (ran TWICE, both timed out; second one produced the breakthrough `timing_json` data)
+- Task 3 (Supabase query) — done (data inline in context refresh)
+- Task 4 (worker log walk) — done (logs unhelpful — Python INFO filtered)
+- Task 5 (decision) — Branch B (pivot to Tier 2 investigation of the post-extract gap)
+- Task 6 (rollback fix, added mid-session when the bug was discovered) — done
+
+## 2. Remaining — highest priority for session 38
+
+1. **Extend `_persist_timing_telemetry` to cover every stage after `extract_landmarks`.** Same fresh-session pattern. Add calls after: `exercise_detection`, `quality_gates`, `compute_angle_timeseries`, `detect_reps`, `extract_rep_metrics`, `compute_session_confidence`, `track_barbell_from_video`, `compute_bar_path_from_landmarks`, `extract_keyframes`, form scoring, `generate_annotated_video`, `generate_angle_plot`, `upload_artifact`. Each stage gets its own named timer block.
+2. **Re-run E2E.** Expected outcome: timing_json reveals the one stage eating 24 minutes. Hypothesis: `generate_annotated_video`.
+3. **Only then decide the fix.** Don't plan the fix before the data lands.
+
+### Known deferred (unchanged)
+- D-028, D-029, D-030, D-031
+- D-032 (quality gate false rejections)
+- D-034 (pipeline OOM on 1080p annotation — may be the SAME root cause as D-035 once we confirm)
+- D-036 (GPU offload) — remains deferred post-beta
+
+## 3. Test counts
+
+- **Backend:** 1527 passing, 19 skipped, 0 failing (+1 from session 36 end).
+- **Frontend:** unchanged (1 pre-existing flaky).
+- Coverage: 90%+ no regression.
+
+## 4. E2E verification
+
+Two runs this session, both timed out at 1800s:
+- `31d06d13-8aa7-46f7-98d0-7b64e292651b` (pre-PR #66) — `timing_json=NULL` (rollback bug)
+- `fe64d814-6fe0-4feb-832b-3629f06c9be0` (post-PR #66) — `timing_json` populated with first 3 stages (see above)
+
+## 5. Blockers
+
+**D-035 root cause is still open** — we now know pose extraction is fine, the culprit is a later stage. The 25-minute gap is unambiguous but the specific stage is not. Session 38 priority 1 closes that.
+
+**Streaq error-handling on timeout is broken** (secondary finding). When streaq kills the coroutine mid-native-call, Python's except never runs and the analysis row stays in `quality_gate_pending` with NULL fields. Frontend shows "Preparing to analyse…" forever. This affects UX but is downstream of the real bug. Address after D-035 closes.
+
+## 6. Next session start
+
+```bash
+/status
+
+# PRIORITY 1: Extend _persist_timing_telemetry to every stage after extract_landmarks
+#   Same fresh-session pattern from PR #66. Add a timer.stage("<name>") block around
+#   each CV call in pipeline.py that doesn't already have one, then call the helper
+#   immediately after the block closes.
+#   Stages to instrument (in order):
+#     exercise_detection, quality_gates, compute_angle_timeseries, detect_reps,
+#     extract_rep_metrics, compute_session_confidence, track_barbell_from_video,
+#     compute_bar_path_from_landmarks, extract_keyframes,
+#     form_scoring, generate_annotated_video, generate_angle_plot, upload_artifact
+#   Branch: fix/d035-full-stage-telemetry
+#   TDD gate: add one unit test that patches _persist_timing_telemetry and asserts
+#   it's called with a key set containing ALL expected stage names by the end of
+#   the pipeline (happy path).
+
+# PRIORITY 2: Re-run E2E on atharva-bench-no-weight.mov
+#   Expected: timing_json fully populated at task timeout, one stage eating ~24 min.
+#   Hypothesis: generate_annotated_video.
+
+# PRIORITY 3: Based on the winning stage — decide the fix
+#   - If generate_annotated_video: resize to 720p before encode (per D-034 ADR-056 plan a),
+#     or skip annotation for clips >20s, or defer annotation to a separate streaq task
+#     with its own timeout and non-blocking status update.
+#   - If exercise_detection GPT-4o fallback loop: lower retry count, add a hard
+#     wall-clock timeout on classify_exercise, or accept low-confidence heuristic
+#     result without fallback when clip is short.
+#   - If something unexpected: diagnose then fix.
+
+# SECONDARY: streaq timeout -> row never updated. Fix in analysis_worker.py error
+#   handler OR add a fresh-session "status=failed + error_message" write inside
+#   _persist_timing_telemetry whenever called (so at least partial state lands).
+#   NOT blocking — the telemetry approach gives us visibility without it.
+```
+
+## 7. Session timing
+
+- 13:02 UTC: session 37 plan written (`docs/superpowers/plans/2026-04-16-session-37-d035-validation-and-triage.md`)
+- 13:15-13:26 UTC: first E2E (analysis `31d06d13`) — timed out at 14:46, `timing_json=NULL`
+- 13:28 UTC: root cause identified (rollback wipes telemetry), fix branched
+- 13:51 UTC: PR #66 opened (fix/d035-telemetry-survives-rollback)
+- 13:59 UTC: PR #66 merged
+- 14:02 UTC: second E2E (analysis `fe64d814`) — timed out at 14:33, timing_json HAD DATA for the first time
+- 14:37 UTC: session 37 findings compiled
+
+---
+
 # Session 36 Handoff → Session 37: D-035 Priorities 1 + 3 shipped (PR #64), diagnostic result REFUTES the bench-vs-prod gap — pose extraction in streaq container is ~280s, not >1800s
 
 **Context refresh:** Session 36 shipped PR #64 — Priorities 1 + 3 from the session 35.5 handoff per plan `docs/superpowers/plans/2026-04-16-d035-priorities-1-2-3.md`. Priority 1: three new `analysis.timing_json` flushes after `download`, `duration_probe` (non-rejection path), and `extract_landmarks` in `run_cv_pipeline`. Priority 3: new `pose_extraction_diagnostic` streaq task + `_run_pose_extraction_diagnostic` pure helper + `scripts/enqueue_d035_diagnostic.py` CLI trigger. All 1526 unit tests pass, CI green, droplet HEAD = `89bb58b`.
