@@ -58,6 +58,11 @@ const DEFAULT_GUIDANCE =
 
 const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
+// D-035: duration thresholds — backend rejects beyond these limits
+const MAX_DURATION_FREE_S = 60;
+const MAX_DURATION_EXTENDED_S = 120;
+const WARN_DURATION_S = 30;
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -65,41 +70,51 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * Validates video duration from a File using a temporary HTMLVideoElement.
- * Returns an error message string, or null if valid.
+ * Probes the duration of a video File via a temporary HTMLVideoElement.
+ * Returns the duration in seconds, or 0 if metadata cannot be read
+ * (corrupt/unsupported file — fail open so a corrupt file isn't hard-blocked).
  */
-export async function validateDuration(
-  file: File,
-  extended: boolean,
-): Promise<string | null> {
+export async function probeVideoDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
     const src = URL.createObjectURL(file);
     video.src = src;
 
     video.addEventListener("loadedmetadata", () => {
-      const duration = video.duration;
+      const d = video.duration;
       URL.revokeObjectURL(src);
-
-      if (duration < 2) {
-        resolve("Video is too short (minimum ~2 seconds)");
-      } else if (!extended && duration > 40) {
-        resolve(
-          "Video is too long (max 40 seconds). Enable extended mode for longer sets.",
-        );
-      } else if (extended && duration > 120) {
-        resolve("Video exceeds maximum duration of 2 minutes");
-      } else {
-        resolve(null);
-      }
+      resolve(isFinite(d) ? d : 0);
     });
 
-    // If metadata cannot be read (corrupt/unsupported), skip duration check
     video.addEventListener("error", () => {
       URL.revokeObjectURL(src);
-      resolve(null);
+      resolve(0);
     });
   });
+}
+
+/**
+ * Validates video duration from a File using a temporary HTMLVideoElement.
+ * Returns an error message string, or null if valid.
+ * Hard-blocks at >60s (free) / >120s (extended), and also rejects <2s clips.
+ */
+export async function validateDuration(
+  file: File,
+  extended: boolean,
+): Promise<string | null> {
+  const duration = await probeVideoDuration(file);
+
+  // probeVideoDuration returns 0 for unreadable files — skip duration check
+  if (duration === 0) return null;
+
+  const cap = extended ? MAX_DURATION_EXTENDED_S : MAX_DURATION_FREE_S;
+
+  if (duration < 2) {
+    return "Video is too short (minimum ~2 seconds)";
+  } else if (duration > cap) {
+    return `This clip is ${duration.toFixed(1)}s, which exceeds the ${cap} second limit. Please trim it before uploading.`;
+  }
+  return null;
 }
 
 export default function UploadPage() {
@@ -112,6 +127,7 @@ export default function UploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
   const [durationError, setDurationError] = useState<string | null>(null);
+  const [durationWarning, setDurationWarning] = useState<string | null>(null);
   const [extendedDuration, setExtendedDuration] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -150,6 +166,7 @@ export default function UploadPage() {
     const file = e.target.files?.[0] ?? null;
     setFileSizeError(null);
     setDurationError(null);
+    setDurationWarning(null);
     setSelectedFile(null);
 
     if (!file) return;
@@ -161,11 +178,33 @@ export default function UploadPage() {
       return;
     }
 
-    // B-050: validate video duration before accepting the file
-    const durErr = await validateDuration(file, extendedDuration);
-    if (durErr) {
-      setDurationError(durErr);
-      return;
+    // D-035: probe duration for immediate client-side feedback
+    const d = await probeVideoDuration(file);
+
+    if (d > 0) {
+      // Hard-block above cap — mirrors backend ffprobe rejection
+      const durErr = d < 2
+        ? "Video is too short (minimum ~2 seconds)"
+        : null;
+      if (durErr) {
+        setDurationError(durErr);
+        return;
+      }
+
+      const cap = extendedDuration ? MAX_DURATION_EXTENDED_S : MAX_DURATION_FREE_S;
+      if (d > cap) {
+        setDurationError(
+          `This clip is ${d.toFixed(1)}s, which exceeds the ${cap} second limit. Please trim it before uploading.`,
+        );
+        return;
+      }
+
+      // Soft warning: >30s but within cap
+      if (d > WARN_DURATION_S) {
+        setDurationWarning(
+          "This clip is longer than 30 seconds. Analysis may take several minutes.",
+        );
+      }
     }
 
     setSelectedFile(file);
@@ -348,6 +387,11 @@ export default function UploadPage() {
         {durationError && (
           <p className="mt-1 text-xs text-red-600" role="alert">
             {durationError}
+          </p>
+        )}
+        {durationWarning && (
+          <p className="mt-1 text-xs text-amber-600" role="status">
+            {durationWarning}
           </p>
         )}
       </div>
