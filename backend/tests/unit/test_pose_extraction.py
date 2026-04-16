@@ -390,3 +390,56 @@ class TestModelPathResolution:
         msg = str(exc_info.value)
         assert "pose_landmarker_heavy.task" in msg
         assert "POSE_LANDMARKER_MODEL_PATH" in msg
+
+
+class TestPoseFrameDimensions:
+    """`_pose_frame_dimensions` caps the long side at 1280, never upscales, rounds even.
+
+    Mirrors `_annotation_dimensions` in artifact_generation.py. See D-035 / ADR-057.
+    """
+
+    def test_cap_constant_is_1280(self):
+        """Matches _MAX_ANNOTATION_DIM by convention."""
+        from app.cv.pose_extraction import _MAX_POSE_DIM
+
+        assert _MAX_POSE_DIM == 1280
+
+    def test_landscape_1080p_caps_to_1280x720(self):
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        assert _pose_frame_dimensions(1920, 1080) == (1280, 720)
+
+    def test_portrait_1080p_caps_to_720x1280(self):
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        assert _pose_frame_dimensions(1080, 1920) == (720, 1280)
+
+    def test_720p_source_unchanged(self):
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        assert _pose_frame_dimensions(1280, 720) == (1280, 720)
+        assert _pose_frame_dimensions(720, 1280) == (720, 1280)
+
+    def test_sub_720p_not_upscaled(self):
+        """Never upscale — scale is capped at 1.0."""
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        assert _pose_frame_dimensions(640, 480) == (640, 480)
+        assert _pose_frame_dimensions(320, 240) == (320, 240)
+
+    def test_odd_source_dimensions_rounded_even(self):
+        """Rounds to even dims so any downstream H.264 pipeline stays happy."""
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        w, h = _pose_frame_dimensions(1921, 1081)
+        assert w % 2 == 0
+        assert h % 2 == 0
+        # 1921 > 1280 so scale = 1280/1921 = 0.6663..., 1921 * 0.6663 ≈ 1280, 1081 * 0.6663 ≈ 720
+        assert w == 1280
+        assert h == 720
+
+    def test_square_source_at_cap(self):
+        from app.cv.pose_extraction import _pose_frame_dimensions
+
+        # 2000×2000 → scale = 1280/2000 = 0.64 → (1280, 1280)
+        assert _pose_frame_dimensions(2000, 2000) == (1280, 1280)

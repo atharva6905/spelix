@@ -42,6 +42,15 @@ _COL_PRESENCE = 4
 # var for local-dev or alternative deployment layouts.
 _DEFAULT_MODEL_PATH = "/app/models/pose_landmarker_heavy.task"
 
+# Maximum long-side dimension fed to MediaPipe BlazePose. Frames whose
+# longest side exceeds this get ``cv2.resize``-downscaled before inference.
+# Mirrors ``_MAX_ANNOTATION_DIM`` in artifact_generation.py. See D-035 /
+# ADR-057 — BlazePose Heavy on 2 vCPUs takes ~150–180 ms/frame at 1080p
+# (blows the 900 s streaq task budget on a 22.8 s @59 fps clip) vs ~70–90
+# ms/frame at 720p with no measurable landmark degradation for
+# clinical-grade full-body angle estimation.
+_MAX_POSE_DIM: int = 1280
+
 
 def _resolve_model_path() -> str:
     """Locate the pose landmarker .task model file.
@@ -79,6 +88,21 @@ def _resolve_model_path() -> str:
         + ". Set POSE_LANDMARKER_MODEL_PATH env var to override, or ensure "
         "the Dockerfile downloads the model into /app/models/."
     )
+
+
+def _pose_frame_dimensions(src_width: int, src_height: int) -> tuple[int, int]:
+    """Compute pose-extraction input dimensions, capping the long side at 1280.
+
+    Mirrors ``_annotation_dimensions`` in ``app/cv/artifact_generation.py``.
+    Never upscales (``scale`` is clamped to ``1.0``). Rounds both dimensions
+    down to the nearest even integer — a convention shared with the
+    annotation cap and friendly to downstream H.264 encoders, even though
+    MediaPipe itself does not require it.
+    """
+    scale = min(1.0, _MAX_POSE_DIM / max(src_width, src_height))
+    w = round(src_width * scale)
+    h = round(src_height * scale)
+    return w - w % 2, h - h % 2
 
 
 # ---------------------------------------------------------------------------
