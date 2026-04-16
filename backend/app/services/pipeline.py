@@ -367,6 +367,7 @@ async def run_cv_pipeline(
         analysis.status = transition(analysis.status, "quality_gate_rejected")
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
         raise QualityGateRejection(
             f"Clip duration {duration_s:.1f}s exceeds {cap_s:.0f}s cap"
         )
@@ -452,6 +453,7 @@ async def run_cv_pipeline(
     }
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
 
     # ------------------------------------------------------------------ #
     # Step 3: Quality gates
@@ -484,11 +486,13 @@ async def run_cv_pipeline(
     }
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
 
     if not gate_result.passed:
         analysis.status = transition(analysis.status, "quality_gate_rejected")
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
         raise QualityGateRejection(
             f"Quality gate rejected: {gate_result.status}"
         )
@@ -499,6 +503,7 @@ async def run_cv_pipeline(
     analysis.status = transition(analysis.status, "processing")
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
@@ -586,6 +591,7 @@ async def run_cv_pipeline(
     analysis.confidence_score = session_confidence
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
 
     # ------------------------------------------------------------------ #
     # Step 8: Write rep metrics to DB
@@ -677,6 +683,7 @@ async def run_cv_pipeline(
     analysis.form_score_overall = score_result.overall
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
 
     await write_heartbeat(redis)
 
@@ -722,6 +729,7 @@ async def run_cv_pipeline(
         analysis.plot_path = plot_storage
         analysis.timing_json = timer.as_dict()
         await repo.update(analysis)
+        await repo.db.commit()
 
         result.annotated_video_storage_path = annotated_storage
         result.plot_storage_path = plot_storage
@@ -740,6 +748,7 @@ async def run_cv_pipeline(
 
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
+    await repo.db.commit()
 
     return result
 
