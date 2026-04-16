@@ -22,6 +22,18 @@ _PARAM2 = 30
 _MIN_RADIUS = 10
 _MAX_RADIUS = 100
 
+# ---------------------------------------------------------------------------
+# D-035 downscale constants — HoughCircles runs on a 480p-max-dim frame
+# ---------------------------------------------------------------------------
+# Scaled ~4× from 1080p defaults above. maxRadius bumped to 40 (not 25) so
+# that the existing 640x480 / radius-40 unit fixture remains detectable after
+# the 1.33× downscale to 480x360. Source-resolution plate sizes of up to
+# ~160 px diameter (radius 40 after scaling) are still covered.
+_DETECTION_MAX_DIM = 480
+_MIN_DIST_480P = 12
+_MIN_RADIUS_480P = 3
+_MAX_RADIUS_480P = 40
+
 
 def detect_barbell_in_frame(frame: np.ndarray) -> tuple[float, float] | None:
     """Detect the circular end of a barbell plate in *frame*.
@@ -293,3 +305,25 @@ def _interpolate_centroids(
 
     # At this point all entries should be filled — cast away None
     return [c for c in filled if c is not None]  # type: ignore[return-value]
+
+
+def _downscale_for_detection(
+    frame: np.ndarray, max_dim: int = _DETECTION_MAX_DIM
+) -> tuple[np.ndarray, float]:
+    """Downscale *frame* so its longest side is <= *max_dim*.
+
+    Returns
+    -------
+    (scaled_frame, scale_factor) where scale_factor is the multiplier to
+    convert a pixel coordinate in the scaled frame back to the source frame.
+    Returns (frame, 1.0) unchanged when the frame is already small enough.
+    """
+    h, w = frame.shape[:2]
+    longest = max(h, w)
+    if longest <= max_dim:
+        return frame, 1.0
+    scale = max_dim / longest
+    scaled = cv2.resize(
+        frame, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA
+    )
+    return scaled, 1.0 / scale
