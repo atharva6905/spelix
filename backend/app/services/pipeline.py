@@ -28,13 +28,13 @@ from app.cv.artifact_generation import (
 from app.cv.barbell_detection import (
     compute_bar_path,
     compute_bar_path_from_landmarks,
-    track_barbell,
+    track_barbell_from_video,
 )
 from app.cv.confidence import (
     compute_session_confidence,
 )
 from app.cv.metric_extraction import extract_rep_metrics
-from app.cv.pose_extraction import extract_frames, extract_landmarks
+from app.cv.pose_extraction import extract_landmarks
 from app.cv.quality_gates import run_quality_gates
 from app.cv.rep_detection import detect_reps
 from app.cv.signal_processing import compute_angle_timeseries
@@ -530,10 +530,12 @@ async def run_cv_pipeline(
 
     # ------------------------------------------------------------------ #
     # Step 9: Barbell detection (pixel-based, with landmark fallback)
+    # Streams frames from disk one at a time to avoid ~8.4 GB peak on
+    # 1080p clips. See D-034 / ADR-056.
     # ------------------------------------------------------------------ #
-    frames = await loop.run_in_executor(None, extract_frames, video_local)
-    centroids = await loop.run_in_executor(None, track_barbell, frames)
-    del frames
+    centroids = await loop.run_in_executor(
+        None, track_barbell_from_video, video_local,
+    )
 
     # Determine detection rate
     detected_count = sum(1 for c in centroids if c is not None)
