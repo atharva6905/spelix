@@ -304,6 +304,11 @@ async def run_cv_pipeline(
             if analysis.video_path and os.path.isfile(analysis.video_path):
                 video_local = analysis.video_path
 
+    # D-035 Priority 1: flush after each early stage so a pipeline dying
+    # in pose extraction still leaves per-stage timing on the analysis row.
+    analysis.timing_json = timer.as_dict()
+    await repo.update(analysis)
+
     # ------------------------------------------------------------------ #
     # D-035: defense-in-depth duration check after download
     # ------------------------------------------------------------------ #
@@ -341,6 +346,9 @@ async def run_cv_pipeline(
             f"Clip duration {duration_s:.1f}s exceeds {cap_s:.0f}s cap"
         )
 
+    analysis.timing_json = timer.as_dict()
+    await repo.update(analysis)
+
     # ------------------------------------------------------------------ #
     # Step 2: Pose extraction (CPU-bound)
     # ------------------------------------------------------------------ #
@@ -352,6 +360,9 @@ async def run_cv_pipeline(
     result.fps = fps
     result.frame_width = frame_width
     result.frame_height = frame_height
+
+    analysis.timing_json = timer.as_dict()
+    await repo.update(analysis)
 
     await write_heartbeat(redis)
 
