@@ -882,6 +882,7 @@ class TestPipelineTimingInstrumentation:
         write_heartbeat = AsyncMock()
 
         with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),  # under 60s cap
             patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
             patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
             patch("app.cv.exercise_detection.detect_exercise_heuristic", return_value=_make_high_conf_detection()),
@@ -920,3 +921,42 @@ class TestPipelineTimingInstrumentation:
             )
             assert isinstance(analysis.timing_json[stage], float)
             assert analysis.timing_json[stage] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Test: Duration gate rejection (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineDurationGate:
+    """Pipeline rejects clips longer than the configured cap (D-035)."""
+
+    @pytest.mark.asyncio
+    async def test_pipeline_rejects_too_long_clip(self):
+        analysis = _make_analysis()
+        repo = AsyncMock()
+        rep_metric_repo = AsyncMock()
+        redis = MagicMock()
+        write_heartbeat = AsyncMock()
+
+        with (
+            patch(f"{_PKG}.probe_duration_seconds", return_value=180.0),  # 3 min, exceeds 60s cap
+            patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+            patch("os.path.isfile", return_value=False),
+        ):
+            with pytest.raises(QualityGateRejection):
+                await run_cv_pipeline(
+                    analysis=analysis,
+                    repo=repo,
+                    rep_metric_repo=rep_metric_repo,
+                    storage_client=None,
+                    redis=redis,
+                    write_heartbeat=write_heartbeat,
+                )
+
+        assert analysis.status == "quality_gate_rejected"
+        gate = analysis.quality_gate_result
+        assert gate["passed"] is False
+        check = next(c for c in gate["checks"] if c["name"] == "duration")
+        assert check["metric_value"] == 180.0
+        assert check["threshold"] == 60.0

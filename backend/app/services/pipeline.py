@@ -38,6 +38,7 @@ from app.cv.pose_extraction import extract_landmarks
 from app.cv.quality_gates import run_quality_gates
 from app.cv.rep_detection import detect_reps
 from app.cv.signal_processing import compute_angle_timeseries
+from app.cv.video_probe import probe_duration_seconds
 from app.models.analysis import Analysis
 from app.models.rep_metric import RepMetric
 from app.repositories.analysis import AnalysisRepository
@@ -49,6 +50,11 @@ logger = logging.getLogger(__name__)
 
 # Storage bucket name
 _BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "videos")
+
+# D-035: hard cap on clip duration to avoid timeout DoS via long uploads.
+# Frontend enforces the same cap; this is defense-in-depth.
+_MAX_DURATION_FREE_TIER_S = 60.0
+_MAX_DURATION_EXTENDED_S = 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +303,43 @@ async def run_cv_pipeline(
             # In test mode, video_path may already be a local path
             if analysis.video_path and os.path.isfile(analysis.video_path):
                 video_local = analysis.video_path
+
+    # ------------------------------------------------------------------ #
+    # D-035: defense-in-depth duration check after download
+    # ------------------------------------------------------------------ #
+    with timer.stage("duration_probe"):
+        duration_s = await loop.run_in_executor(
+            None, probe_duration_seconds, video_local,
+        )
+    cap_s = (
+        _MAX_DURATION_EXTENDED_S
+        if getattr(analysis, "extended_mode", False)
+        else _MAX_DURATION_FREE_TIER_S
+    )
+    if duration_s > cap_s:
+        analysis.quality_gate_result = {
+            "passed": False,
+            "status": "rejected",
+            "checks": [
+                {
+                    "passed": False,
+                    "name": "duration",
+                    "level": "error",
+                    "metric_value": duration_s,
+                    "threshold": cap_s,
+                    "user_message": (
+                        f"Video is {duration_s:.1f}s — please trim to under {cap_s:.0f}s. "
+                        "Long clips can take many minutes to analyse on the current tier."
+                    ),
+                }
+            ],
+        }
+        analysis.status = transition(analysis.status, "quality_gate_rejected")
+        analysis.timing_json = timer.as_dict()
+        await repo.update(analysis)
+        raise QualityGateRejection(
+            f"Clip duration {duration_s:.1f}s exceeds {cap_s:.0f}s cap"
+        )
 
     # ------------------------------------------------------------------ #
     # Step 2: Pose extraction (CPU-bound)
