@@ -81,6 +81,43 @@ def track_barbell(
     return [detect_barbell_in_frame(f) for f in frames]
 
 
+def track_barbell_from_video(
+    video_path: str,
+) -> list[tuple[float, float] | None]:
+    """Streaming barbell detection — reads frames one at a time.
+
+    Equivalent to `track_barbell(extract_frames(video_path))` but never
+    holds more than a single frame in memory. Critical for 1080p clips
+    on memory-constrained hosts (D-034).
+
+    Parameters
+    ----------
+    video_path:
+        Absolute path to an OpenCV-readable video file.
+
+    Returns
+    -------
+    List of centroids (one per frame).  Entries are None where no barbell
+    plate was detected.  Empty list if the video cannot be opened.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        cap.release()
+        return []
+
+    centroids: list[tuple[float, float] | None] = []
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            centroids.append(detect_barbell_in_frame(frame))
+    finally:
+        cap.release()
+
+    return centroids
+
+
 def compute_bar_path(
     centroids: list[tuple[float, float] | None],
     frame_width: int,
