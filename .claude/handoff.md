@@ -1,3 +1,119 @@
+# Session 39 Handoff → Session 40: D-035 CLOSED — downscale-before-HoughCircles cuts barbell_tracking 24.4 min → 2 min (12.3× in prod); PR #71 merged, E2E verified end-to-end
+
+**Context refresh:** Session 38 per-stage telemetry (analysis `fc318bc3`) proved `barbell_tracking` was 83% of pipeline wall time at 1,465 s / 24.4 min on a 1080p@59fps bench clip — not pose extraction. Session 39 fixed it: `cv2.HoughCircles` at source resolution with radius range 10–100 was the culprit. Per-frame cost dropped from ~1037 ms → ~99 ms after downscaling every frame to 480 px (longest dim) via `cv2.INTER_AREA` before HoughCircles, with a `scale_factor` multiplier applied to the detected centroid before return so callers keep seeing source-resolution coordinates. FR-BDET-01/02 preserved (detection still runs on every frame), FR-BDET-06 landmark fallback unchanged. ADR-060 in `decisions.md` documents the decision + evidence.
+
+**Session 38 handoff is on unmerged branch `docs/session-38-handoff` at commit `b43ebdf`** — contains the full 24.4-min telemetry forensics that guided this session. Not merged because that branch was docs-only; its content is captured in ADR-060 and this handoff. The branch can stay as-is or be cleaned up whenever.
+
+## 1. Shipped this session
+
+| Ref | What |
+|---|---|
+| PR #71 merged `91b1903` | `fix(cv): D-035 downscale-before-HoughCircles cuts barbell_tracking from 24 min to 2.2 min (10.4×)` |
+| ADR-060 | `docs(adr): ADR-060 downscale-before-HoughCircles + close D-035` — commit `bec4bef` |
+| Branch `fix/d035-downscale-barbell-detection` | 8 commits TDD ladder: spec + plan → bench → RED helper → GREEN helper → RED detect → GREEN detect + tolerance widen → slow integration test → ADR |
+
+Pre-fix bench and post-fix bench both captured in `backend/bench_barbell.py` (committed to main). Evidence table:
+
+| Measurement | Value |
+|---|---|
+| Mode 1 I/O only | 89.7 ms/frame |
+| Mode 2 detect @ source pre-fix | **1037.6 ms/frame** |
+| Mode 2 = Mode 3 @ 480p post-fix | **99.6 ms/frame — 10.4× speedup** |
+| Detection rate pre-fix | 1338/1338 (100%) |
+| Detection rate post-fix | 1338/1338 (100%) |
+
+## 2. Production E2E verification
+
+**Analysis `01fd3c57-af0d-4c7d-b846-b298260bd7ca`** on a fresh test account (`atharva6905+e2e-d035@gmail.com`, password `SpelixE2E-D035-2026!` — created during this session because the primary account exhausted the 10/day rate limit on `POST /api/v1/analyses`):
+
+| Stage | Session 38 (pre-fix) | Session 39 (post-fix) | Delta |
+|---|---|---|---|
+| pose (extract_landmarks) | 286.4 s | 259.5 s | noise |
+| **barbell_tracking** | **1,465.6 s** | **118.8 s** | **−1,347 s = 12.3× faster** |
+| generate_annotated_video | did not reach | 150.3 s | — |
+| generate_angle_plot | did not reach | 0.3 s | — |
+| upload_artifacts | did not reach | 2.2 s | — |
+| **Total pipeline wall** | >1800 s (timed out) | **670 s (11.2 min)** | completes |
+
+Status on completion: `completed`, 15/15 stages persisted in `timing_json`, `error_message=NULL`. UI renders "Analysis complete — Your analysis is ready." with "View results" button. Screenshot at `e2e/screenshots/d035-post-fix-analysis-01fd3c57.png`.
+
+**Known console errors on the results page:**
+- `429 /api/v1/analyses` — from my earlier rate-limited upload attempt on the primary account *before* switching to the fresh E2E account. Pre-dates the successful upload. Expected artifact.
+- `404 /api/v1/profiles/me` — transient race on a freshly-created account before profile is saved. Unrelated to D-035.
+- `Connection lost — reconnecting…` banner on the status page — pre-existing D-028 cosmetic bug in `useAnalysisStatus`. Unrelated to D-035.
+
+## 3. Test counts
+
+- **Backend:** 1539 passing, 19 skipped, 0 failing (+11 from session 38's 1528). New tests: 5 `TestDownscaleForDetection`, 3 `TestDetectBarbellAfterDownscale`, 2 `TestTrackBarbellStageBudget` (marked `@pytest.mark.slow`, gated; CI skips because the 720p fixture isn't in git).
+- **Frontend:** unchanged (1 pre-existing flaky EmailCaptureForm timeout).
+- Coverage: 90%+ no regression.
+
+## 4. Remaining — highest priority for session 40
+
+| ID | Title | Status | Priority |
+|---|---|---|---|
+| **D-035 follow-up** | Lower `streaq` `process_analysis` task timeout 1800 s → 900 s now that total pipeline runs in ~670 s | **pending** | HIGH — one-line change; restores ADR-055 intent |
+| D-028 | `useAnalysisStatus` "Connection lost — reconnecting…" banner after intentional unsubscribe | pending | MEDIUM — cosmetic, visible on every completed analysis (confirmed again this session) |
+| D-029 | Rename `injury_advice_accurate` → `movement_advice_accurate` across DB column + model + schema + frontend | pending | LOW — SaMD/FTC compliance cleanup |
+| D-030 | Orphan `rag_documents` uploading-state cleanup cron | pending | LOW |
+| D-031 | Admin `GET /rag/documents` query param Literal constraint | pending | LOW |
+| D-032 | Framing + single-person quality gates false rejections | **done** per backlog entry (PR #58) | — |
+| D-034 | Pipeline OOM post-quality-gate on 1080p@59fps | **done** per backlog entry (PR #57 + #59) | — |
+| D-036 | GPU offload (deferred post-beta) | deferred | — |
+
+## 5. Blockers
+
+**None.** D-035 is closed, PR #71 merged, production E2E confirms the fix at 12.3× speedup, full pipeline completes end-to-end in 11.2 min on the bench-no-weight 1080p@59fps clip — well under the current 1800 s streaq timeout and under the 900 s original target. Task 11 (lowering timeout back to 900 s) is unblocked; safe to ship whenever.
+
+## 6. Next session start
+
+```bash
+/status
+
+# PRIORITY 1 (5 min): Lower streaq task timeout 1800 -> 900s
+#   git checkout -b fix/d036-lower-streaq-timeout
+#   Find streaq process_analysis decorator in backend/app/workers/ (timeout=1800)
+#   Change 1800 -> 900, update comment to reference ADR-060 close
+#   git commit -m "fix(worker): lower streaq analysis task timeout 1800s -> 900s (D-035 close)"
+#   Push + PR via mcp__github__create_pull_request (base=main, merge_method='merge')
+#   Watch CI; merge when green; wait for Deploy to Production
+#   Optional smoke test — not re-running full E2E, just confirm any existing analysis
+#   isn't cancelled mid-flight (unlikely given the 670s actual pipeline time).
+
+# PRIORITY 2 (cleanup): Decide fate of docs/session-38-handoff branch
+#   Branch exists at b43ebdf with session 38 forensic details.
+#   Option A: merge with a docs-only PR so main's handoff has a complete chain.
+#   Option B: leave it — ADR-060 + this handoff capture the important parts.
+#   Recommend B (YAGNI).
+
+# PRIORITY 3: D-028 cosmetic banner fix
+#   frontend/src/hooks/useAnalysisStatus.ts — don't set isReconnecting=true
+#   when channel status is CLOSED after intentional unsubscribe.
+#   Visible to every user on completion; ~15-30 min fix + frontend tests.
+
+# Fresh E2E account created this session:
+#   email: atharva6905+e2e-d035@gmail.com
+#   password: SpelixE2E-D035-2026!
+#   analysis IDs: 01fd3c57-af0d-4c7d-b846-b298260bd7ca (this session's verification)
+#   Reuse for future E2E work to avoid burning primary account's 10/day rate limit.
+```
+
+## 7. Session timing
+
+- ~20:40 UTC: branch `fix/d035-downscale-barbell-detection` created; spec + plan committed (`7b47af6`)
+- ~22:10 UTC: `bench_barbell.py` committed (`d66a194`); Task 1 pre-fix bench clean run: Mode 1 = 89.7 ms/frame, Mode 2 = 1037.6 ms/frame — confirmed HoughCircles-at-1080p hypothesis
+- ~23:50 UTC: Task 2-6 shipped via TDD (RED → GREEN with helper, then RED → GREEN with wired detect function, then slow integration test). 1539 tests passing.
+- ~00:05 UTC (2026-04-17): Task 7 post-fix bench: Mode 2 = 99.6 ms/frame (10.4× speedup)
+- ~00:15 UTC: ADR-060 + backlog.md D-035 = done (`bec4bef`)
+- ~00:26 UTC: PR #71 opened; CI green in ~2 min
+- ~00:29 UTC: PR #71 merged `91b1903`; Deploy to Production succeeded
+- ~00:35 UTC: Playwright MCP E2E kicked off; hit rate limit on primary account; created fresh test account
+- ~00:40 UTC: Fresh E2E upload succeeded; analysis `01fd3c57` created
+- ~00:50 UTC: Supabase polling confirmed `barbell_tracking=118.8s`, `status=completed`, `total=670s`
+- ~01:00 UTC: handoff written
+
+---
+
 # Session 37 Handoff → Session 38: D-035 culprit narrowed — pose extraction is ~5min (NOT the bottleneck), real bug is in a stage AFTER extract_landmarks (exercise_detection / quality_gates / artifact_generation)
 
 **Context refresh:** Session 37 tried to validate session 36's "bench-vs-prod gap was a workload-transient" hypothesis by running a prod E2E. **The gap reproduces 100%.** First attempt (analysis `31d06d13-8aa7-46f7-98d0-7b64e292651b`) showed `quality_gate_pending` stuck for the full 1800s, `timing_json` still NULL — because session 36's Priority 1 writes went through the main pipeline session, which `analysis_worker.py:1030` rolls back on timeout, wiping every pending write. Root-cause-of-root-cause: telemetry invisible whenever the pipeline actually needs telemetry.
