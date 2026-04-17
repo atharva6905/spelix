@@ -409,26 +409,36 @@ function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
 }
 
 function EvalScoreCard({ scores }: { scores: Record<string, number> }) {
-  const faithfulness = scores.faithfulness;
-  const overall = scores.overall;
+  // FR-ADMN-12: deepeval scorecard shows faithfulness / correctness /
+  // relevance / overall with color coding. Any dim not populated by
+  // Phase 2 faithfulness-only eval is hidden rather than shown as "—".
+  const dims: { key: string; label: string }[] = [
+    { key: "overall", label: "Overall" },
+    { key: "faithfulness", label: "Faithfulness" },
+    { key: "correctness", label: "Correctness" },
+    { key: "relevance", label: "Relevance" },
+  ];
+  function toneFor(score: number): string {
+    if (score >= 0.85) return "text-green-700";
+    if (score >= 0.6) return "text-amber-700";
+    return "text-red-700";
+  }
   return (
     <div className="rounded-md border border-gray-200 p-3">
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
         Eval scores
       </p>
       <dl className="space-y-1 text-sm">
-        {overall !== undefined && (
-          <div className="flex justify-between">
-            <dt className="text-gray-600">Overall</dt>
-            <dd className="font-mono">{overall.toFixed(2)}</dd>
-          </div>
-        )}
-        {faithfulness !== undefined && (
-          <div className="flex justify-between">
-            <dt className="text-gray-600">Faithfulness</dt>
-            <dd className="font-mono">{faithfulness.toFixed(2)}</dd>
-          </div>
-        )}
+        {dims.map(({ key, label }) => {
+          const score = scores[key];
+          if (score === undefined) return null;
+          return (
+            <div key={key} className="flex justify-between">
+              <dt className="text-gray-600">{label}</dt>
+              <dd className={`font-mono ${toneFor(score)}`}>{score.toFixed(2)}</dd>
+            </div>
+          );
+        })}
       </dl>
     </div>
   );

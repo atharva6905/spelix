@@ -25,6 +25,7 @@ Reject flow (FR-BRAIN-07):
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -39,6 +40,19 @@ from app.services.brain_embedding import BrainEmbeddingService
 
 logger = logging.getLogger(__name__)
 
+# Prompt-injection denylist — patterns that, if promoted into coach_brain via
+# content_override, would escape the retrieval-augmented coaching prompt at
+# inference time. The expert reviewer is the primary defense, but we strip
+# obvious separator sequences at the service layer as defence-in-depth.
+_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\n\s*Human\s*:", re.IGNORECASE),
+    re.compile(r"\n\s*Assistant\s*:", re.IGNORECASE),
+    re.compile(r"<\|im_(start|end)\|>", re.IGNORECASE),
+    re.compile(r"\[/?INST\]", re.IGNORECASE),
+    re.compile(r"IGNORE\s+(PREVIOUS|PRIOR|ALL)\s+INSTRUCTIONS", re.IGNORECASE),
+    re.compile(r"SYSTEM\s+PROMPT", re.IGNORECASE),
+)
+
 
 class CandidateNotFound(Exception):
     """Raised when the candidate UUID does not exist."""
@@ -50,6 +64,14 @@ class CandidateAlreadyReviewed(Exception):
     The FOR UPDATE lock in ``get_by_id_for_update`` serialises two admins
     attempting to approve the same candidate; the second caller observes the
     mutated ``review_status`` and raises this exception.
+    """
+
+
+class PromptInjectionDetected(Exception):
+    """Raised when ``content_override`` contains LLM separator sequences.
+
+    Router maps this to HTTP 422 so the admin sees a clear rejection
+    rather than a silent sanitisation that might mangle legitimate cues.
     """
 
 
@@ -88,6 +110,13 @@ class CandidateReviewService:
             raise CandidateAlreadyReviewed(
                 f"candidate {candidate_id} review_status={candidate.review_status}"
             )
+
+        if content_override is not None:
+            for pattern in _INJECTION_PATTERNS:
+                if pattern.search(content_override):
+                    raise PromptInjectionDetected(
+                        f"content_override matches denylist pattern: {pattern.pattern}"
+                    )
 
         final_content = content_override if content_override else candidate.content
         edited = content_override is not None and content_override != candidate.content

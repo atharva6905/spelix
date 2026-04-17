@@ -662,3 +662,21 @@ Use the buffer to pull Phase 3 Batch 1 (P3-001/002/003) forward from the schedul
 **Implementation**: `CandidateReviewService.approve` owns the transaction. A `QdrantUpsertFailed` catch-block calls `db.rollback()` before raising. Reject path has no Qdrant side effects, so its transaction is a straight UPDATE + COMMIT.
 
 **Related**: ADR-DISTILL-01 (candidate storage in a separate table); FR-ADMN-12; FR-BRAIN-07; FR-BRAIN-18.
+
+**L2-launch deviations from FR-ADMN-12 (explicit down-scoping, session 43 audit)**:
+
+The spelix-auditor (session 43) flagged three surface-coverage gaps against FR-ADMN-12's "Must" information set. All three are down-scoped to D-037 and D-038 follow-ups rather than blocking L2 launch:
+
+1. **Top-2 similar existing approved entries** (auditor H-02). Implementation shows only the single nearest entry (`nearest_entry_id` + `nearest_cosine_sim` already persisted on the candidate by the distillation `lifecycle_decision` node). Showing a second requires a per-card Qdrant live search, adding ~50–150 ms per card view. At L2 volume (11 live candidates, <10/day new) the marginal safety gain is small. Tracked in D-037.
+
+2. **confirmation_count field on the review card** (auditor H-03). The candidate row itself has no `confirmation_count` column — only `coach_brain_entries` does. SRS likely meant "show how often the nearest existing entry has been confirmed," which is redundant with the top-2-similar-entries feature (D-037). Bundled into D-037.
+
+3. **entry_type='compensation' CHECK constraint** (auditor M-01). The UI banner is forward-compatible (TSX cast), so no live rows can land today. The CHECK migration and biomechanics reviewer routing are tracked in D-038.
+
+**Security hardening applied from session 43 reviewer (inline, not deferred)**:
+
+- HTTP 409 (`ALREADY_REVIEWED`) and 502 (`QDRANT_UPSERT_FAILED`) response bodies set `detail: null` instead of echoing `str(exc)`. Vendor SDK exception strings can include cluster hostnames or credential fragments in debug output. Full cause is retained via `logger.exception` at the service layer.
+- `_get_review_service` wraps `get_cohere_client()` / `await get_qdrant_client()` in try/except and surfaces env-misconfiguration as a clean HTTP 503 (`VECTOR_STORE_UNAVAILABLE`) envelope.
+- `CandidateReviewService.approve` runs a denylist regex against `content_override` to reject obvious prompt-injection separator sequences (`\n\nHuman:`, `<|im_end|>`, `[INST]`, `IGNORE PREVIOUS INSTRUCTIONS`, etc.) before the content flows to Cohere embed and Qdrant upsert. Raised as `PromptInjectionDetected`, mapped to HTTP 422 `PROMPT_INJECTION_DETECTED`. Expert-review workflow remains the primary defense; this is defence-in-depth for admin-editor compromise.
+
+**Decision**: ship P3-006 at this scope for L2 launch. The core correctness properties (`confirmation_count=1` per FR-BRAIN-18, `SELECT FOR UPDATE` race guard, Qdrant rollback on upsert failure, admin-only RLS) are unaffected by the deferred surface work. D-037 and D-038 are explicitly prioritized ahead of Phase 4 eval work.

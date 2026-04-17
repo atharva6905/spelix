@@ -19,8 +19,11 @@ from app.schemas.coach_brain_candidate import CoachBrainCandidate
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
+    PromptInjectionDetected,
     QdrantUpsertFailed,
 )
+
+_ = PromptInjectionDetected  # keep import alive through formatter strip
 
 TEST_ADMIN_ID = uuid.uuid4()
 
@@ -213,6 +216,20 @@ class TestApproveCandidate:
         )
         assert resp.status_code == 502
         assert resp.json()["detail"]["error"]["code"] == "QDRANT_UPSERT_FAILED"
+        # Ensure vendor exception string is not leaked in response body
+        assert resp.json()["detail"]["error"]["detail"] is None
+
+    def test_approve_422_on_prompt_injection(self, admin_client, mock_service):
+        cid = uuid.uuid4()
+        mock_service.approve = AsyncMock(
+            side_effect=PromptInjectionDetected("content_override matches denylist")
+        )
+        resp = admin_client.post(
+            f"/api/v1/admin/coach-brain/candidates/{cid}/approve",
+            json={"content_override": "ok tuck elbows now"},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"]["code"] == "PROMPT_INJECTION_DETECTED"
 
 
 class TestRejectCandidate:
@@ -269,3 +286,4 @@ class TestRejectCandidate:
             json={"reason": "irrelevant"},
         )
         assert resp.status_code == 409
+        assert resp.json()["detail"]["error"]["code"] == "ALREADY_REVIEWED"

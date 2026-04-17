@@ -42,6 +42,7 @@ from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
     CandidateReviewService,
+    PromptInjectionDetected,
     QdrantUpsertFailed,
 )
 from app.services.cohere_client import get_cohere_client
@@ -53,6 +54,7 @@ _USED = (
     CoachBrainRepository,
     CoachBrainCandidateRepository,
     CandidateReviewService,
+    PromptInjectionDetected,
     CoachBrainEntryModel,
     CoachBrainEntrySchema,
     CoachBrainEntryCreate,
@@ -467,8 +469,23 @@ async def _get_review_service(
 ) -> CandidateReviewService:
     cand_repo = CoachBrainCandidateRepository(db)
     entry_repo = CoachBrainRepository(db)
-    cohere = get_cohere_client()
-    qdrant = await get_qdrant_client()
+    try:
+        cohere = get_cohere_client()
+        qdrant = await get_qdrant_client()
+    except Exception as exc:
+        # Wrap vendor-client construction failures so env-misconfiguration
+        # surfaces as 503 with a clean envelope instead of a raw 500 whose
+        # traceback may echo secrets (QDRANT_URL, COHERE_API_KEY values).
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "code": "VECTOR_STORE_UNAVAILABLE",
+                    "message": "Vector store client unavailable. Retry later.",
+                    "detail": None,
+                }
+            },
+        ) from exc
     brain_embedding = BrainEmbeddingService(
         cohere_client=cohere,
         qdrant_client=qdrant,  # type: ignore[arg-type]
@@ -534,25 +551,43 @@ async def approve_coach_brain_candidate(
                 }
             },
         )
-    except CandidateAlreadyReviewed as exc:
+    except CandidateAlreadyReviewed:
         raise HTTPException(
             status_code=409,
             detail={
                 "error": {
                     "code": "ALREADY_REVIEWED",
                     "message": "Candidate has already been reviewed.",
-                    "detail": str(exc),
+                    "detail": None,
                 }
             },
         )
-    except QdrantUpsertFailed as exc:
+    except PromptInjectionDetected:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "PROMPT_INJECTION_DETECTED",
+                    "message": (
+                        "Edited content matched a prompt-injection denylist "
+                        "pattern (e.g. role separators, 'IGNORE PREVIOUS INSTRUCTIONS'). "
+                        "Rephrase the cue without those sequences."
+                    ),
+                    "detail": None,
+                }
+            },
+        )
+    except QdrantUpsertFailed:
+        # Do not leak vendor exception strings (may contain cluster hostnames
+        # or credential fragments in some client SDKs). Full cause is already
+        # logged via logger.exception in CandidateReviewService.approve.
         raise HTTPException(
             status_code=502,
             detail={
                 "error": {
                     "code": "QDRANT_UPSERT_FAILED",
-                    "message": "Approve aborted - vector store upsert failed. Retry later.",
-                    "detail": str(exc),
+                    "message": "Vector store upsert failed. Retry later; full cause in server logs.",
+                    "detail": None,
                 }
             },
         )
