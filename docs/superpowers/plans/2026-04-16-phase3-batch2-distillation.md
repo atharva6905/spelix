@@ -546,14 +546,14 @@ def _stub_coaching_output():
 
     return CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -733,8 +733,8 @@ async def test_extract_insights_returns_candidates_from_llm() -> None:
             recommended_cues=["Spread the floor"],
             citations=[],
             safety_warnings=[],
-            confidence_level="high",
-            dimension_addressed="safety",
+            confidence_level="High",
+            dimension_addressed="Movement Quality",
             disclaimer=_disclaimer(),
             raw_prompt_tokens=0,
             raw_completion_tokens=0,
@@ -808,16 +808,17 @@ def _state_with_coaching_output(co):
 
 
 def _empty_coaching_output():
+    """Valid-but-minimal CoachingOutput — nothing worth distilling."""
     return CoachingOutput(
-        summary="",
-        strengths=[],
+        summary="No significant issues observed.",
+        strengths=["Consistent bar path"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain current form."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="low",
-        dimension_addressed="safety",
+        confidence_level="Low",
+        dimension_addressed="Movement Quality",
         disclaimer=_disclaimer(),
         raw_prompt_tokens=0,
         raw_completion_tokens=0,
@@ -1025,14 +1026,14 @@ async def test_validate_quality_missing_scores_rejects() -> None:
 def _stub_coaching_output():
     return CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -1236,14 +1237,14 @@ async def test_lifecycle_add_when_empty_qdrant() -> None:
 def _stub_coaching_output():
     return CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -1709,14 +1710,14 @@ async def test_cove_verify_skips_noop_candidates() -> None:
 
     co = CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -1887,14 +1888,14 @@ async def test_format_entry_contradiction_flag_set() -> None:
 def _stub_coaching_output():
     return CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -2018,14 +2019,14 @@ from app.schemas.coaching import CoachingOutput
 def _stub_coaching_output():
     return CoachingOutput(
         summary="s",
-        strengths=[],
+        strengths=["Consistent tempo"],
         issues=[],
-        correction_plan=[],
+        correction_plan=["Maintain neutral spine throughout the lift."],
         recommended_cues=[],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
@@ -2251,8 +2252,8 @@ def _stub_coaching_output():
         recommended_cues=["Spread the floor"],
         citations=[],
         safety_warnings=[],
-        confidence_level="high",
-        dimension_addressed="safety",
+        confidence_level="High",
+        dimension_addressed="Movement Quality",
         disclaimer=(
             "This feedback is for educational purposes only and is not a "
             "substitute for in-person coaching or medical advice."
