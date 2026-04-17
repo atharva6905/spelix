@@ -391,8 +391,9 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P3-004 | LangGraph distillation StateGraph — extract_insights → validate_quality → format_entry → store_entry. Quality gate: eval_scores overall ≥0.85 AND correctness ≥0.8 for approval. Runs async after analysis completion, never blocks coaching response. | XL | P3-001 | FR-BRAIN-06 | pending |
-| P3-005 | Knowledge lifecycle operations — cosine similarity dedup before creating entries. >0.92: NOOP, 0.75–0.92: UPDATE (increment confirmation_count), <0.75: ADD new candidate. Contradiction detection flags existing entries. | L | P3-004 | FR-BRAIN-17 | pending |
+| P3-004 | LangGraph distillation StateGraph — extract_insights → validate_quality → [gate] → lifecycle_decision → cove_verify → format_entry → store_entry. Quality gate: eval_scores overall ≥0.85 AND correctness ≥0.8 for approval. Runs async after analysis completion via streaq task, never blocks coaching response. FR-BRAIN-14 CoVe slim service + FR-BRAIN-16 consent cascade extension to candidates table also land in this batch. | XL | P3-001 | FR-BRAIN-06, FR-BRAIN-14, FR-BRAIN-16 | done (L2 Day 6, worktree commits `ac1ec15`..`f367967`; PR pending) |
+| P3-005 | Knowledge lifecycle operations — cosine similarity dedup before creating entries. >0.92: NOOP, 0.75–0.92: UPDATE (increment confirmation_count + append source_analysis_id same-txn, FR-BRAIN-18), <0.75: ADD new candidate. Contradiction flag set when UPDATE + CoVe unverified. | L | P3-004 | FR-BRAIN-17, FR-BRAIN-18 | done (L2 Day 6, worktree commits `97e6299` + `c73c434`; PR pending) |
+| P3-008 | FR-BRAIN-08 auto-triage — confidence-based auto-approve/auto-reject thresholds for distilled candidates. Blocks on ≥50 human-reviewed candidates for threshold calibration (per SRS "start conservative"). | M | P3-004, P3-005 | FR-BRAIN-08 | deferred post-L2 |
 
 ### Batch 3 — Admin & Frontend
 

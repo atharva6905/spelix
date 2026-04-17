@@ -117,17 +117,26 @@ def build_citation_blocks(contexts: list[RetrievedContext]) -> list[CitationBloc
         One CitationBlock per context, index starting at 1.
     """
     blocks: list[CitationBlock] = []
+    from app.schemas.rag import ChunkPayload
+
     for i, ctx in enumerate(contexts, start=1):
         chunk = ctx.chunk
         # Truncate excerpt to 300 chars to keep prompts manageable
         excerpt = chunk.text[:300].strip()
+        # ChunkPayload carries full citation metadata (authors/doi); the slim
+        # Chunk model used by distillation test stubs does not. Coaching
+        # always produces ChunkPayload from the retrieval pipeline — this
+        # isinstance narrow keeps pyright happy across the union widening
+        # introduced in ADR-DISTILL-04.
+        authors = chunk.authors if isinstance(chunk, ChunkPayload) else []
+        doi = chunk.doi if isinstance(chunk, ChunkPayload) else None
         blocks.append(
             CitationBlock(
                 index=i,
                 title=chunk.title,
-                authors=chunk.authors,
+                authors=authors,
                 year=chunk.year,
-                doi=chunk.doi,
+                doi=doi,
                 chunk_text_excerpt=excerpt,
             )
         )

@@ -121,7 +121,7 @@ async def test_cascade_job_no_analyses(mock_engine_cls, mock_repo_cls):
 
         result = await cascade_consent_withdrawal({}, user_id)
 
-    assert result == {"removed": 0, "soft_deleted": 0}
+    assert result == {"removed": 0, "soft_deleted": 0, "candidates_updated": 0}
     mock_repo_cls.assert_not_called()
 
 
@@ -139,11 +139,20 @@ async def test_cascade_job_with_analyses(mock_engine_cls, mock_repo_cls):
     mock_engine_cls.return_value = mock_engine
 
     mock_session = AsyncMock()
-    mock_scalars = MagicMock()
-    mock_scalars.all.return_value = analysis_ids
-    mock_result = MagicMock()
-    mock_result.scalars.return_value = mock_scalars
-    mock_session.execute.return_value = mock_result
+
+    # First execute(): select(Analysis.id) -> analysis_ids
+    mock_analysis_scalars = MagicMock()
+    mock_analysis_scalars.all.return_value = analysis_ids
+    mock_analysis_result = MagicMock()
+    mock_analysis_result.scalars.return_value = mock_analysis_scalars
+
+    # Second execute(): select(CoachBrainCandidate) -> no matching candidates
+    mock_candidate_scalars = MagicMock()
+    mock_candidate_scalars.all.return_value = []
+    mock_candidate_result = MagicMock()
+    mock_candidate_result.scalars.return_value = mock_candidate_scalars
+
+    mock_session.execute.side_effect = [mock_analysis_result, mock_candidate_result]
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
@@ -157,7 +166,7 @@ async def test_cascade_job_with_analyses(mock_engine_cls, mock_repo_cls):
 
         result = await cascade_consent_withdrawal({}, user_id)
 
-    assert result == {"removed": 3, "soft_deleted": 1}
+    assert result == {"removed": 3, "soft_deleted": 1, "candidates_updated": 0}
     mock_repo.remove_analysis_ids_for_user.assert_awaited_once_with(analysis_ids)
     mock_repo.soft_delete_empty_unconfirmed.assert_awaited_once()
     mock_session.commit.assert_awaited_once()
@@ -249,3 +258,124 @@ async def test_withdraw_analytics_does_not_enqueue():
     with patch("app.api.v1.consent._get_streaq_worker") as mock_get_worker:
         await withdraw_consent(body=body, user=user, repo=mock_repo)
         mock_get_worker.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# FR-BRAIN-16 — coach_brain_candidates cascade
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("app.workers.consent_cascade.CoachBrainRepository")
+@patch("app.workers.consent_cascade.create_async_engine")
+async def test_cascade_removes_analysis_id_from_candidates(mock_engine_cls, mock_repo_cls):
+    """Cascade removes withdrawing user's analysis IDs from coach_brain_candidates.
+
+    Mixed candidate retains the other analysis_id; solo candidate is
+    soft-deleted (review_status='rejected', rejected_reason='source_consent_withdrawn').
+    """
+    from app.workers.consent_cascade import cascade_consent_withdrawal
+
+    user_id = str(uuid.uuid4())
+    withdrawing_aid = uuid.uuid4()
+    other_aid = uuid.uuid4()
+
+    # Solo candidate — only the withdrawing user's analysis_id
+    solo_candidate = MagicMock()
+    solo_candidate.source_analysis_ids = [withdrawing_aid]
+    solo_candidate.review_status = "pending"
+    solo_candidate.rejected_reason = None
+
+    # Mixed candidate — withdrawing user's + another user's analysis_id
+    mixed_candidate = MagicMock()
+    mixed_candidate.source_analysis_ids = [withdrawing_aid, other_aid]
+    mixed_candidate.review_status = "pending"
+    mixed_candidate.rejected_reason = None
+
+    mock_engine = AsyncMock()
+    mock_engine_cls.return_value = mock_engine
+
+    # First execute call returns analysis IDs; second returns candidates
+    mock_analysis_scalars = MagicMock()
+    mock_analysis_scalars.all.return_value = [withdrawing_aid]
+    mock_analysis_result = MagicMock()
+    mock_analysis_result.scalars.return_value = mock_analysis_scalars
+
+    mock_candidate_scalars = MagicMock()
+    mock_candidate_scalars.all.return_value = [solo_candidate, mixed_candidate]
+    mock_candidate_result = MagicMock()
+    mock_candidate_result.scalars.return_value = mock_candidate_scalars
+
+    mock_session = AsyncMock()
+    mock_session.execute.side_effect = [
+        mock_analysis_result,   # select(Analysis.id) query
+        mock_candidate_result,  # select(CoachBrainCandidate) query
+    ]
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    mock_repo = AsyncMock()
+    mock_repo.remove_analysis_ids_for_user.return_value = 1
+    mock_repo.soft_delete_empty_unconfirmed.return_value = 0
+    mock_repo_cls.return_value = mock_repo
+
+    with patch("app.workers.consent_cascade.async_sessionmaker") as mock_sm:
+        mock_sm.return_value = MagicMock(return_value=mock_session)
+
+        result = await cascade_consent_withdrawal({}, user_id)
+
+    # Solo candidate must be soft-deleted
+    assert solo_candidate.review_status == "rejected"
+    assert solo_candidate.rejected_reason == "source_consent_withdrawn"
+    assert solo_candidate.source_analysis_ids == []
+
+    # Mixed candidate must retain the other analysis_id only
+    assert mixed_candidate.source_analysis_ids == [other_aid]
+    assert mixed_candidate.review_status == "pending"  # unchanged
+
+    # Return value still reports the coach_brain_entries counts
+    assert result["removed"] == 1
+
+
+@pytest.mark.asyncio
+@patch("app.workers.consent_cascade.CoachBrainRepository")
+@patch("app.workers.consent_cascade.create_async_engine")
+async def test_cascade_candidates_no_overlap(mock_engine_cls, mock_repo_cls):
+    """When no candidates overlap the withdrawing user's analyses, nothing is mutated."""
+    from app.workers.consent_cascade import cascade_consent_withdrawal
+
+    user_id = str(uuid.uuid4())
+    withdrawing_aid = uuid.uuid4()
+
+    mock_engine = AsyncMock()
+    mock_engine_cls.return_value = mock_engine
+
+    mock_analysis_scalars = MagicMock()
+    mock_analysis_scalars.all.return_value = [withdrawing_aid]
+    mock_analysis_result = MagicMock()
+    mock_analysis_result.scalars.return_value = mock_analysis_scalars
+
+    mock_candidate_scalars = MagicMock()
+    mock_candidate_scalars.all.return_value = []  # no overlap
+    mock_candidate_result = MagicMock()
+    mock_candidate_result.scalars.return_value = mock_candidate_scalars
+
+    mock_session = AsyncMock()
+    mock_session.execute.side_effect = [
+        mock_analysis_result,
+        mock_candidate_result,
+    ]
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    mock_repo = AsyncMock()
+    mock_repo.remove_analysis_ids_for_user.return_value = 0
+    mock_repo.soft_delete_empty_unconfirmed.return_value = 0
+    mock_repo_cls.return_value = mock_repo
+
+    with patch("app.workers.consent_cascade.async_sessionmaker") as mock_sm:
+        mock_sm.return_value = MagicMock(return_value=mock_session)
+
+        result = await cascade_consent_withdrawal({}, user_id)
+
+    assert result == {"removed": 0, "soft_deleted": 0, "candidates_updated": 0}

@@ -105,6 +105,42 @@ class ChunkPayload(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Chunk — lightweight chunk model for distillation / test stubs
+# ---------------------------------------------------------------------------
+
+
+class Chunk(BaseModel):
+    """Lightweight chunk model used by the distillation pipeline.
+
+    Unlike ``ChunkPayload`` (which mirrors the full Qdrant payload), ``Chunk``
+    carries only the fields needed for single-claim CoVe verification:
+    human-readable title, publication year, and the raw text content.
+
+    Attributes
+    ----------
+    id:
+        Chunk identifier (opaque string).
+    document_id:
+        Source document identifier.
+    text:
+        The raw chunk text.
+    title:
+        Paper or document title for citation display.
+    year:
+        Publication year, or None if unknown.
+    collection:
+        Which Qdrant collection this chunk came from.
+    """
+
+    id: str
+    document_id: str
+    text: str
+    title: str
+    year: int | None = None
+    collection: CollectionName
+
+
+# ---------------------------------------------------------------------------
 # RetrievedContext
 # ---------------------------------------------------------------------------
 
@@ -112,8 +148,8 @@ class ChunkPayload(BaseModel):
 class RetrievedContext(BaseModel):
     """A single retrieved chunk with its similarity score.
 
-    Wraps ``ChunkPayload`` with the score returned by the Qdrant query so
-    downstream reranking and citation code can order results.
+    Wraps ``ChunkPayload`` or ``Chunk`` with the score returned by the Qdrant
+    query so downstream reranking and citation code can order results.
 
     Attributes
     ----------
@@ -125,7 +161,7 @@ class RetrievedContext(BaseModel):
         Which Qdrant collection this result came from (ADR-BRAIN-01).
     """
 
-    chunk: ChunkPayload
+    chunk: ChunkPayload | Chunk
     score: float
     collection: CollectionName
 

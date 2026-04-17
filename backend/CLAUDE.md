@@ -326,6 +326,79 @@ Every node emits a `NodeEvent` appended to `state['trace']`, serialized to `coac
 - The `state_box` shared-handle pattern in `build_adaptive_graph` is a concession for StructuredTool closures; it works because the graph is single-threaded. Do NOT run the adaptive graph in a multi-threaded executor.
 - Large trace fields get truncated by `serialize_trace_for_storage` before JSONB write. When adding new fields to the trace, consider whether they should live in the essential-fields whitelist (`node`, `duration_ms`, `error`, `started_at`, `output_keys`).
 
+## Phase 3 Distillation Pipeline (FR-BRAIN-06/14/17)
+
+The distillation pipeline lives in `app/distillation/`. It is a SEPARATE
+compiled `StateGraph` from the coaching agent per ADR-BRAIN-07 — different
+lifecycle, different invocation, different deps. Runs async after
+`process_analysis` reaches `completed`; never blocks user-facing coaching.
+
+### Feature flags
+
+| env var | default | meaning |
+|---------|---------|---------|
+| `SPELIX_DISTILLATION_ENABLED` | `0` | When `1`, `process_analysis` enqueues `distill_analysis` for every completed analysis whose `eval_scores.overall >= 0.6`. When `0`, no distillation runs. |
+
+### Rollout plan
+
+1. Merge with `SPELIX_DISTILLATION_ENABLED=0` (no behavioural change).
+2. Post-deploy: flip the flag on for one test-account analysis.
+3. Inspect the resulting `coach_brain_candidates` row, CoVe result, lifecycle decision.
+4. If sane, flip flag on globally. If not, flag off + iterate.
+
+### Graph flow
+
+`START → extract_insights → validate_quality → [reject|continue] → lifecycle_decision → cove_verify → format_entry → store_entry → END`
+
+### Storage model
+
+- Candidates land in a **new** `coach_brain_candidates` table
+  (migration 011) — NOT in the existing `coach_brain_entries` table.
+  Retrieval (`DualCollectionOrchestrator`) remains filtered to
+  `coach_brain_entries.status='active'` so unvetted candidates never
+  reach live coaching.
+- `lifecycle_decision='ADD'` → candidate `review_status='pending'` (Batch 3
+  admin queue).
+- `lifecycle_decision='UPDATE'` → candidate `review_status='superseded'`
+  (audit-only) + same transaction bumps `coach_brain_entries.confirmation_count`
+  on the nearest active entry and appends `source_analysis_id`
+  (FR-BRAIN-18).
+- `lifecycle_decision='NOOP'` → no row written; telemetry log only.
+
+### Consent-withdrawal cascade (FR-BRAIN-16)
+
+`cascade_consent_withdrawal` in `app/workers/consent_cascade.py` extends
+to `coach_brain_candidates`: strips withdrawing-user analysis IDs from
+`source_analysis_ids`; soft-deletes candidates left empty by setting
+`review_status='rejected'`, `rejected_reason='source_consent_withdrawn'`.
+
+### Gotchas
+
+- Distillation enqueue failures are SWALLOWED as warnings —
+  `_maybe_enqueue_distillation` wraps `enqueue()` in try/except because
+  the parent analysis must always finish successfully for the user.
+  Expect the occasional warning in worker logs; investigate if persistent.
+- The slim `BrainCoveService` (`app/distillation/cove_brain.py`) is
+  separate from `app/services/cove.py::CoveVerificationService`. Do NOT
+  try to share: the coaching-path service extracts claims from a full
+  `CoachingOutput`, whereas the distillation service verifies a single
+  already-atomic coaching cue (ADR-DISTILL-03).
+- `CoachBrainCandidate.review_status='superseded'` rows are NEVER shown
+  in the Batch 3 review UI (filter: `review_status='pending'`). They
+  exist purely for provenance — one row per UPDATE confirmation.
+- Do NOT extend `coach_brain_entries.status` CHECK to add `'candidate'`.
+  The hard separation between the two tables is load-bearing for
+  retrieval correctness (ADR-DISTILL-01).
+- `app/workers/deps.py::build_distillation_ctx` constructs heavyweight
+  clients (Anthropic, instructor, Cohere, Qdrant, BrainEmbeddingService)
+  and an `async_sessionmaker` per-task invocation. Reuse would require
+  wiring them through the streaq `WorkerContext` — not worth it at
+  current volume (<10 analyses/day post-L2).
+- `qdrant_client` passed to `lifecycle_decision` must support `.search(...)`
+  directly. `QdrantClientWrapper` only exposes `.query_points`, so
+  `deps.py` passes the raw `_client` (AsyncQdrantClient). Watch for
+  breakage if the wrapper API changes.
+
 ## Backend Gotchas
 
 ### Python imports

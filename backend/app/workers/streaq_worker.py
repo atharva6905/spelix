@@ -208,6 +208,22 @@ async def ingest_paper(
     return await _ingest(_adapt_ctx(context), paper_id)
 
 
+@worker.task(timeout=300)
+async def distill_analysis(
+    analysis_id: UUID,
+    context: WorkerContext = WorkerDepends(),
+) -> dict[str, Any]:
+    """Phase 3 Batch 2 distillation pipeline (FR-BRAIN-06). See distillation_worker.py."""
+    # Lazy-imported to avoid api.v1 → worker → api.v1 cycle.
+    from app.workers.deps import build_distillation_ctx
+    from app.workers.distillation_worker import distill_analysis_body as _distill
+
+    ctx = _adapt_ctx(context)
+    extra = await build_distillation_ctx()
+    ctx.update(extra)
+    return await _distill(ctx, analysis_id)
+
+
 @worker.cron("0 3 * * *")  # 03:00 UTC nightly
 async def cleanup_expired_artifacts_cron(
     context: WorkerContext = WorkerDepends(),
