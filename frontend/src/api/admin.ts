@@ -239,3 +239,91 @@ export async function updateCoachBrainEntry(
 export async function deleteCoachBrainEntry(id: string): Promise<void> {
   return adminFetch<void>(`/api/v1/admin/coach-brain/${id}`, { method: "DELETE" });
 }
+
+// ---------------------------------------------------------------------------
+// Coach Brain Candidate Review Queue (P3-006, FR-ADMN-12)
+// ---------------------------------------------------------------------------
+
+export interface CoachBrainCandidate {
+  id: string;
+  exercise: "squat" | "bench" | "deadlift";
+  phase: "setup" | "descent" | "bottom" | "ascent" | "lockout" | "general" | null;
+  entry_type: "cue" | "correction" | "principle" | "drill";
+  content: string;
+  trigger_tags: string[];
+  source_analysis_ids: string[];
+  confidence_score: number | null;
+  eval_scores: Record<string, number>;
+  cove_verified: boolean | null;
+  cove_explanation: string | null;
+  lifecycle_decision: "ADD" | "UPDATE" | "NOOP";
+  nearest_entry_id: string | null;
+  nearest_cosine_sim: number | null;
+  contradiction_flag: boolean;
+  review_status: "pending" | "approved" | "rejected" | "superseded";
+  created_at: string;
+}
+
+export interface ApproveCandidateResponse {
+  candidate_id: string;
+  entry_id: string;
+  qdrant_point_id: string;
+}
+
+export interface RejectCandidateResponse {
+  candidate_id: string;
+  rejected_reason: string;
+}
+
+export interface PendingQueueStats {
+  total_pending: number;
+}
+
+export async function listCoachBrainCandidates(
+  limit = 50,
+  offset = 0,
+): Promise<CoachBrainCandidate[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return adminFetch<CoachBrainCandidate[]>(
+    `/api/v1/admin/coach-brain/candidates?${params}`,
+  );
+}
+
+export async function getCoachBrainCandidateStats(): Promise<PendingQueueStats> {
+  return adminFetch<PendingQueueStats>(
+    "/api/v1/admin/coach-brain/candidates/stats",
+  );
+}
+
+export async function approveCoachBrainCandidate(
+  id: string,
+  contentOverride?: string,
+): Promise<ApproveCandidateResponse> {
+  const body =
+    contentOverride !== undefined && contentOverride.trim() !== ""
+      ? { content_override: contentOverride }
+      : {};
+  return adminFetch<ApproveCandidateResponse>(
+    `/api/v1/admin/coach-brain/candidates/${id}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function rejectCoachBrainCandidate(
+  id: string,
+  reason: string,
+): Promise<RejectCandidateResponse> {
+  return adminFetch<RejectCandidateResponse>(
+    `/api/v1/admin/coach-brain/candidates/${id}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
