@@ -81,6 +81,7 @@ def _make_mock_analysis(
 def _make_mock_coaching_result():
     cr = MagicMock()
     cr.structured_output_json = {"summary": "Good form", "strengths": [], "issues": []}
+    cr.agent_trace_json = None  # default null for legacy analyses (FR-RESL-07)
     cr.created_at = datetime.now(timezone.utc)
     return cr
 

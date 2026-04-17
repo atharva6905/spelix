@@ -128,9 +128,16 @@ class AnalysisUpdate(BaseModel):
 
 
 class CoachingResultSchema(BaseModel):
-    """Nested coaching result for AnalysisDetail."""
+    """Nested coaching result for AnalysisDetail.
+
+    Phase 3 Batch 3 (FR-RESL-07): agent_trace_json is surfaced so the
+    frontend "How AI Reasoned" sidebar can render the LangGraph agent trace.
+    The column has been populated since Phase 3 Batch 1 for every new
+    analysis; legacy Phase 2 analyses carry null.
+    """
 
     structured_output_json: dict | None
+    agent_trace_json: dict | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
