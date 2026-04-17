@@ -140,14 +140,13 @@ def _adapt_ctx(context: WorkerContext) -> dict[str, Any]:
     }
 
 
-# timeout=1800 per ADR-058 (D-035 instrumentation tier) — bench-vs-prod gap left
-# the 900 s ceiling unsafe for full-length 1080p@59fps clips even after the 720p
-# pose cap (PR #61) and streaming barbell tracking (PR #59). Doubled to 1800 s
-# as a safety net while telemetry (analyses.timing_json) reveals where the prod
-# pipeline actually spends its budget. Other tasks stay at 300 s — sub-second
-# in the common case. Re-tighten once Tier 2 (ffmpeg fps normalize / GPU offload)
-# lands and a 22.8 s clip routinely completes under ~600 s.
-@worker.task(timeout=1800)
+# timeout=900 per ADR-060 (D-035 downscale-before-HoughCircles close).
+# Telemetry post-PR-#71 confirms a 22.8 s 1080p@59fps clip completes the full
+# pipeline in ~670 s (pose 260 s + barbell 120 s + annotation 150 s + rest <5 s),
+# well under the 900 s ceiling originally set in ADR-BRAIN-04. The 1800 s safety
+# net from ADR-058 is no longer justified now that barbell_tracking dropped from
+# 24.4 min → 2 min. Other tasks stay at 300 s — sub-second in the common case.
+@worker.task(timeout=900)
 async def process_analysis(
     analysis_id: UUID,
     context: WorkerContext = WorkerDepends(),
