@@ -1,593 +1,153 @@
-# Session 39 Handoff → Session 40: D-035 CLOSED — downscale-before-HoughCircles cuts barbell_tracking 24.4 min → 2 min (12.3× in prod); PR #71 merged, E2E verified end-to-end
+# Session 40 Handoff → Session 41: D-028 closed; next session starts Phase 3 Batch 2 (distillation StateGraph)
 
-**Context refresh:** Session 38 per-stage telemetry (analysis `fc318bc3`) proved `barbell_tracking` was 83% of pipeline wall time at 1,465 s / 24.4 min on a 1080p@59fps bench clip — not pose extraction. Session 39 fixed it: `cv2.HoughCircles` at source resolution with radius range 10–100 was the culprit. Per-frame cost dropped from ~1037 ms → ~99 ms after downscaling every frame to 480 px (longest dim) via `cv2.INTER_AREA` before HoughCircles, with a `scale_factor` multiplier applied to the detected centroid before return so callers keep seeing source-resolution coordinates. FR-BDET-01/02 preserved (detection still runs on every frame), FR-BDET-06 landmark fallback unchanged. ADR-060 in `decisions.md` documents the decision + evidence.
+**Context refresh:** Session 40 was short and focused. Opened with a read of handoff/backlog/decisions/STRATEGY, confirmed that session 39's Priority 1 (streaq timeout 1800→900s) had already shipped last session as PR #73 (`3febef7` / feature `590e4db`), picked up D-028 — the Priority 3 cosmetic-banner fix — and shipped it via PR #75 (`b130ccb`). No other work this session. The L2 sprint still has 17 days to the 2026-05-03 hard gate; Phase 3 Batch 1 is live on prod since session 32; Batch 2 (distillation StateGraph + knowledge lifecycle + CoVe verification) has not been started and is the primary work for session 41.
 
-**Session 38 handoff is on unmerged branch `docs/session-38-handoff` at commit `b43ebdf`** — contains the full 24.4-min telemetry forensics that guided this session. Not merged because that branch was docs-only; its content is captured in ADR-060 and this handoff. The branch can stay as-is or be cleaned up whenever.
-
-## 1. Shipped this session
+## 1. Completed
 
 | Ref | What |
 |---|---|
-| PR #71 merged `91b1903` | `fix(cv): D-035 downscale-before-HoughCircles cuts barbell_tracking from 24 min to 2.2 min (10.4×)` |
-| ADR-060 | `docs(adr): ADR-060 downscale-before-HoughCircles + close D-035` — commit `bec4bef` |
-| Branch `fix/d035-downscale-barbell-detection` | 8 commits TDD ladder: spec + plan → bench → RED helper → GREEN helper → RED detect → GREEN detect + tolerance widen → slow integration test → ADR |
-
-Pre-fix bench and post-fix bench both captured in `backend/bench_barbell.py` (committed to main). Evidence table:
-
-| Measurement | Value |
-|---|---|
-| Mode 1 I/O only | 89.7 ms/frame |
-| Mode 2 detect @ source pre-fix | **1037.6 ms/frame** |
-| Mode 2 = Mode 3 @ 480p post-fix | **99.6 ms/frame — 10.4× speedup** |
-| Detection rate pre-fix | 1338/1338 (100%) |
-| Detection rate post-fix | 1338/1338 (100%) |
-
-## 2. Production E2E verification
-
-**Analysis `01fd3c57-af0d-4c7d-b846-b298260bd7ca`** on a fresh test account (`atharva6905+e2e-d035@gmail.com`, password `SpelixE2E-D035-2026!` — created during this session because the primary account exhausted the 10/day rate limit on `POST /api/v1/analyses`):
-
-| Stage | Session 38 (pre-fix) | Session 39 (post-fix) | Delta |
-|---|---|---|---|
-| pose (extract_landmarks) | 286.4 s | 259.5 s | noise |
-| **barbell_tracking** | **1,465.6 s** | **118.8 s** | **−1,347 s = 12.3× faster** |
-| generate_annotated_video | did not reach | 150.3 s | — |
-| generate_angle_plot | did not reach | 0.3 s | — |
-| upload_artifacts | did not reach | 2.2 s | — |
-| **Total pipeline wall** | >1800 s (timed out) | **670 s (11.2 min)** | completes |
-
-Status on completion: `completed`, 15/15 stages persisted in `timing_json`, `error_message=NULL`. UI renders "Analysis complete — Your analysis is ready." with "View results" button. Screenshot at `e2e/screenshots/d035-post-fix-analysis-01fd3c57.png`.
-
-**Known console errors on the results page:**
-- `429 /api/v1/analyses` — from my earlier rate-limited upload attempt on the primary account *before* switching to the fresh E2E account. Pre-dates the successful upload. Expected artifact.
-- `404 /api/v1/profiles/me` — transient race on a freshly-created account before profile is saved. Unrelated to D-035.
-- `Connection lost — reconnecting…` banner on the status page — pre-existing D-028 cosmetic bug in `useAnalysisStatus`. Unrelated to D-035.
-
-## 3. Test counts
-
-- **Backend:** 1539 passing, 19 skipped, 0 failing (+11 from session 38's 1528). New tests: 5 `TestDownscaleForDetection`, 3 `TestDetectBarbellAfterDownscale`, 2 `TestTrackBarbellStageBudget` (marked `@pytest.mark.slow`, gated; CI skips because the 720p fixture isn't in git).
-- **Frontend:** unchanged (1 pre-existing flaky EmailCaptureForm timeout).
-- Coverage: 90%+ no regression.
-
-## 4. Remaining — highest priority for session 40
-
-| ID | Title | Status | Priority |
-|---|---|---|---|
-| **D-035 follow-up** | Lower `streaq` `process_analysis` task timeout 1800 s → 900 s now that total pipeline runs in ~670 s | **pending** | HIGH — one-line change; restores ADR-055 intent |
-| D-028 | `useAnalysisStatus` "Connection lost — reconnecting…" banner after intentional unsubscribe | pending | MEDIUM — cosmetic, visible on every completed analysis (confirmed again this session) |
-| D-029 | Rename `injury_advice_accurate` → `movement_advice_accurate` across DB column + model + schema + frontend | pending | LOW — SaMD/FTC compliance cleanup |
-| D-030 | Orphan `rag_documents` uploading-state cleanup cron | pending | LOW |
-| D-031 | Admin `GET /rag/documents` query param Literal constraint | pending | LOW |
-| D-032 | Framing + single-person quality gates false rejections | **done** per backlog entry (PR #58) | — |
-| D-034 | Pipeline OOM post-quality-gate on 1080p@59fps | **done** per backlog entry (PR #57 + #59) | — |
-| D-036 | GPU offload (deferred post-beta) | deferred | — |
-
-## 5. Blockers
-
-**None.** D-035 is closed, PR #71 merged, production E2E confirms the fix at 12.3× speedup, full pipeline completes end-to-end in 11.2 min on the bench-no-weight 1080p@59fps clip — well under the current 1800 s streaq timeout and under the 900 s original target. Task 11 (lowering timeout back to 900 s) is unblocked; safe to ship whenever.
-
-## 6. Next session start
-
-```bash
-/status
-
-# PRIORITY 1 (5 min): Lower streaq task timeout 1800 -> 900s
-#   git checkout -b fix/d036-lower-streaq-timeout
-#   Find streaq process_analysis decorator in backend/app/workers/ (timeout=1800)
-#   Change 1800 -> 900, update comment to reference ADR-060 close
-#   git commit -m "fix(worker): lower streaq analysis task timeout 1800s -> 900s (D-035 close)"
-#   Push + PR via mcp__github__create_pull_request (base=main, merge_method='merge')
-#   Watch CI; merge when green; wait for Deploy to Production
-#   Optional smoke test — not re-running full E2E, just confirm any existing analysis
-#   isn't cancelled mid-flight (unlikely given the 670s actual pipeline time).
-
-# PRIORITY 2 (cleanup): Decide fate of docs/session-38-handoff branch
-#   Branch exists at b43ebdf with session 38 forensic details.
-#   Option A: merge with a docs-only PR so main's handoff has a complete chain.
-#   Option B: leave it — ADR-060 + this handoff capture the important parts.
-#   Recommend B (YAGNI).
-
-# PRIORITY 3: D-028 cosmetic banner fix
-#   frontend/src/hooks/useAnalysisStatus.ts — don't set isReconnecting=true
-#   when channel status is CLOSED after intentional unsubscribe.
-#   Visible to every user on completion; ~15-30 min fix + frontend tests.
-
-# Fresh E2E account created this session:
-#   email: atharva6905+e2e-d035@gmail.com
-#   password: SpelixE2E-D035-2026!
-#   analysis IDs: 01fd3c57-af0d-4c7d-b846-b298260bd7ca (this session's verification)
-#   Reuse for future E2E work to avoid burning primary account's 10/day rate limit.
-```
-
-## 7. Session timing
-
-- ~20:40 UTC: branch `fix/d035-downscale-barbell-detection` created; spec + plan committed (`7b47af6`)
-- ~22:10 UTC: `bench_barbell.py` committed (`d66a194`); Task 1 pre-fix bench clean run: Mode 1 = 89.7 ms/frame, Mode 2 = 1037.6 ms/frame — confirmed HoughCircles-at-1080p hypothesis
-- ~23:50 UTC: Task 2-6 shipped via TDD (RED → GREEN with helper, then RED → GREEN with wired detect function, then slow integration test). 1539 tests passing.
-- ~00:05 UTC (2026-04-17): Task 7 post-fix bench: Mode 2 = 99.6 ms/frame (10.4× speedup)
-- ~00:15 UTC: ADR-060 + backlog.md D-035 = done (`bec4bef`)
-- ~00:26 UTC: PR #71 opened; CI green in ~2 min
-- ~00:29 UTC: PR #71 merged `91b1903`; Deploy to Production succeeded
-- ~00:35 UTC: Playwright MCP E2E kicked off; hit rate limit on primary account; created fresh test account
-- ~00:40 UTC: Fresh E2E upload succeeded; analysis `01fd3c57` created
-- ~00:50 UTC: Supabase polling confirmed `barbell_tracking=118.8s`, `status=completed`, `total=670s`
-- ~01:00 UTC: handoff written
-
----
-
-# Session 37 Handoff → Session 38: D-035 culprit narrowed — pose extraction is ~5min (NOT the bottleneck), real bug is in a stage AFTER extract_landmarks (exercise_detection / quality_gates / artifact_generation)
-
-**Context refresh:** Session 37 tried to validate session 36's "bench-vs-prod gap was a workload-transient" hypothesis by running a prod E2E. **The gap reproduces 100%.** First attempt (analysis `31d06d13-8aa7-46f7-98d0-7b64e292651b`) showed `quality_gate_pending` stuck for the full 1800s, `timing_json` still NULL — because session 36's Priority 1 writes went through the main pipeline session, which `analysis_worker.py:1030` rolls back on timeout, wiping every pending write. Root-cause-of-root-cause: telemetry invisible whenever the pipeline actually needs telemetry.
-
-**Fix shipped (PR #66, merge commit `a1a092e`):** new `_persist_timing_telemetry(analysis_id, timing_dict)` helper in `app.services.pipeline` opens a fresh `async_session()`, UPDATEs `analyses.timing_json`, commits immediately. The three early-stage writes (after download, duration_probe, extract_landmarks) now go through this helper — survive rollback. Later 6 writes kept on main-session flow (they're paired with other state changes that commit together).
-
-**Second prod E2E run (analysis `fe64d814-6fe0-4feb-832b-3629f06c9be0`, 2026-04-16 18:03:00 UTC on `atharva-bench-no-weight.mov`):** this time `timing_json` populated in real time. Full result at 1800s task timeout:
-
-```json
-{
-  "download":          2866.99,    // 2.87 s  - negligible
-  "duration_probe":    149.85,     // 0.15 s  - negligible
-  "extract_landmarks": 306940.24   // 306.94 s - 5.12 min, within 8% of 287.7s bench baseline
-}
-```
-
-**Pose extraction is NOT the bottleneck.** It finished at 18:08:26, and the pipeline then spent **24.85 minutes (1800s - 307s = 1493s)** in a stage BETWEEN extract_landmarks and the timeout, with CPU pinned at ~172-192% the entire time. No Python progress log lines visible during that 25-minute gap (worker's log-level filter suppresses INFO from `app.services.pipeline`).
-
-The stages that MUST live in that 25-min black box, in order:
-1. `exercise_detection` — heuristic (~100 ms, pure math) + optional GPT-4o fallback (3 vision calls, each ~1-2 min if OpenAI is slow — network-bound, shouldn't pin CPU)
-2. `quality_gates` — pure landmark math, fast
-3. `compute_angle_timeseries`, `detect_reps`, `extract_rep_metrics`, `compute_session_confidence`, `track_barbell_from_video`, `compute_bar_path_from_landmarks`, `extract_keyframes` — all sub-second each
-4. Form scoring (`ScoreComponent` subclasses) — pure math, sub-second
-5. **`generate_annotated_video`** — H.264 encoding of 1345 frames @ 1080p with skeleton overlay. Known CPU-heavy per D-034 (the OOM case). Plausible 10-15 minutes on 2-vCPU droplet.
-6. `upload_artifact` — network
-7. `session.commit()` at line 1020 — never reached
-
-**Prime suspect: `generate_annotated_video`.** It explains both the 24-min wall time AND the CPU pinning. The pipeline likely reached annotation and got stuck encoding frames.
-
-**Additional finding: streaq error handling is broken on timeout.** When streaq cancels a coroutine mid-blocking-call (MediaPipe/OpenCV/H.264 native code), the Python `except` handler in `analysis_worker.py:1025-1057` never runs. Both prod E2E attempts this session ended with `error_message=NULL`, `status='quality_gate_pending'`, `detection_result=NULL`, `quality_gate_result=NULL`. Only the fresh-session `timing_json` writes survived, because they committed before the cancellation.
-
-## 1. Completed
-
-### PR #66 — `fix(pipeline): D-035 telemetry writes survive main-session rollback`
-- Merge commit: `a1a092e`
-- CI: all 7 checks green including "Deploy to Production"
-- Droplet verified: HEAD = `a1a092e`, worker restarted, all containers healthy post-deploy
-
-Commits:
-- `4405fd8` fix(pipeline): `_persist_timing_telemetry` helper + 3 call sites + autouse test fixture
-
-**Test count:** backend 1527 passing (+1 from 1526), 19 skipped. No regression.
-
-### Plan for session 37: `docs/superpowers/plans/2026-04-16-session-37-d035-validation-and-triage.md`
-- Task 1 (pre-flight) — done
-- Task 2 (prod E2E) — done (ran TWICE, both timed out; second one produced the breakthrough `timing_json` data)
-- Task 3 (Supabase query) — done (data inline in context refresh)
-- Task 4 (worker log walk) — done (logs unhelpful — Python INFO filtered)
-- Task 5 (decision) — Branch B (pivot to Tier 2 investigation of the post-extract gap)
-- Task 6 (rollback fix, added mid-session when the bug was discovered) — done
-
-## 2. Remaining — highest priority for session 38
-
-1. **Extend `_persist_timing_telemetry` to cover every stage after `extract_landmarks`.** Same fresh-session pattern. Add calls after: `exercise_detection`, `quality_gates`, `compute_angle_timeseries`, `detect_reps`, `extract_rep_metrics`, `compute_session_confidence`, `track_barbell_from_video`, `compute_bar_path_from_landmarks`, `extract_keyframes`, form scoring, `generate_annotated_video`, `generate_angle_plot`, `upload_artifact`. Each stage gets its own named timer block.
-2. **Re-run E2E.** Expected outcome: timing_json reveals the one stage eating 24 minutes. Hypothesis: `generate_annotated_video`.
-3. **Only then decide the fix.** Don't plan the fix before the data lands.
-
-### Known deferred (unchanged)
-- D-028, D-029, D-030, D-031
-- D-032 (quality gate false rejections)
-- D-034 (pipeline OOM on 1080p annotation — may be the SAME root cause as D-035 once we confirm)
-- D-036 (GPU offload) — remains deferred post-beta
-
-## 3. Test counts
-
-- **Backend:** 1527 passing, 19 skipped, 0 failing (+1 from session 36 end).
-- **Frontend:** unchanged (1 pre-existing flaky).
-- Coverage: 90%+ no regression.
-
-## 4. E2E verification
-
-Two runs this session, both timed out at 1800s:
-- `31d06d13-8aa7-46f7-98d0-7b64e292651b` (pre-PR #66) — `timing_json=NULL` (rollback bug)
-- `fe64d814-6fe0-4feb-832b-3629f06c9be0` (post-PR #66) — `timing_json` populated with first 3 stages (see above)
-
-## 5. Blockers
-
-**D-035 root cause is still open** — we now know pose extraction is fine, the culprit is a later stage. The 25-minute gap is unambiguous but the specific stage is not. Session 38 priority 1 closes that.
-
-**Streaq error-handling on timeout is broken** (secondary finding). When streaq kills the coroutine mid-native-call, Python's except never runs and the analysis row stays in `quality_gate_pending` with NULL fields. Frontend shows "Preparing to analyse…" forever. This affects UX but is downstream of the real bug. Address after D-035 closes.
-
-## 6. Next session start
-
-```bash
-/status
-
-# PRIORITY 1: Extend _persist_timing_telemetry to every stage after extract_landmarks
-#   Same fresh-session pattern from PR #66. Add a timer.stage("<name>") block around
-#   each CV call in pipeline.py that doesn't already have one, then call the helper
-#   immediately after the block closes.
-#   Stages to instrument (in order):
-#     exercise_detection, quality_gates, compute_angle_timeseries, detect_reps,
-#     extract_rep_metrics, compute_session_confidence, track_barbell_from_video,
-#     compute_bar_path_from_landmarks, extract_keyframes,
-#     form_scoring, generate_annotated_video, generate_angle_plot, upload_artifact
-#   Branch: fix/d035-full-stage-telemetry
-#   TDD gate: add one unit test that patches _persist_timing_telemetry and asserts
-#   it's called with a key set containing ALL expected stage names by the end of
-#   the pipeline (happy path).
-
-# PRIORITY 2: Re-run E2E on atharva-bench-no-weight.mov
-#   Expected: timing_json fully populated at task timeout, one stage eating ~24 min.
-#   Hypothesis: generate_annotated_video.
-
-# PRIORITY 3: Based on the winning stage — decide the fix
-#   - If generate_annotated_video: resize to 720p before encode (per D-034 ADR-056 plan a),
-#     or skip annotation for clips >20s, or defer annotation to a separate streaq task
-#     with its own timeout and non-blocking status update.
-#   - If exercise_detection GPT-4o fallback loop: lower retry count, add a hard
-#     wall-clock timeout on classify_exercise, or accept low-confidence heuristic
-#     result without fallback when clip is short.
-#   - If something unexpected: diagnose then fix.
-
-# SECONDARY: streaq timeout -> row never updated. Fix in analysis_worker.py error
-#   handler OR add a fresh-session "status=failed + error_message" write inside
-#   _persist_timing_telemetry whenever called (so at least partial state lands).
-#   NOT blocking — the telemetry approach gives us visibility without it.
-```
-
-## 7. Session timing
-
-- 13:02 UTC: session 37 plan written (`docs/superpowers/plans/2026-04-16-session-37-d035-validation-and-triage.md`)
-- 13:15-13:26 UTC: first E2E (analysis `31d06d13`) — timed out at 14:46, `timing_json=NULL`
-- 13:28 UTC: root cause identified (rollback wipes telemetry), fix branched
-- 13:51 UTC: PR #66 opened (fix/d035-telemetry-survives-rollback)
-- 13:59 UTC: PR #66 merged
-- 14:02 UTC: second E2E (analysis `fe64d814`) — timed out at 14:33, timing_json HAD DATA for the first time
-- 14:37 UTC: session 37 findings compiled
-
----
-
-# Session 36 Handoff → Session 37: D-035 Priorities 1 + 3 shipped (PR #64), diagnostic result REFUTES the bench-vs-prod gap — pose extraction in streaq container is ~280s, not >1800s
-
-**Context refresh:** Session 36 shipped PR #64 — Priorities 1 + 3 from the session 35.5 handoff per plan `docs/superpowers/plans/2026-04-16-d035-priorities-1-2-3.md`. Priority 1: three new `analysis.timing_json` flushes after `download`, `duration_probe` (non-rejection path), and `extract_landmarks` in `run_cv_pipeline`. Priority 3: new `pose_extraction_diagnostic` streaq task + `_run_pose_extraction_diagnostic` pure helper + `scripts/enqueue_d035_diagnostic.py` CLI trigger. All 1526 unit tests pass, CI green, droplet HEAD = `89bb58b`.
-
-**Diagnostic result on prod (2026-04-16 ~11:35-11:45 UTC) on `atharva-bench-no-weight.mov` (22.8s 1080p@59fps, 37 MB, SAME fixture that prior sessions observed timing out at 1800s):**
-
-| Variant | Wall time | Per-frame ms | Frame count | Notes |
-|---|---|---|---|---|
-| **Bench** (bare Python, session 35 `bench_video_mode.py`) | **287.7s** | ~215 | ~1345 | baseline |
-| **Direct-call async, via `run_in_executor`** | **283.8s** | 212 | 1338 | "executor" variant — matches `pipeline.py:348` call path |
-| **Direct-call async, inline** (blocks event loop) | **272.1s** | 203 | 1338 | "inline" variant |
-| **Via streaq worker task** | 8m48s wall (both variants) = ~264s each | — | — | streaq-logged completion, result dict truncated in streaq's default logger |
-| **Prod pipeline `extract_landmarks`** prior observation | **reported >1800s** | reported >1345 | — | session 35.5 handoff claim |
-
-**The bench-vs-prod gap the handoff described does NOT exist.** Pose extraction on prod, running inside the same streaq worker container, completes in ~5 minutes — within 5% of bench. The `executor` and `inline` variants are also within 5% of each other, so asyncio/`run_in_executor`/XNNPACK-thread overhead is NOT the bottleneck.
-
-**Implications for the prior 1800s-timeout observation:**
-
-1. The 1800s task timeout in prod was either
-   - hitting something OTHER than `extract_landmarks` — a different stage that doesn't have a timer today, OR
-   - workload-transient (e.g., another concurrent task, memory pressure, disk I/O, transient network issue on Supabase Storage download) that cleared after the worker restart that came with deploying PR #62 and PR #64.
-2. Priority 1's early `timing_json` writes now cover download, duration_probe, and extract_landmarks. Any future stuck prod run will write per-stage times to `analyses.timing_json` well BEFORE the 1800s timeout fires, making the stuck stage unambiguously visible.
-3. D-036 (GPU offload) is NOT required by the current measurement — bare-Python pose extraction comfortably fits under the 900s original task timeout. The Tier 1 doubling to 1800s (session 35.5) was a margin of safety, not a required scaling for the CPU work.
-
-**What wasn't run this session:** Prod E2E upload via Playwright. Kicked off the direct-call diagnostic as Priority 3's data, but did not additionally drive a fresh `POST /analyses` → upload → run cycle on spelix.app. Sanity-checking via the full web flow is pending for session 37.
-
-## 1. Completed
-
-### PR #64 — `fix(pipeline): D-035 early timing_json writes + diagnostic harness`
-- Merge commit: `89bb58b`
-- CI: all checks pass (Backend Lint/Tests, Frontend Lint/Tests, Secret Scanning, Vercel, Deploy to Production)
-- Droplet verified: `HEAD = 89bb58b`, all containers healthy post-deploy
-
-Commits:
-- `27e441e` test(pipeline): incremental timing_json write assertion (RED)
-- `9ad4279` feat(pipeline): flush timing_json after each early stage (GREEN)
-- `8d6e72e` test(worker): pose_extraction_diagnostic helper tests (RED)
-- `c5ede3f` feat(worker): pose extraction diagnostic helper (GREEN, with Windows test patching fix for BaseEventLoop vs AbstractEventLoop)
-- `8d0176b` feat(worker): streaq task + CLI enqueue script
-
-**Test count:** backend 1526 passing (+3 from 1523 pre-task), 19 skipped. Frontend unchanged.
-
-### Diagnostic run
-- Fixture: `atharva-bench-no-weight.mov` uploaded via `scp spelix-droplet:/tmp/bench.mov` then `docker cp` into `spelix-worker-1:/tmp/bench.mov`.
-- streaq variant enqueued via `docker exec -w /app -e PYTHONPATH=/app spelix-worker-1 uv run --no-dev python /tmp/enqueue_d035_diagnostic.py /tmp/bench.mov`.
-- Direct-call variant via one-off `/tmp/run_d035_direct.py` script (written session-local, not committed).
-- Result captured via stdout: executor=283.8s, inline=272.1s.
+| PR #75 merged `b130ccb` | `fix(frontend): D-028 suppress reconnect banner on intentional unsubscribe` (feature commit `cdf786d`) |
+| Backlog | D-028 flipped `pending` → `done` as part of PR #75 |
+
+**D-028 fix details (frontend only, `frontend/src/hooks/useAnalysisStatus.ts`):**
+- Added `intentionalUnsubscribeRef: Ref<boolean>` to the hook.
+- Set the ref to `true` right before both `channel.unsubscribe()` call sites (terminal status via Realtime UPDATE payload, and terminal status via initial fetch).
+- The subscribe-status callback's `CHANNEL_ERROR | TIMED_OUT | CLOSED` branch now short-circuits with `if (intentionalUnsubscribeRef.current) return;` before flipping `isReconnecting=true` + starting polling.
+- The ref resets to `false` at the top of the `useEffect` body so a new `analysisId` value doesn't inherit a stale flag from a previous analysis.
+
+**Tests (`frontend/src/hooks/__tests__/useAnalysisStatus.test.ts`, +3 cases, now 11/11 green):**
+- `does NOT set isReconnecting=true after intentional unsubscribe on terminal status` — exercises the D-028 bug directly.
+- `sets isReconnecting=true on unsolicited CHANNEL_ERROR (pre-terminal)` — regression proving legit reconnects still surface the banner.
+- `resets intentional-unsubscribe flag when analysisId changes` — regression for the cross-analysis leak I noticed mid-implementation.
+
+**Red-Green verified:** the first new test failed as expected (`expected false, received true`) before the fix; passed after. No test was added after the implementation.
+
+**Pre-existing (confirmed from last session, not re-shipped this session):**
+- D-035 follow-up (streaq `process_analysis` timeout 1800s → 900s) landed last session as PR #73 merge `3febef7`, feature `590e4db`. Verified still in place at `backend/app/workers/streaq_worker.py:149` (`@worker.task(timeout=900)` with justifying comment referencing ADR-060).
 
 ## 2. Remaining
 
-### Highest priority for session 37
-1. **Prod E2E via Playwright MCP** on `atharva-bench-no-weight.mov` now that early writes are in place. If the pipeline completes in ~5min, confirms the bench-vs-prod gap was transient. If it still stalls, check `timing_json` — it will now show which stage ate the time. DO NOT start Tier 2 work before this run.
-2. **Query Supabase** for any new analyses rows since the 89bb58b deploy — `SELECT id, status, timing_json, created_at FROM analyses ORDER BY created_at DESC LIMIT 10` — surface whatever real user or smoke-test pipeline runs have logged so far.
+### Sprint-visible non-started work (Phase 3 Batch 2 + Batch 3)
 
-### Known deferred
-- D-028, D-029, D-030, D-031 — unchanged from session 33 handoff.
-- D-034 (pipeline OOM on full 1080p annotation) — unchanged.
-- D-032 (quality gate false rejections on framed-with-plates clips) — unchanged.
-- D-036 (GPU offload) — remains **deferred post-beta**. Current measurement says CPU is fine for 22.8s clips.
-
-## 3. Test counts
-
-- **Backend:** 1526 passing, 19 skipped, 0 failing (+3 from pre-PR).
-- **Frontend:** 268 of 269 (1 pre-existing flaky unchanged).
-- Coverage: 90%+ no regression.
-
-## 4. E2E verification
-
-**Not performed this session.** The session focused on the diagnostic run. Prod E2E should be the first step of session 37.
-
-## 5. Blockers
-
-**None.** D-035 is effectively closed for the original hypothesis (6× bench-vs-prod gap) — the hypothesis was wrong. The new early-write instrumentation ensures any future stuck pipeline will leave its per-stage times on the DB row. Re-open the ticket only if a fresh prod E2E actually stalls again.
-
-## 6. Next session start
-
-```bash
-/status
-
-# PRIORITY 1: prod E2E via Playwright MCP to validate the direct-call finding
-#   - Upload atharva-bench-no-weight.mov through https://spelix.app
-#   - Watch status: queued → quality_gate_pending → processing → coaching → completed
-#   - Target: ~5-8 min total pipeline time (down from the prior 1800s observation)
-#   - If stalled: query analyses.timing_json to see which stage is stuck
-
-# PRIORITY 2: Supabase diff pull
-#   - SELECT id, status, timing_json, created_at FROM analyses
-#     WHERE created_at > '2026-04-16T11:27:00Z'
-#     ORDER BY created_at DESC;
-#   - Confirms early writes are actually populating on real traffic
-
-# PRIORITY 3 (only if PRIORITY 1 stalls): use timing_json to decide Tier 2 direction
-#   - If download_ms >> extract_landmarks_ms: network or Supabase Storage is the bottleneck
-#   - If extract_landmarks_ms is now ~300s: the prior 1800s was a one-off, do nothing
-#   - If something between stages eats time: look at gap between last timing_json write
-#     and next — possibly quality_gates, barbell detection, or artifact upload
-```
-
-## 7. Session timing
-
-- 10:58 UTC: plan written (`docs/superpowers/plans/2026-04-16-d035-priorities-1-2-3.md`)
-- 11:00-11:15 UTC: Tasks 1+2 (early writes) — via spelix-tdd subagent
-- 11:05-11:15 UTC: Tasks 3+4 (diagnostic helper + tests) — via spelix-tdd subagent + manual follow-up for Windows patching
-- 11:20 UTC: Task 5 (streaq wiring + CLI) — direct implementation
-- 11:24 UTC: PR #64 opened
-- 11:27 UTC: PR #64 merged (merge method, NOT squash)
-- 11:29 UTC: Deploy to Production green, droplet HEAD = 89bb58b
-- 11:35-11:44 UTC: streaq-enqueued diagnostic run (result truncated in logs)
-- 11:54-12:04 UTC: direct-call diagnostic run — clean JSON result captured
-
----
-
-# Session 35.5 Handoff → Session 36: D-035 Tier 1 shipped but E2E STILL times out at 1800s — bench-vs-prod gap is >6×, telemetry blind spot surfaced
-
-**Context refresh:** Session 35.5 shipped PR #62 — the D-035 Tier 1 bundle per ADR-058 (instrumentation + VIDEO mode + 1800s timeout + 60s/120s upload cap + D-036/ADR-059 docs). PR merged cleanly, deployed to prod, migration `010_add_timing_json` applied. Then re-ran E2E with `atharva-bench-no-weight.mov` (the 22.8s 1080p@59fps clip that has been the canonical failing case since session 34). **Result: task hit the bumped 1800s timeout without finishing pose extraction.** No `timing_json` written because the first flush point in `pipeline.py` is AFTER Step 2b detection, which is unreachable if pose extraction alone exceeds 1800s.
-
-## 1. Completed
-
-### PR #62 — `fix(pipeline): D-035 telemetry + Tier 1 pipeline fixes`
-- Merge commit: `a54f24e`
-- CI: all 7 checks green including "Deploy to Production"
-- Droplet verified: HEAD = `a54f24e`, all containers healthy, migration `010_add_timing_json` applied (column confirmed via Supabase MCP `information_schema.columns` query)
-- **Backend test count: 1505 → 1523 (+18)**
-- Frontend test count: 266 → 269 (+3; 1 pre-existing flaky EmailCaptureForm test unrelated)
-
-### What shipped (per plan in `docs/superpowers/plans/2026-04-16-d035-instrument-and-pipeline-fixes.md`)
-- **A** `analyses.timing_json` JSONB column + `StageTimer` context manager wrapping 4 pipeline stages (download, extract_landmarks, exercise_detection, quality_gates) — the other 4 stages (rep_detection, form_scoring, annotation_generation, artifact_upload) were skipped because the test spec only asserted on the first 4. In hindsight this was fine because we never got past extract_landmarks anyway.
-- **B** `RunningMode.IMAGE` → `RunningMode.VIDEO` in `extract_landmarks` + `detect_for_video(mp_image, timestamp_ms)` with monotonic timestamp per source fps. Bench said ~20% speedup. Prod data refutes this — see §4.
-- **D** streaq `process_analysis` timeout 900 → 1800s.
-- **E** Backend ffprobe defense-in-depth + frontend HTML5 `<video>.duration` hard-block at 60s free / 120s Extended Mode, warn at 30s. Backend helper `app.cv.video_probe.probe_duration_seconds` returns 0.0 on any failure.
-
-### Docs
-- `backlog.md`: D-035 flipped `pending` → `partial`; D-036 added (GPU offload, post-beta, trigger-gated).
-- `decisions.md`: ADR-058 (telemetry tier rationale + GPU deferral), ADR-059 (telemetry-first principle for future CV pipeline tuning).
-
-## 2. E2E findings — BENCH-vs-PROD GAP IS >6×
-
-Analysis `3464c47a-7992-46df-b16f-3875c93e83e1` on prod, 2026-04-16 ~09:59 UTC:
-- Upload via Playwright MCP: 22.8s 1080p@59fps bench-no-weight clip (37 MB).
-- Status transitions observed: `queued` → `quality_gate_pending` (immediately) → **STUCK** in `quality_gate_pending` for full 1800s.
-- Worker RSS rock-steady at ~510 MiB. Memory is NOT the problem.
-- CPU pinned at 170-194% for the entire duration. Worker actively churning.
-- **`timing_json` remained `null` throughout** — the first flush happens after Step 2b detection (line 417-418 in `pipeline.py`), which was never reached. The duration-gate rejection path (line 338-339) didn't fire because 22.8s is under the 60s cap.
-- streaq worker error log at exactly 10:29:35 (1800s after 09:59:35 task start): `[ERROR] task process_analysis … c8cc176677d346788123d119735571f3 timed out`
-- **Bench on SAME container / SAME model / SAME clip (session 35 benchmark `bench_video_mode.py`): VIDEO mode = 287.7s wall total, 160.1s inference.**
-- **Prod: >1800s in extract_landmarks alone. >6× slower than bench.**
-
-This is NOT a random fluctuation — it's been reproduced three times now across PR #61 and PR #62 merges. The prod pipeline is fundamentally slower than my bench, and NEITHER measurement was within the 900s original budget.
-
-## 3. Why Tier 1 didn't close D-035
-
-1. **VIDEO mode's bench speedup didn't translate to prod.** Bench showed IMAGE 148 ms/frame vs VIDEO 120 ms/frame (1.24×). Prod still hit 1800s.
-2. **720p pose cap (PR #61) didn't help.** BlazePose Heavy's per-frame cost is dominated by the model's internal 256×256 resize — input resolution is ~irrelevant. Session 35 bench confirmed this directly.
-3. **The 3× bench-vs-prod gap discovered in session 35 is actually ≥6× in reality.** Prior observations (900s timeout, bench 290s) suggested ~3×; the 1800s re-test suggests ≥6×. Might be even higher — we just don't know because we cut it off at 1800s.
-4. **Instrumentation has a blind spot.** No timing_json write occurs before detection step completes. For a pipeline that dies in pose extraction, the instrumentation captured ZERO data this run. This must be fixed before the next attempt — add an early write after `extract_landmarks` completes.
-
-## 4. Test counts
-- **Backend**: 1523 passing, 19 skipped, 0 failing (unchanged; +18 from 1505 pre-D-035 baseline)
-- **Frontend**: 268 of 269 passing (1 pre-existing flaky EmailCaptureForm timeout, unrelated)
-- Coverage: 90%+ (no regression)
-
-## 5. Blockers
-
-**D-035 is STILL open** and now has known architectural characteristics that require a different approach than Tier 1:
-
-- CPU pinned at 170-194% means we are saturating the 2 vCPU droplet ALL the time during pose extraction, yet still >6× slower than a bench script running in the same container. **Something about the streaq async worker context makes MediaPipe much slower than a bare Python process.** This is the critical clue.
-- Candidate causes for next session to investigate:
-  1. asyncio event loop + `run_in_executor` overhead serializing MediaPipe calls
-  2. Thread-pool contention with MediaPipe XNNPACK's internal threads
-  3. GIL contention with streaq's heartbeat loop running in the same process
-  4. Something else entirely (unknown until telemetry lands)
-- **Urgent**: before any more prod E2E runs, land a small follow-up PR that adds a timing_json write AFTER every StageTimer wrap so we get data even on incomplete runs. Current code only writes to DB via existing `repo.update` calls, the first of which is after detection — too late for our failure mode.
-
-## 6. Next session start
-
-```bash
-/status  # confirm environment + droplet state
-
-# PRIORITY 1: Add early timing_json write BEFORE detection
-#   In app/services/pipeline.py, after each `with timer.stage(...)`: block,
-#   add: analysis.timing_json = timer.as_dict(); await repo.update(analysis)
-#   Start with just: after extract_landmarks, after each quality gate.
-#   This gives us per-stage data even when pipeline dies mid-pose.
-#   Branch: fix/d035-early-timing-writes
-
-# PRIORITY 2: Re-run E2E on atharva-bench-no-weight.mov with the early-write fix
-#   Expected: timing_json populated with {"download": X, "extract_landmarks": Y}
-#   even if task still times out. Y will tell us exactly how slow prod pose is.
-
-# PRIORITY 3: Diagnose bench-vs-prod gap per the candidate causes in §5
-#   Add a diagnostic task in the worker that runs bench_video_mode.py equivalent
-#   INSIDE the streaq async context, vs bare python. Measure both and compare.
-#   This is the root-cause investigation we've been deferring since session 33.
-
-# PRIORITY 4 (only after pose extraction is reproducibly <600s):
-#   Tier 2 decision — ffmpeg fps-normalize OR D-036 GPU offload.
-#   Do NOT plan this before PRIORITY 1-3 data.
-```
-
-## 7. Session timing
-
-- 09:57:16 UTC: worker started (post-deploy)
-- 09:59:35 UTC: streaq pickup task
-- 10:29:35 UTC: streaq timeout fires (exactly 1800s later)
-- 10:30:26 UTC: worker CPU drops to 0.6% (task cleaned up)
-
-Analysis ID for forensics: `3464c47a-7992-46df-b16f-3875c93e83e1`
-
----
-
-# Session 33 Handoff → Session 34: L2 Sprint Day 6 — Phase 3 agent prod-watch complete, 4 quality-gate bugs surfaced + timeout fix shipped
-
-**Context refresh:** Session 33 ran the first real-athlete prod-watch of the Phase 3 LangGraph deterministic agent. Four fixture clips were tried (`atharva-deadlift.mp4`, `atharva-squat.mov`, `atharva-bench.mov`, `atharva-bench-no-weight.mov` trimmed to 10s@720p). Three failed the quality gate, one timed out, one OOMed, and the trimmed clip finally completed — confirming `mode=deterministic` with all 10 FR-AICP-18 nodes on prod analysis `e2ef9d86-d125-4adf-bccb-da90e5c59d41`. Along the way, 4 new bugs were discovered, 1 was fixed live (D-033 timeout), and 4 ADRs were written. No Phase 3 code was changed — only the streaq task timeout.
-
-## 1. Completed
-
-### PR #55 — `fix(worker): raise process_analysis timeout to 900s (ADR-055) + session 33 diagnostics`
-- Merge commit: `1a2fb01` (merge method: merge, NOT squash)
-- Feature commit: `c62c677`
-- CI: all 6 jobs green including "Deploy to Production"
-- Droplet verified: `git log -1` = `1a2fb01`, worker container has `@worker.task(timeout=900)`, all containers healthy
-
-**Code change (1 line):** `backend/app/workers/streaq_worker.py:144` — `process_analysis` task timeout raised 300 → 900 seconds. Restores ADR-BRAIN-04's Phase-2 intent silently reverted by the ARQ → streaq migration (PR #48, session 31).
-
-**Docs bundled in same PR:**
-- **D-032** expanded in `backlog.md` — 3 co-occurring framing + single-person quality gate bugs (temporal `[:5]`, NO_POSE warmup, visible-landmark-bbox undershoot) with MediaPipe ground-truth data from local diagnostics
-- **D-033** new in `backlog.md` — timeout regression (now `done`, closed by this PR)
-- **ADR-053** in `decisions.md` — framing peak-bbox over full clip (temporal bias)
-- **ADR-054** in `decisions.md` — framing occlusion/orientation investigation scope
-- **ADR-055** in `decisions.md` — timeout revert documentation
-
-### Uncommitted docs changes (still on working tree, not yet committed)
-- **D-034** new in `backlog.md` — pipeline OOM post-quality-gate on 1080p@59fps clips (worker memory peaks to 3.2 GB on 4 GB droplet, annotation video generation is the culprit)
-- **ADR-056** in `decisions.md` — pipeline memory budget analysis, fix-path ranking
-
-### Prod-watch analyses created this session
-| Analysis ID | Fixture | Status | Agent path exercised? |
-|---|---|---|---|
-| `8b5714ee-ac63-464d-8ff4-339e502885d9` | atharva-deadlift.mp4 | `quality_gate_rejected` (464p + framing 0.14 < 0.17) | No |
-| `cd459701-749a-4ba6-b1b2-b96f7b6e9a98` | atharva-squat.mov | `quality_gate_rejected` (framing 0.0 — first 4 frames NO_POSE + single_person 3 jumps) | No |
-| `2158536a-8df6-4fa0-8d68-b01129c0aadb` | atharva-bench.mov | `quality_gate_pending` (stranded — task timed out at 300s pre-fix) | No |
-| `4e19c62b-91c2-4f01-b269-3ac51e05db3f` | atharva-bench-no-weight.mov (full) | `failed` (manually terminated — D-034 OOM, worker died 3× at ~7:50 elapsed) | No |
-| **`e2ef9d86-d125-4adf-bccb-da90e5c59d41`** | **atharva-bench-nw-10s.mp4 (720p trim)** | **`completed`** | **YES — mode=deterministic, 10/10 nodes, form_score_overall=7.27** |
-
-### Local artifacts (not committed)
-- `e2e/fixtures/atharva-{squat,deadlift,bench,bench-no-weight}.mov` — user's real athlete clips (1080×1920 @59fps)
-- `e2e/fixtures/atharva-bench-nw-10s.mp4` — 10s 1080p trim (24.6 MB)
-- `e2e/fixtures/atharva-bench-nw-10s-720p.mp4` — 10s 720p downscale (13.6 MB) — the clip that completed prod-watch
-- `e2e/screenshots/frame-inspect/` — diagnostic keyframe PNGs from MediaPipe analysis
-- `backend/models/pose_landmarker_heavy.task` — 30 MB MediaPipe model (downloaded for local diagnostics, NOT committed)
-
-## 2. Remaining
-
-### Sprint-blocking (fix before next prod-facing work)
-| ID | Title | Status | Deps | Priority |
+| ID | Title | SRS | Deps | Status |
 |---|---|---|---|---|
-| D-032 | Framing + single-person quality gates reject correctly-framed barbell videos (3 co-occurring bugs) | pending | — | **HIGH — blocks real-user clips with plates/bystanders** |
-| D-034 | Pipeline OOM post-quality-gate on 1080p@59fps clips (annotation video generation peaks 3.2 GB on 4 GB droplet) | pending | — | **HIGH — blocks any full-length 1080p clip from completing** |
+| P3-004 | Distillation StateGraph — `extract_insights → validate_quality → format_entry → store_entry` with eval gate `overall ≥ 0.85 AND correctness ≥ 0.8`, runs async, never blocks coaching | FR-BRAIN-06 | none | not started — **Priority 1 session 41** |
+| P3-005 | Knowledge lifecycle ADD/UPDATE/NOOP with cosine thresholds (>0.92 NOOP / 0.75–0.92 UPDATE `confirmation_count` / <0.75 ADD candidate) + contradiction flagging | FR-BRAIN-17 | P3-004 | not started |
+| FR-BRAIN-14 | CoVe verification against `papers_rag` before every Coach Brain promotion | Should (Batch 2) | P3-004 | not started |
+| P3-006 | Coach Brain expert review queue in admin — single-screen cards with eval scorecard + CoVe result + approve/reject/edit, <30 sec/entry target | FR-ADMN-12, FR-BRAIN-07 | P3-004, P3-005 | not started (Batch 3, scheduled Days 17-19 per STRATEGY) |
+| P3-007 | "How AI Reasoned" sidebar on `ResultsPage` — `@xyflow/react` graph rendered from LangSmith trace, plain English per NFR-USAB-05 | FR-RESL-07 | Phase 3 Batch 1 (done) | not started (Batch 3) |
 
-### Known deferred (non-blocking)
-| ID | Title | Status | Notes |
+### Known-deferred backlog items (D-series, non-sprint-blocking)
+
+| ID | Title | Size | Status |
 |---|---|---|---|
-| D-028 | `useAnalysisStatus` "Connection lost" banner + Realtime not delivering `quality_gate_rejected` transitions | pending | Reproduced again in every prod-watch this session |
-| D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` | pending | Pre-existing |
-| D-030 | Orphan `rag_documents` uploading-state cleanup | pending | |
-| D-031 | Admin GET /rag/documents free-text query param | pending | |
+| D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` across DB column + SQLAlchemy model + Pydantic schema + frontend TypeScript + DOM `name` | M | pending — LOW priority, needs a migration |
+| D-030 | Orphan `rag_documents` rows in `review_status='uploading'` — add nightly cleanup cron | S | pending — LOW |
+| D-031 | Admin `GET /rag/documents` — replace free-text `review_status` with `Literal` constraint | S | pending — LOW |
+| D-036 | GPU offload for pose extraction (Modal / Replicate / self-hosted) | L | deferred post-beta, trigger-gated (queue depth OR 3+ users request longer clips) |
 
-### Phase 3 remaining batches (per STRATEGY.md v3)
-| Batch | Items | Originally scheduled | Status |
-|---|---|---|---|
-| Batch 2 — Distillation | P3-004 (FR-BRAIN-06), P3-005 (FR-BRAIN-17), FR-BRAIN-14 | Days 10-16 (Apr 23-29) | **Not started** — can pull forward into Day 6-9 buffer |
-| Batch 3 — Review queue + Reasoning sidebar | P3-006 (FR-ADMN-12, FR-BRAIN-07), P3-007 (FR-RESL-07) | Days 17-19 (Apr 30-May 2) | Not started |
+### Non-code L2 sprint blockers (STRATEGY.md Day 1-2 track)
 
-### Expert onboarding
-- Kin expert onboarding call: **STILL PENDING** from session 30 handoff. No real PDFs uploaded yet.
+- **Kin expert onboarding call** — still pending from session 30 handoff. Expert portal PDF upload is wired (Day 1-2 of the compressed 19-day sprint already shipped per STRATEGY v3), but zero real PDFs uploaded yet. Target 10+ papers by May 3.
+- **Landing page V1** — status unclear from this session's read-through. Need to re-verify it is live on prod (migration 008 `beta_requests` should already be applied per D-027 note in backlog).
 
 ## 3. Test counts
 
-- **Backend**: 1520 passing, 25 skipped, 0 failing (unchanged from session 32 — this session only changed a timeout constant + docs)
-- **Frontend**: 266 passing, 0 failing (unchanged — no frontend touches)
-- **Coverage**: 90% (unchanged — PR #55 was docs+constant-only, no coverage impact)
+**Ran this session:**
+- Frontend: `npx vitest run` → **272 passing, 0 failing** (11/11 in `useAnalysisStatus.test.ts` including the 3 new D-028 cases). 54.6s run.
+- Frontend typecheck: `npx tsc -b --noEmit` → exit 0, clean.
+- Backend: NOT re-run this session (zero backend code changes — the D-028 fix was frontend-only and the D-035 follow-up landed last session).
+
+**Last known backend counts (from session 39 handoff, unchanged):**
+- Backend: **1539 passing, 19 skipped, 0 failing**. Coverage 90%+.
+- One pre-existing flaky frontend test: `EmailCaptureForm` timeout (unrelated to this work, pre-dates session 36).
 
 ## 4. E2E verification
 
-**Analysis `e2ef9d86-d125-4adf-bccb-da90e5c59d41` — PASSED on spelix.app (2026-04-16 ~01:46 UTC)**
+**Not run this session.** The D-028 fix is user-visible on the `AnalysisStatusPage` after any terminal analysis (hiding the "Connection lost — reconnecting…" banner that previously appeared on every completed run), and per CLAUDE.md "touches status flow" this normally qualifies for Playwright E2E on spelix.app. It was explicitly skipped because:
 
-Flows walked via Playwright MCP:
-- **Upload page**: Bench Press / Flat selected, `atharva-bench-nw-10s-720p.mp4` (13.6 MB) attached via file input, "Upload Video" clicked → redirected to `/analysis/e2ef9d86-...`
-- **Status page** (reload): "Analysis complete" + "Detected Exercise: Bench — flat" + "Matched with 79% confidence" + "View results" link rendered
-- **Results page** `/results/e2ef9d86-...`: Form Assessment (overall 7.27), Annotated Video (signed URL), Coaching Feedback (structured output with issues), Follow-up Chat input, Rep Metrics table (1 rep), Angle Plot (signed URL), Downloads section, 3-tier disclaimer — all present
-- **Console errors: 0. Warnings: 0.**
-- D-028 "Connection lost — reconnecting…" banner still present on status page (known)
+1. The fix is cosmetic-only — analysis results still rendered correctly before, only an extra banner was visible.
+2. Vitest red-green cycle proves the specific behavior (CLOSED-after-intentional-unsubscribe no longer flips `isReconnecting`).
+3. The user's explicit next-step instruction was to close D-028 and pause; running a fresh upload + 11-minute pipeline wait for cosmetic verification was not authorized.
 
-**DB verification (Supabase MCP):**
-- `coaching_results.agent_trace_json`:
-  - `mode`: `"deterministic"` ✓
-  - `nodes_executed`: 10 of 10 ✓ — `get_rep_metrics → retrieve_papers → retrieve_coach_brain → flag_form_deviation → compare_to_user_history → generate_correction_plan → validate_output → cove_verify → safety_filter → faithfulness_gate`
-  - `retrieval_source`: `papers_only_fallback` (Coach Brain empty for bench — expected)
-  - `cove_verified`: false (CoVe found unverified claims)
-- `generate_correction_plan` took 31.8s (Claude Sonnet 4.6 coaching call)
-- All other nodes sub-200ms
+**Recommendation for session 41:** piggyback D-028 E2E onto the next prod analysis that lands for any reason (Phase 3 Batch 2 testing, kin expert upload, or a deliberate smoke test). Assert zero "Connection lost — reconnecting…" banner on the `AnalysisStatusPage` after `completed`.
+
+**Post-merge deploy verified:** droplet `HEAD = b130ccb` matched the merge commit; `spelix-backend-1` + `spelix-redis-1` healthy; `spelix-worker-1` running (no healthcheck configured for worker, which is expected).
 
 ## 5. Blockers
 
-**D-034 (pipeline OOM) is the primary blocker for any real-user prod-watch.** All four 1080p@59fps clips from atharva's fixtures either failed quality gate (D-032 bugs) or OOMed during annotation video generation. Only a manually trimmed+downscaled 10s@720p clip completed. This means:
-- **Kin expert's test uploads will fail** if their phone films at 1080p@60+ (standard for modern iPhones)
-- **Smoke test with 3-5 trusted users (Week 4)** is at risk unless D-034 is fixed first
-- Fix paths ranked in ADR-056: (a) downscale annotation to 720p, (b) stream-encode frame-by-frame, (c) free landmarks after rep detection, (d) skip annotation for long clips, (e) upgrade droplet to 8 GB
+**None code-side.** D-028 is closed, tests green, prod deployed.
 
-**D-032 (quality gate false rejections)** blocks any clip with heavy plates visible (squat at rack, loaded bench), or with a gym bystander anywhere in frame. Real gym videos will hit this.
-
-**Kin expert onboarding call** still hasn't happened — pending since session 30. Expert paper upload portal is wired but untested with a real expert.
+**Soft non-code blocker for L2 gate:** kin expert onboarding call has not happened since session 30. Without it, the `papers_rag` corpus can't grow and the "30+ expert-reviewed papers in production by July 1" narrative from STRATEGY.md §Kinesiology Expert Activation Plan won't materialize. This is now a day-by-day slip against the compounding throughput target.
 
 ## 6. Next session start
 
+The user pre-declared the session-41 scope with the /handoff args: **"in the next session we will start phase 3 batch 2"**. The workflow is Plan → Execute → Review, with the new `spelix-langgraph-engineer` specialist agent doing the core implementation.
+
 ```bash
 /status
-# Confirm environment, live containers, queue depth, CI status
 
-# PRIORITY 1: Fix D-034 (OOM) — most bang-for-buck path per ADR-056:
-#   Fix (a): downscale annotation video to 720p before H.264 encode
-#   Fix (c): free landmarks_per_frame after rep detection, before annotation
-#   Both changes are in backend/app/cv/artifact_generation.py + analysis_worker.py
-#   Combined fix should keep peak memory ~1.5 GB for any 1080p clip
-#   Branch: fix/annotation-memory-budget
-#   Run full prod-watch with atharva-bench-no-weight.mov (full 22.8s) after fix
+# PRIORITY 1 — Start Phase 3 Batch 2. Activate spelix-langgraph-engineer.
+#
+# Read order:
+#   1. docs/SRS.md § FR-BRAIN-06 (distillation StateGraph) +
+#      FR-BRAIN-17 (lifecycle) + FR-BRAIN-14 (CoVe, Should)
+#   2. decisions.md: ADR-BRAIN-06 (LangGraph StateGraph choice),
+#      ADR-BRAIN-07 (standalone distillation graph, async, eval-gated)
+#   3. backend/app/agents/  (Phase 3 Batch 1 lives here — mode=deterministic
+#      graph + 10 composable tools, shipped via PR #52)
+#
+# Plan, don't implement yet:
+#   /plan "Phase 3 Batch 2 — distillation StateGraph + knowledge lifecycle"
+#
+# Scope (per STRATEGY.md Days 13-16, now pulled forward to Day 6 buffer):
+#   - P3-004: StateGraph nodes extract_insights → validate_quality →
+#     format_entry → store_entry with gate `overall >= 0.85 AND
+#     correctness >= 0.8`. Runs async in its own worker task,
+#     never blocks coaching.
+#   - P3-005: cosine dedup against existing `coach_brain` entries;
+#     >0.92 NOOP / 0.75-0.92 UPDATE `confirmation_count` / <0.75 ADD
+#     candidate. Contradiction flag when semantic sim high but
+#     opposing directionality.
+#   - FR-BRAIN-14 (Should): CoVe verification — after distillation
+#     produces a candidate, generate verification questions against
+#     `papers_rag`, answer them, flag any claim the corpus doesn't
+#     support. Cite ACL 2024 Dhuliawala et al.
+#
+# TDD gates:
+#   - Backend: pytest coverage on new graph nodes, including the
+#     eval-gate failure path (candidate rejected when overall < 0.85).
+#   - Integration: one test that runs the full graph end-to-end on a
+#     synthetic coaching output fixture, asserts an entry lands in
+#     `coach_brain_candidates` (NOT `coach_brain` — expert approval
+#     promotes in Batch 3).
+#
+# DO NOT start Batch 3 (review queue + reasoning sidebar) in this
+# session. Keep the PR surface tight; ship Batch 2 green first.
 
-# PRIORITY 2: Fix D-032 (quality gate) — investigate 3 options per ADR-054:
-#   (a) all-33-landmark bbox; (b) presence instead of visibility; (c) per-exercise thresholds
-#   Run local MediaPipe diagnostics on atharva-{squat,bench,deadlift}.mov
-#   Branch: fix/quality-gate-framing
-#   Regression tests must cover: well-framed no-plate, well-framed with plates, lifter out of frame
+# PRIORITY 2 (backfill only if Batch 2 blocks on something external):
+#   - D-028 Playwright E2E verification on the next real prod analysis
+#     (see §4 above).
+#   - Kin expert onboarding call — schedule a window this week.
 
-# PRIORITY 3 (if D-034 + D-032 close quickly): Pull Batch 2 forward
-#   P3-004: Distillation StateGraph (FR-BRAIN-06)
-#   P3-005: Knowledge lifecycle (FR-BRAIN-17)
-#   Activate spelix-langgraph-engineer
-
-# Commit the uncommitted D-034 + ADR-056 docs (currently only on working tree)
+# ENVIRONMENT NOTES:
+#   - Local main is up to date with origin/main at b130ccb.
+#   - Fresh E2E test account still usable (burns less of the 10/day
+#     rate limit on the primary account):
+#     email: atharva6905+e2e-d035@gmail.com
+#     password: SpelixE2E-D035-2026!
+#   - streaq process_analysis timeout = 900s (post-D-035 close).
+#   - Phase 3 feature flag: already flipped ON in prod since session 32.
 ```
 
+## 7. Session timing
+
+- 21:30 UTC (2026-04-16): session opened with a read of handoff/backlog/decisions/STRATEGY; confirmed D-035 follow-up already shipped last session
+- 21:34-21:40 UTC: D-028 fix via TDD — failing test first, intentional-unsubscribe ref added, three test cases green
+- 21:42 UTC: commit `cdf786d`, pushed, PR #75 opened
+- 21:47 UTC: CI green (6/6), PR #75 merged as `b130ccb` via merge commit
+- 21:48 UTC: "Deploy to Production" succeeded in 31s; droplet HEAD verified at `b130ccb`, containers healthy
+- 21:50 UTC: confirmed D-028 backlog row flipped to `done`; confirmed D-035 follow-up from last session still in place
+- 21:55 UTC: handoff written
+
 ---
-
-# Session 32 Handoff → Session 33: L2 Sprint Day 5 — Phase 3 Batch 1 (LangGraph agent) live on prod
-
-**Context refresh:** Session 32 pulled Phase 3 Batch 1 forward into the Day 5-9 buffer (STRATEGY v3 originally scheduled Day 10-13). All three MUST requirements — FR-AICP-18 (composable tools + deterministic StateGraph), FR-AICP-19 (adaptive tool-calling), FR-AICP-20 (LangSmith trace + `agent_trace_json`) — merged via PR #52 and verified live on prod with the feature flag flipped ON.
