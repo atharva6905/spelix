@@ -582,3 +582,35 @@ Use the buffer to pull Phase 3 Batch 1 (P3-001/002/003) forward from the schedul
 **Context**: First CI run on PR #52 produced ~25 `reportTypedDictNotRequiredAccess` errors because `AgentState` was declared `total=False`. Every `state["analysis_id"]` read in `backend/app/agents/tools.py` was flagged as a potential `KeyError` under pyright strict mode, even though `make_initial_state` always populates every field before the graph runs.
 **Decision**: Change `backend/app/agents/state.py::AgentState` from `TypedDict(total=False)` to default `total=True`. All keys — `analysis_id`, `user_id`, `exercise_type`, `exercise_variant`, `confidence_score`, `mode`, `body_stats`, `keyframe_analysis_text`, `rep_metrics`, `papers_contexts`, `brain_contexts`, `retrieval_source`, `flagged_deviations`, `user_history_summary`, `coaching_output`, `cove_verified`, `eval_scores`, `degraded_mode`, `trace`, `messages` — are required. `make_initial_state` is the sole entry point and sets every field with safe defaults before `graph.ainvoke`.
 **Consequences**: Pyright accepts `state["key"]` reads without narrowing. Node return values remain plain `dict[str, Any]` partials — LangGraph merges them shallowly into the typed running state, so partial updates still work. Future agent-graph state classes in Spelix (e.g., the Phase 3 Batch 2 distillation graph) MUST follow this pattern: `total=True` on the state, single `make_initial_state(...)`-style constructor, node returns as untyped partials. Adding a new field to `AgentState` now requires adding a default in `make_initial_state` in the same commit or pyright fails across every tool.
+
+## ADR-DISTILL-01: Candidate storage in a new `coach_brain_candidates` table (Session 41)
+
+**Context**: Phase 3 distillation needs a place to write unvetted entries until expert review promotes them. Options: (a) add `status='candidate'` to `coach_brain_entries` CHECK constraint and rely on retrieval filters; (b) new `coach_brain_candidates` table with a separate lifecycle column.
+
+**Decision**: Option (b). The retrieval path (`DualCollectionOrchestrator`) filters on `status='active'`; extending the enum risks accidental leakage if any future predicate change drops that filter. A separate table also makes RLS admin-only trivially (migration 011 adds `FORCE ROW LEVEL SECURITY` + a single `service_role` policy), gives us a distinct primary-key space for Batch 3's `promoted_entry_id` pointer, and matches the session-40 handoff directive.
+
+**Consequences**: Two tables to maintain. Batch 3 promotion writes BOTH — `INSERT INTO coach_brain_entries (status='active', ...)` + `UPDATE coach_brain_candidates SET review_status='approved', promoted_entry_id=...`. FR-BRAIN-16 cascade now targets both tables' `source_analysis_ids` GIN indexes (see `consent_cascade.py` extension in Task 11b, commit `8a1c568`).
+
+## ADR-DISTILL-02: Invocation via streaq task, not `asyncio.create_task` (Session 41)
+
+**Context**: FR-BRAIN-06 says "Invoked via `asyncio.create_task` (MVP) or task queue job (production)". We are on streaq already; production-grade invocation is cheap.
+
+**Decision**: New `distill_analysis` streaq task in `app/workers/distillation_worker.py`, registered via a `@worker.task(timeout=300)` wrapper in `streaq_worker.py`, enqueued from the tail of `process_analysis` (both coaching paths — graph and imperative) via `_maybe_enqueue_distillation` gated on `SPELIX_DISTILLATION_ENABLED=1 AND eval_scores.overall >= 0.6`. `asyncio.create_task` loses retries, isolation, and heartbeat visibility; streaq gives all three with zero extra infra.
+
+**Consequences**: Distillation queues up behind subsequent analyses (streaq `concurrency=1`). Acceptable at L2 beta volume (<10 analyses/day). Enqueue errors are SWALLOWED as warnings — the parent analysis must always finish successfully for the user. If p95 coaching latency regresses, split to a distillation-specific queue in a follow-up.
+
+## ADR-DISTILL-03: Slim `BrainCoveService` for single-claim verification (Session 41)
+
+**Context**: FR-BRAIN-14 requires CoVe against `papers_rag` before every Coach Brain promotion. The existing `CoveVerificationService` (P2-014) extracts claims from a full `CoachingOutput`. Distillation candidates are already atomic coaching cues.
+
+**Decision**: Introduce `app/distillation/cove_brain.py::BrainCoveService.verify_claim(claim: str, contexts: list[RetrievedContext])` that skips claim-extraction and generates exactly one verification question per candidate. Uses Haiku 4.5 (same model as the coaching-path service). The coaching-path `CoveVerificationService` remains untouched.
+
+**Consequences**: Two CoVe services in the codebase. Acceptable — they have different inputs. Consolidation deferred until one service sees zero traffic or prompt styles drift far enough to justify a common abstraction.
+
+## ADR-DISTILL-04: `Chunk` added alongside `ChunkPayload` in `app/schemas/rag.py` (Session 41)
+
+**Context**: The Phase 3 distillation pipeline (BrainCoveService, its tests, and the graph integration tests) needs a lightweight `RetrievedContext.chunk` that carries only `{id, document_id, text, title, year, collection}`. `ChunkPayload` requires ~10 additional fields (`paper_id`, `chunk_index`, `section`, `token_count`, `quality_tier`, `authors`, `doi`) that distillation does not populate.
+
+**Decision**: Add a second Pydantic model `Chunk` to `app/schemas/rag.py` and widen `RetrievedContext.chunk: ChunkPayload | Chunk`. All 22 existing files that read `.chunk.*` use only the common fields (`.title`, `.year`, `.text`, `.id`), so the union widening is safe — no consumer breakage.
+
+**Consequences**: Two chunk shapes coexist. Retrieval-path code continues to produce `ChunkPayload`; distillation test stubs produce `Chunk`. If a future consumer needs `ChunkPayload`-only fields (`authors`, `doi`, `quality_tier`), it must narrow with `isinstance(ctx.chunk, ChunkPayload)` before access.
