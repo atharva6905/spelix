@@ -250,6 +250,46 @@ async def test_dense_search_parses_results_into_retrieved_context() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 4b — coach_brain payloads use 'content' field, not 'text'
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dense_search_falls_back_to_payload_content_for_coach_brain() -> None:
+    """coach_brain payloads carry the body under ``content``, not ``text``
+    (matches seed_coach_brain.py + ingestion.py). Without this fallback,
+    dense_search returns empty ``chunk.text`` strings, which Cohere Rerank
+    rejects as ``invalid request: list of documents must not contain only
+    empty strings``. Regression guard from prod 2026-04-17.
+    """
+    from app.services.retrieval import RetrievalService
+
+    payload = {
+        "id": "c" * 64,
+        # No "text" key — coach_brain seeds use "content"
+        "content": "Drive your knees out at the bottom of the squat.",
+        "exercise": "squat",
+        "phase": "bottom",
+        "entry_type": "cue",
+        "status": "seed",
+        "confirmation_count": 1,
+        "trigger_tags": ["valgus", "knee_drive"],
+    }
+    point = _make_qdrant_scored_point(score=0.91, payload=payload)
+    qdrant_client = _make_qdrant_client(_make_qdrant_result([point]))
+    cohere_client = _make_cohere_client()
+
+    service = RetrievalService(cohere_client=cohere_client, qdrant_client=qdrant_client)
+    results = await service.dense_search("knee valgus", collection="coach_brain")
+
+    assert len(results) == 1
+    assert results[0].chunk.text == "Drive your knees out at the bottom of the squat.", (
+        f"chunk.text must fall back to payload['content'] when 'text' is absent; "
+        f"got {results[0].chunk.text!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Test 5 — empty Qdrant result returns empty list
 # ---------------------------------------------------------------------------
 
