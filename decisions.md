@@ -727,3 +727,26 @@ The spelix-auditor (session 43) flagged three surface-coverage gaps against FR-A
 
 **Related:** FR-RESL-07, NFR-USAB-05, ADR-BRAIN-REVIEW-01 (sibling in P3-006), FR-AICP-18 (deterministic graph shape).
 
+## ADR-REPDET-01: Replace fixed-threshold rep detection state machine with peak/valley extraction (Session 45, Planned)
+
+**Context:** Session 44 P3-007 E2E upload (`cea2312b-…`, bodyweight bench, camera on lifter's right side) returned **0 reps** despite the video containing ~3 clean rep cycles. Root cause investigation via `systematic-debugging` skill (Phase 1 — evidence-gathering only):
+- MediaPipe pose extraction succeeded on 593/593 frames.
+- Prod uses `_BENCH_ELBOW_L = 14` (despite the `_L` suffix, this is MediaPipe's `right_elbow` = subject's right = visible side in this video). Visibility on that landmark: mean 0.935, 593/593 frames > 0.5. Signal was clean.
+- Right-side elbow angle peaked at **152.97°**, never crossing the prod STANDING threshold of 160° (with 5° hysteresis, effectively 155° going down). Signal clearly shows 3 rep cycles with minima at ~t=5.8s (38°) and ~t=9.8s (50°) and maxima at ~t=2.0s (152°) and ~t=7.5s (143°).
+- State machine (`backend/app/cv/rep_detection.py::detect_reps`) never entered STANDING state → never transitioned → 0 reps emitted.
+- Partial-lockout lifts (bodyweight, light-load bench, RDL, any beginner pressing) silently fail this way. The failure is silent: quality gates pass, pose extraction succeeds, state machine just stays in the initial state and `rep_metrics` is empty.
+
+A second degenerate case compounded: with `rep_metrics=[]`, downstream scoring produced **Technique 10.0 / Control 10.0** (defaulting to max on empty input) alongside `form_score_overall=7.04` while the UI showed Confidence "Very Low / Unable to score reliably — please re-record". The contradiction (max per-dimension but Very Low confidence) is a trust-violating UX bug.
+
+**Decision:** In session 45, replace the absolute-threshold state machine in `detect_reps` with a **peak/valley extraction algorithm** (`scipy.signal.find_peaks` on the smoothed angle series + its negation, filtered by prominence and min-distance). Tuning knobs become **signal-relative** (prominence in degrees, min-distance in seconds) rather than exercise-absolute (160°/90°). Applies to all three exercises — squat, bench, deadlift — via the same function; per-exercise tuning becomes a `prominence_deg` parameter rather than hard-coded standing/depth thresholds. Plan specified in new backlog items D-040 (rep detection rework) and D-041 (degenerate-input scoring fix). Both land in one PR next session.
+
+**Consequences:**
+- **Unlocks** partial-lockout detection for real user videos: bodyweight benches, fatigued final reps, parallel-only squats, RDLs that don't reach full hip extension. These fail the current state machine silently.
+- **Preserves** the `DetectedRep` dataclass, per-rep metric extraction (`_bench_metrics` / `_squat_metrics` / `_dl_metrics`), the Tier 1–5 confidence aggregation, and artifact-generation boundaries — all consume `(start_frame, end_frame, angle_series)` and are agnostic to how reps are found.
+- **Tuning risk:** `prominence_deg=20` is an initial guess. Too low → noise creates phantom reps; too high → low-ROM real reps disappear. First test pass must audit `backend/tests/unit/test_rep_detection.py` fixtures + hand-count reps on the in-repo fixture library (`e2e/fixtures/atharva-bench-*.mov/mp4`, `atharva-squat.mov`, `atharva-deadlift.mov`) to set defaults. Per-exercise `prominence_deg` may be needed.
+- **Breaks tests** that assert specific rep counts on fixtures where the old state machine under-counted — those tests were encoding the bug, not the spec. Fix tests to reflect the true rep count in the fixture.
+- **Independent of D-041 (degenerate scoring fix):** even after D-040 ships and rep counts go from 0 to N>0, the degenerate 10.0/10.0-on-empty-input path still exists for truly poseless videos or Very-Low-confidence analyses. D-041 (separate follow-up) changes ScoreComponent implementations to return `None` / "Not available" on empty input instead of defaulting to 10.0 — avoids the "Very Low confidence + 10.0 Technique" contradiction surfaced on the P3-007 E2E analysis.
+- **Does not change** the SRS-specified thresholds for form-scoring evaluation (`FR-SCOR-*` thresholds for lockout quality, depth, etc.). Those are downstream of rep detection and still consume the detected boundaries.
+
+**Related:** FR-CVPL-15, FR-REPM-01, FR-REPM-05 (rep detection spec), FR-SCOR-02 / FR-SCOR-04 (degenerate scoring path for D-041), `backend/app/cv/rep_detection.py`, `backend/app/cv/scoring.py`. Supersedes the per-exercise threshold dict in `rep_detection.py::_STANDING_THRESHOLD` and `_DEPTH_THRESHOLD` once D-040 ships.
+
