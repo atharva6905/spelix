@@ -153,19 +153,24 @@ class QdrantClientWrapper:
         """Idempotently create both Qdrant collections if they don't exist.
 
         Safe to call multiple times — a no-op if both collections already
-        exist.  This is the entrypoint for the one-shot provisioning script
+        exist. This is the entrypoint for the one-shot provisioning script
         and the startup path once Phase 2 worker is wired.
 
         Collections created:
-        - ``papers_rag``: 1024-dim cosine + BM25 sparse (ADR-RAG-03, ADR-BRAIN-03)
+        - ``papers_rag``: 1024-dim cosine + BM25 sparse + keyword index on
+          ``exercise`` (ADR-RAG-03, ADR-BRAIN-03, FR-AICP-15 retrieval filter)
         - ``coach_brain``: same vector config + keyword indexes on
-          ``exercise`` and ``status`` (ADR-BRAIN-01)
+          ``exercise`` and ``status`` (ADR-BRAIN-01, FR-BRAIN-04)
         """
-        await self._ensure_collection(COLLECTION_PAPERS_RAG, add_brain_indexes=False)
-        await self._ensure_collection(COLLECTION_COACH_BRAIN, add_brain_indexes=True)
+        await self._ensure_collection(
+            COLLECTION_PAPERS_RAG, payload_index_fields=("exercise",)
+        )
+        await self._ensure_collection(
+            COLLECTION_COACH_BRAIN, payload_index_fields=("exercise", "status")
+        )
 
     async def _ensure_collection(
-        self, name: str, *, add_brain_indexes: bool
+        self, name: str, *, payload_index_fields: tuple[str, ...]
     ) -> None:
         exists = await self._client.collection_exists(collection_name=name)
         if exists:
@@ -190,18 +195,20 @@ class QdrantClientWrapper:
 
         # Always ensure payload indexes exist — Qdrant ignores duplicate index
         # creation, so this is safe to run on existing collections. This also
-        # recovers from the case where a collection was created without indexes
-        # (e.g., by a previous version of this code).
-        if add_brain_indexes:
-            await self._create_brain_indexes(name)
+        # recovers from collections created by a previous version of this code
+        # that didn't provision the needed indexes (prod papers_rag pre-fix).
+        if payload_index_fields:
+            await self._ensure_payload_indexes(name, payload_index_fields)
 
-    async def _create_brain_indexes(self, collection_name: str) -> None:
-        """Add keyword payload indexes for coach_brain query filters.
+    async def _ensure_payload_indexes(
+        self, collection_name: str, fields: tuple[str, ...]
+    ) -> None:
+        """Add keyword payload indexes for query filters on a collection.
 
         Idempotent: per-field try/except swallows duplicate-index errors so
         this can safely be re-run against existing collections.
         """
-        for field in ("exercise", "status"):
+        for field in fields:
             try:
                 await self._client.create_payload_index(
                     collection_name=collection_name,
@@ -214,9 +221,6 @@ class QdrantClientWrapper:
                     field,
                 )
             except Exception as exc:
-                # Qdrant returns 4xx when the index already exists or the
-                # field_name conflicts. Log and continue — the index we need
-                # exists, which is the desired end state.
                 logger.info(
                     "ensure_collections: index on %r.%s already present or unchanged (%s)",
                     collection_name,

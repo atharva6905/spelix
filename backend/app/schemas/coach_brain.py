@@ -207,7 +207,7 @@ class CoachBrainPayload(BaseModel):
     ``uuid.UUID`` objects.
 
     The ``exercise`` and ``status`` fields have Qdrant keyword payload indexes
-    (created in ``QdrantClientWrapper._create_brain_indexes``).  The Literal
+    (created in ``QdrantClientWrapper._ensure_payload_indexes``).  The Literal
     constraints here mirror those indexes so validation catches accidental
     invalid values before a point is upserted.
 
