@@ -1,15 +1,15 @@
 # memory.md — Agent Persistent State
 
-phase: 2
-task: phase-2-planning-kickoff
-status: ready
-last_modified: [.claude/commands/adr.md, .claude/commands/backlog.md, CLAUDE.md, .claude/handoff.md, decisions.md]
+phase: 3
+task: phase-3-batch-2-distillation-fully-verified-on-prod
+status: done
+last_modified: [.claude/handoff.md, backend/app/distillation/validate.py, backend/app/workers/analysis_worker.py, backend/app/services/retrieval.py, backend/app/services/dual_collection.py, backend/app/agents/tools.py, backend/app/services/qdrant.py, backend/scripts/seed_coach_brain.py, backend/scripts/oneoff/sanitize_seed_samd_content.py, backend/scripts/oneoff/create_papers_rag_exercise_index.py, decisions.md, backend/CLAUDE.md, backlog.md]
 failing_tests: []
-blockers: [test_fixture_quality_below_gate_thresholds]
+blockers: []
 srs_deviations: []
-next_action: "Start Phase 2 planning in a new session: re-read SRS Phase 2 Must filter (rg pattern in CLAUDE.md general rules), seed backlog.md Phase 2 section, activate spelix-rag-engineer + spelix-corpus-curator agents, run /phase transition gate, then /plan P2-001 (Migration 004 — rag_documents + expert_annotations). See .claude/handoff.md for full kickoff sequence."
-session_count: 13
-last_session: 2026-04-11
+next_action: "Phase 3 Batch 3 — P3-006 expert review queue UI. 11 real coach_brain_candidates rows pending review on prod. Read order: SRS FR-ADMN-12 + FR-BRAIN-07, backend/app/models/coach_brain_candidate.py, decisions.md ADR-DISTILL-01. Run /plan 'Phase 3 Batch 3 — review queue + reasoning sidebar'. See .claude/handoff.md Session 42 §6 for full kickoff."
+session_count: 42
+last_session: 2026-04-17
 
 ## decisions_since_plan
 - Direct SSH droplet debugging via spelix-droplet alias (~/.ssh/config + ~/.ssh/claude_spelix). Codified in CLAUDE.md "Droplet Debugging (SSH)" section.
