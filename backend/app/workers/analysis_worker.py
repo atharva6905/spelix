@@ -603,6 +603,11 @@ async def _run_coaching_imperative(
     )
     await coaching_repo.create(coaching_result)
 
+    await _maybe_enqueue_distillation(
+        analysis_id=analysis.id,
+        eval_scores=analysis.eval_scores or {},
+    )
+
     return coaching_output, rep_metrics_dicts, body_stats
 
 
@@ -806,6 +811,11 @@ async def _run_coaching_graph(
             analysis.flagged_for_review = True
         await repo.update(analysis)
 
+    await _maybe_enqueue_distillation(
+        analysis_id=analysis.id,
+        eval_scores=analysis.eval_scores or {},
+    )
+
     return coaching_output, rep_metrics_dicts, body_stats
 
 
@@ -843,6 +853,33 @@ async def _dispatch_coaching(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _maybe_enqueue_distillation(
+    *,
+    analysis_id: uuid.UUID,
+    eval_scores: dict[str, Any],
+) -> None:
+    """Phase 3 Batch 2: enqueue the distillation pipeline when gated.
+
+    Gate: SPELIX_DISTILLATION_ENABLED env=1 AND eval_scores.overall >= 0.6.
+    Failure is swallowed as a warning — distillation MUST NEVER fail the
+    user-facing analysis.
+    """
+    flag = os.environ.get("SPELIX_DISTILLATION_ENABLED", "0").lower()
+    if flag not in ("1", "true", "yes"):
+        return
+    overall = (eval_scores or {}).get("overall")
+    if overall is None or overall < 0.6:
+        return
+    try:
+        # Wrapper lives alongside other task wrappers in streaq_worker.py;
+        # body lives in distillation_worker.py (same pattern as process_analysis).
+        from app.workers.streaq_worker import distill_analysis as _task
+
+        await _task.enqueue(analysis_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("distillation enqueue failed (%s: %s)", type(exc).__name__, exc)
 
 
 async def _write_heartbeat(redis: Any) -> None:
