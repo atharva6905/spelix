@@ -13,15 +13,28 @@ Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
 ## Completed — Coach Brain + Papers Retrieval Unblock (2026-04-17, session 42)
 
-Two Phase 2 bugs silently prevented `analyses.eval_scores` from populating on prod, which blocked the Phase 3 Batch 2 distillation gate (`eval_scores.overall >= 0.6`) so no `coach_brain_candidates` rows ever landed. Discovered during Priority 1 flag-flip verification when a real bench upload completed with `eval_scores=NULL`, `degraded_mode=True`, `retrieval_source='papers_only_fallback'`, 0 retrieved sources.
+Five bugs silently inert-ed the entire retrieval-eval-distillation chain since Phase 2 shipped. Discovered during Priority 1 flag-flip verification when a real bench upload completed with `eval_scores=NULL`. Five PRs (#78–#81) merged, all 5 fixed, end-to-end verification produced 11 real `coach_brain_candidates` rows for analysis `73f9a137-c528-4f11-b833-48c638b5d5fc`.
 
-| ID | Title | Commits |
-|---|---|---|
-| FIX-RETRIEVAL-01 | `papers_rag` Qdrant missing `exercise` payload index. `ensure_collections` refactored — `add_brain_indexes: bool` → `payload_index_fields: tuple[str, ...]`, `papers_rag` gets `('exercise',)`, `coach_brain` gets `('exercise','status')`. One-shot script backfills the prod collection's index over the 39 pre-existing points. FR-AICP-15, ADR-RAG-03, ADR-BRAIN-03. | `691c28d` (RU-2 test) + `29fe2de` (RU-3 fix) + `e36737e` (review polish) + `328d4f1` (RU-4 script) |
-| FIX-RETRIEVAL-02 | `retrieve_coach_brain` (agent path) AND `DualCollectionOrchestrator.retrieve` (imperative path) both hardcoded `status='active'` filter, excluding all 24 seed entries. Both changed to `MatchAny(['active','seed'])` per FR-BRAIN-05 cold-start intent. Seeds now first-class retrieval targets alongside promoted `active` entries on BOTH coaching paths. FR-BRAIN-04, FR-BRAIN-05, ADR-BRAIN-08. | `3985134` (agent-path test) + `f52aab2` (agent-path fix) + imperative-path fix in dual_collection.py + test update |
-| FIX-RETRIEVAL-03 | Two bench seed entries contained prohibited SaMD language ("rotator cuff impingement risk", "risking sternum or rib injury"). Surfaced by FIX-RETRIEVAL-02 (seeds now reach LLM). Sanitized in `scripts/seed_coach_brain.py` for future ingests; `scripts/oneoff/sanitize_seed_samd_content.py` repairs already-polluted prod Postgres + Qdrant payloads. |  same commit as retrieval fixes |
+| ID | Title | Status | PR | Commits |
+|---|---|---|---|---|
+| FIX-RETRIEVAL-01 | `papers_rag` Qdrant missing `exercise` payload index. `ensure_collections` refactored — `add_brain_indexes: bool` → `payload_index_fields: tuple[str, ...]`, papers_rag gets `('exercise',)`, coach_brain gets `('exercise','status')`. One-shot script backfilled the prod collection's index over the 39 pre-existing points. FR-AICP-15, ADR-RAG-03, ADR-BRAIN-03. | done | #78 | `691c28d` (test) + `29fe2de` (fix) + `e36737e` (review polish) + `328d4f1` (one-shot) |
+| FIX-RETRIEVAL-02 | `retrieve_coach_brain` (agent path) AND `DualCollectionOrchestrator.retrieve` (imperative path) both hardcoded `status='active'` filter, excluding all 24 seed entries. Both changed to `MatchAny(['active','seed'])` per FR-BRAIN-05 cold-start intent. FR-BRAIN-04, FR-BRAIN-05, ADR-BRAIN-08. | done | #78 | `3985134` (test) + `f52aab2` (agent fix) + `d9c1240` (imperative fix + test update) |
+| FIX-RETRIEVAL-03 | Two bench seed entries contained prohibited SaMD language ("rotator cuff impingement risk", "risking sternum or rib injury"). Surfaced by FIX-RETRIEVAL-02 (seeds now reach LLM). Sanitized in `scripts/seed_coach_brain.py` for future ingests; `scripts/oneoff/sanitize_seed_samd_content.py` repairs already-polluted prod Postgres + Qdrant payloads (run successfully on 2026-04-17). | done | #78 | `d9c1240` |
+| FIX-RETRIEVAL-04 | `retrieval.py:237` (`dense_search` chunk parser) hardcoded `payload['text']` but coach_brain payloads use `content`. Cohere Rerank returned 400 "documents must not contain only empty strings" on every brain call. Fix: `text=payload.get("text") or payload.get("content","")` + regression test for the coach_brain payload shape. | done | #79 | `d971034` |
+| FIX-RETRIEVAL-05 | `_maybe_enqueue_distillation` checked `eval_scores.overall` (Phase 4 RAGAS aggregate, not yet shipped per ADR-RAG-04). Phase 2 only populates `faithfulness`. Gate silently rejected every analysis. Fix: read `overall` first, fall back to `faithfulness` with the same 0.6 floor. ADR-PHASE2-EVAL-FALLBACK. | done | #80 | `95e060a` |
+| FIX-RETRIEVAL-06 | `validate_quality` node at `validate.py:29` had the same `overall`-only check. With FIX-RETRIEVAL-05 the gate fired, but the distillation graph then returned `validation_decision=reject`. Same fallback applied; node now returns `review` (not `pass` — `correctness` is still missing) so candidates flow through to lifecycle/CoVe/store. ADR-PHASE2-EVAL-FALLBACK. | done | #81 | `dc35d8c` |
 
-Backend test count: 1641 passing (was 1639), ruff clean, pyright `app/` 0 errors. See ADR-BRAIN-08 + backend/CLAUDE.md "Coach Brain retrieval — seed is retrievable" section.
+**Final E2E proof:** Analysis `73f9a137-c528-4f11-b833-48c638b5d5fc` (T_SUBMIT 10:02:32Z, completed t+217s): `eval_scores.faithfulness=0.82` → gate fired → `validate_quality=review` → distillation graph wrote **11 candidate rows** with `lifecycle_decision=ADD`, `review_status=pending`. Sample contents: real bench coaching cues ("Tuck your elbows and bend the bar outward...", "Set elbows at 45–75°..."). Phase 3 Batch 3 (P3-006 review queue) is unblocked.
+
+Backend test count: 1641 → 1649 passing (+8 regression guards across 4 PRs), 25 skipped, 0 failing. Ruff clean, pyright `app/` 0 errors. See ADR-BRAIN-08 (seed retrievability) + ADR-PHASE2-EVAL-FALLBACK (faithfulness fallback) + backend/CLAUDE.md "Coach Brain retrieval — seed is retrievable" section.
+
+### Discovered backlog items (post-L2 follow-ups)
+
+| ID | Title | Status | Size | SRS / ADR |
+|---|---|---|---|---|
+| M-04 | Re-embed 24 seed Coach Brain points with FR-BRAIN-03 contextualized prefix (`exercise:{exercise} phase:{phase} type:{entry_type}\n{content}`). Current seeds were embedded with raw content only — explains why `retrieval_source=papers_only_fallback` even with seeds eligible. One-shot script + Cohere re-embed. | pending | M | FR-BRAIN-03, ADR-BRAIN-02 |
+| M-05 | Bump `BrainCoveService` Haiku 4.5 `max_tokens` from 1024 to ≥2048 OR shorten verification prompt. All 11 candidates from session 42 carry `cove_verified=false` because the verification call hits max_tokens × 3 retries. Not blocking distillation, but Batch 3 reviewers will see "evaluation_failed" CoVe banners on every candidate until fixed. | pending | S | FR-BRAIN-14, ADR-DISTILL-03 |
+| M-06 | When Phase 4 RAGAS aggregate ships `eval_scores.overall` + `eval_scores.correctness`, the Phase 2 faithfulness fallbacks in `_maybe_enqueue_distillation` and `validate_quality` become inert (correct precedence). Add a check at Phase 4 kickoff that overall takes precedence and document the deprecation path for the fallbacks. | pending | S | FR-AICP-08, ADR-PHASE2-EVAL-FALLBACK |
 
 ## Completed (Phase 0 Core Build)
 
