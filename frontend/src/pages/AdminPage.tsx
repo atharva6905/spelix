@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { Navigate } from "react-router";
+import { Link, Navigate } from "react-router";
 import { supabase } from "@/lib/supabase";
 import {
   listAdminUsers,
@@ -888,7 +888,15 @@ function CoachBrainPanel() {
 
   return (
     <section className="rounded-lg bg-white p-6 shadow">
-      <h2 className="mb-4 text-lg font-semibold text-gray-900">Coach Brain Management</h2>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900">Coach Brain Management</h2>
+        <Link
+          to="/admin/coach-brain/candidates"
+          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          Review candidates &rarr;
+        </Link>
+      </div>
 
       <div className="mb-4 flex gap-3">
         <select value={exerciseFilter} onChange={(e) => { setExerciseFilter(e.target.value); setOffset(0); }} className="rounded border px-2 py-1 text-sm">

@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router";
 import RequireAuth from "@/components/RequireAuth";
 import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AdminCoachBrainCandidatesPage from "@/pages/AdminCoachBrainCandidatesPage";
 import AdminPage from "@/pages/AdminPage";
 import AnalysisStatusPage from "@/pages/AnalysisStatusPage";
 import BetaTermsPage from "@/pages/BetaTermsPage";
@@ -53,6 +54,10 @@ const router = createBrowserRouter([
       { path: "/analysis/:id", element: <AnalysisStatusPage /> },
       { path: "/results/:id", element: <ResultsPage /> },
       { path: "/admin", element: <AdminPage /> },
+      {
+        path: "/admin/coach-brain/candidates",
+        element: <AdminCoachBrainCandidatesPage />,
+      },
       { path: "/expert", element: <ExpertPortalPage /> },
       { path: "/expert/analyses/:id", element: <ExpertAnalysisDetailPage /> },
       { path: "/expert/papers/upload", element: <ExpertPaperUploadPage /> },
