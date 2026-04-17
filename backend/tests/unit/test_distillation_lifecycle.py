@@ -86,6 +86,22 @@ async def test_lifecycle_update_when_cosine_in_075_092() -> None:
 
 
 @pytest.mark.asyncio
+async def test_lifecycle_update_at_noop_boundary_exact_092() -> None:
+    """FR-BRAIN-17 boundary — SRS says `>0.92` NOOP (strict). At exactly
+    0.92 the route must be UPDATE (increment confirmation_count), not
+    NOOP. Regression test for auditor C-01."""
+    nearest = uuid.uuid4()
+    state = _state_with_candidates([_stub_candidate()])
+    update = await lifecycle_decision(
+        state,
+        cohere_client=_mock_cohere([0.0] * 1024),
+        qdrant_client=_mock_qdrant(nearest, 0.92),
+        brain_embedding_svc=_mock_brain_embedding([0.0] * 1024),
+    )
+    assert update["decisions"][0].decision == "UPDATE"
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_add_when_cosine_below_075() -> None:
     nearest = uuid.uuid4()
     state = _state_with_candidates([_stub_candidate()])

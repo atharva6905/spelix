@@ -44,7 +44,7 @@ async def cascade_consent_withdrawal(ctx: dict, user_id: str) -> dict:
 
             if not analysis_ids:
                 logger.info("User %s has no analyses — cascade complete (no-op)", uid)
-                return {"removed": 0, "soft_deleted": 0}
+                return {"removed": 0, "soft_deleted": 0, "candidates_updated": 0}
 
             # Step 2: remove those IDs from coach_brain_entries
             repo = CoachBrainRepository(db)
@@ -81,6 +81,10 @@ async def cascade_consent_withdrawal(ctx: dict, user_id: str) -> dict:
                 deleted,
                 len(cand_rows),
             )
-            return {"removed": modified, "soft_deleted": deleted}
+            return {
+                "removed": modified,
+                "soft_deleted": deleted,
+                "candidates_updated": len(cand_rows),
+            }
     finally:
         await engine.dispose()

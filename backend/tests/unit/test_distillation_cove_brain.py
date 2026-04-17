@@ -93,7 +93,11 @@ async def test_verify_claim_llm_error_returns_safe_default() -> None:
         contexts=[_stub_context("something")],
     )
     assert result.verified is False
-    assert "boom" in result.explanation or "evaluation_failed" in result.explanation
+    # H-2: explanation must NOT embed the raw exception message (could leak
+    # URLs with API keys). Only type name + "evaluation_failed:" prefix.
+    assert result.explanation == "evaluation_failed: RuntimeError"
+    assert "boom" not in result.explanation
+    assert result.trace == [{"claim": "any claim", "error_type": "RuntimeError"}]
 
 
 # ---- cove_verify node tests ----

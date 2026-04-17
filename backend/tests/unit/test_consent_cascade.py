@@ -121,7 +121,7 @@ async def test_cascade_job_no_analyses(mock_engine_cls, mock_repo_cls):
 
         result = await cascade_consent_withdrawal({}, user_id)
 
-    assert result == {"removed": 0, "soft_deleted": 0}
+    assert result == {"removed": 0, "soft_deleted": 0, "candidates_updated": 0}
     mock_repo_cls.assert_not_called()
 
 
@@ -166,7 +166,7 @@ async def test_cascade_job_with_analyses(mock_engine_cls, mock_repo_cls):
 
         result = await cascade_consent_withdrawal({}, user_id)
 
-    assert result == {"removed": 3, "soft_deleted": 1}
+    assert result == {"removed": 3, "soft_deleted": 1, "candidates_updated": 0}
     mock_repo.remove_analysis_ids_for_user.assert_awaited_once_with(analysis_ids)
     mock_repo.soft_delete_empty_unconfirmed.assert_awaited_once()
     mock_session.commit.assert_awaited_once()
@@ -378,4 +378,4 @@ async def test_cascade_candidates_no_overlap(mock_engine_cls, mock_repo_cls):
 
         result = await cascade_consent_withdrawal({}, user_id)
 
-    assert result == {"removed": 0, "soft_deleted": 0}
+    assert result == {"removed": 0, "soft_deleted": 0, "candidates_updated": 0}

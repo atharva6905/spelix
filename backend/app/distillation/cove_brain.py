@@ -108,10 +108,15 @@ class BrainCoveService:
                 type(exc).__name__,
                 exc,
             )
+            # Security H-2: only the exception type name is persisted.
+            # Full exc text can contain request URLs with embedded API
+            # keys/auth tokens; the cove_explanation column surfaces in
+            # the admin review UI and must never leak secrets. Full
+            # details stay in the worker log above for debugging.
             return BrainCoveResult(
                 verified=False,
-                explanation=f"evaluation_failed: {type(exc).__name__}: {exc}",
-                trace=[{"claim": claim, "error": str(exc)}],
+                explanation=f"evaluation_failed: {type(exc).__name__}",
+                trace=[{"claim": claim, "error_type": type(exc).__name__}],
             )
 
         verified = answer_out.answer == "Yes"

@@ -99,7 +99,9 @@ async def lifecycle_decision(
         nearest_id = uuid.UUID(top.id) if isinstance(top.id, str) else top.id
         score = float(top.score)
 
-        if score >= _NOOP_THRESHOLD:
+        # FR-BRAIN-17: strict "> 0.92" for NOOP — a cosine of exactly 0.92
+        # must UPDATE (increment confirmation_count), not be silently skipped.
+        if score > _NOOP_THRESHOLD:
             label = "NOOP"
         elif score >= _UPDATE_FLOOR:
             label = "UPDATE"
