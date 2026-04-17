@@ -326,6 +326,12 @@ Every node emits a `NodeEvent` appended to `state['trace']`, serialized to `coac
 - The `state_box` shared-handle pattern in `build_adaptive_graph` is a concession for StructuredTool closures; it works because the graph is single-threaded. Do NOT run the adaptive graph in a multi-threaded executor.
 - Large trace fields get truncated by `serialize_trace_for_storage` before JSONB write. When adding new fields to the trace, consider whether they should live in the essential-fields whitelist (`node`, `duration_ms`, `error`, `started_at`, `output_keys`).
 
+## Coach Brain retrieval — seed is retrievable (FR-BRAIN-04 / FR-BRAIN-05)
+
+`retrieve_coach_brain` filters `status ∈ {'active', 'seed'}`, NOT `'active'` only. Seed entries are hand-curated, expert-validated kinesiology references ingested via FR-BRAIN-09 bulk ingest; they are first-class retrieval targets until explicit deprecation (`status='deprecated'`). The `active` state is produced by the Phase 3 Batch 3 expert review queue promoting distillation candidates. Filtering seeds out (earlier code at `agents/tools.py:131`) caused every analysis to silently degrade to `papers_only_fallback` with 0 sources, which in turn kept `analyses.eval_scores` NULL and blocked the distillation gate (`eval_scores.overall >= 0.6`). See ADR-BRAIN-08.
+
+Related: `papers_rag` Qdrant collection requires a keyword payload index on `exercise` for the retrieval filter to not raise 400 under strict mode. `ensure_collections()` in `app/services/qdrant.py` provisions this now for both collections via `payload_index_fields` per-collection tuples (`('exercise',)` for papers_rag; `('exercise','status')` for coach_brain). Pre-fix prod `papers_rag` had no index and was backfilled via `backend/scripts/oneoff/create_papers_rag_exercise_index.py`.
+
 ## Phase 3 Distillation Pipeline (FR-BRAIN-06/14/17)
 
 The distillation pipeline lives in `app/distillation/`. It is a SEPARATE

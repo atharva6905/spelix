@@ -11,6 +11,18 @@ and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
 Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
 Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
+## Completed — Coach Brain + Papers Retrieval Unblock (2026-04-17, session 42)
+
+Two Phase 2 bugs silently prevented `analyses.eval_scores` from populating on prod, which blocked the Phase 3 Batch 2 distillation gate (`eval_scores.overall >= 0.6`) so no `coach_brain_candidates` rows ever landed. Discovered during Priority 1 flag-flip verification when a real bench upload completed with `eval_scores=NULL`, `degraded_mode=True`, `retrieval_source='papers_only_fallback'`, 0 retrieved sources.
+
+| ID | Title | Commits |
+|---|---|---|
+| FIX-RETRIEVAL-01 | `papers_rag` Qdrant missing `exercise` payload index. `ensure_collections` refactored — `add_brain_indexes: bool` → `payload_index_fields: tuple[str, ...]`, `papers_rag` gets `('exercise',)`, `coach_brain` gets `('exercise','status')`. One-shot script backfills the prod collection's index over the 39 pre-existing points. FR-AICP-15, ADR-RAG-03, ADR-BRAIN-03. | `691c28d` (RU-2 test) + `29fe2de` (RU-3 fix) + `e36737e` (review polish) + `328d4f1` (RU-4 script) |
+| FIX-RETRIEVAL-02 | `retrieve_coach_brain` (agent path) AND `DualCollectionOrchestrator.retrieve` (imperative path) both hardcoded `status='active'` filter, excluding all 24 seed entries. Both changed to `MatchAny(['active','seed'])` per FR-BRAIN-05 cold-start intent. Seeds now first-class retrieval targets alongside promoted `active` entries on BOTH coaching paths. FR-BRAIN-04, FR-BRAIN-05, ADR-BRAIN-08. | `3985134` (agent-path test) + `f52aab2` (agent-path fix) + imperative-path fix in dual_collection.py + test update |
+| FIX-RETRIEVAL-03 | Two bench seed entries contained prohibited SaMD language ("rotator cuff impingement risk", "risking sternum or rib injury"). Surfaced by FIX-RETRIEVAL-02 (seeds now reach LLM). Sanitized in `scripts/seed_coach_brain.py` for future ingests; `scripts/oneoff/sanitize_seed_samd_content.py` repairs already-polluted prod Postgres + Qdrant payloads. |  same commit as retrieval fixes |
+
+Backend test count: 1641 passing (was 1639), ruff clean, pyright `app/` 0 errors. See ADR-BRAIN-08 + backend/CLAUDE.md "Coach Brain retrieval — seed is retrievable" section.
+
 ## Completed (Phase 0 Core Build)
 
 B-001–B-011, B-015–B-019, B-023–B-025, B-027–B-032, B-035–B-038, B-042 — all verified clean by audit.

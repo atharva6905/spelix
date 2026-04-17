@@ -250,6 +250,38 @@ class TestEnsureCollections:
             assert isinstance(bm25_params, SparseVectorParams)
             assert bm25_params.modifier == Modifier.IDF
 
+    @pytest.mark.asyncio
+    async def test_ensure_collections_creates_exercise_index_on_papers_rag(
+        self,
+    ) -> None:
+        """B1 regression: papers_rag must get a keyword payload index on `exercise`
+        so that retrieve_papers's exercise_filter does not raise 400 under Qdrant
+        strict mode (FR-AICP-15 / ADR-BRAIN-03).
+        """
+        from qdrant_client.http.models import PayloadSchemaType
+
+        from app.services.qdrant import COLLECTION_PAPERS_RAG
+
+        wrapper = self._make_wrapper()
+        wrapper._client.collection_exists = AsyncMock(return_value=False)
+        wrapper._client.create_collection = AsyncMock(return_value=True)
+        wrapper._client.create_payload_index = AsyncMock()
+
+        await wrapper.ensure_collections()
+
+        # Assert create_payload_index was called for papers_rag.exercise
+        index_calls = [
+            c
+            for c in wrapper._client.create_payload_index.await_args_list
+            if c.kwargs.get("collection_name") == COLLECTION_PAPERS_RAG
+            and c.kwargs.get("field_name") == "exercise"
+            and c.kwargs.get("field_schema") == PayloadSchemaType.KEYWORD
+        ]
+        assert len(index_calls) == 1, (
+            f"expected exactly one create_payload_index call for "
+            f"papers_rag.exercise, got {wrapper._client.create_payload_index.await_args_list}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # ping()

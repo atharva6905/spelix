@@ -150,10 +150,10 @@ SEED_ENTRIES: list[tuple[str, str, str, str, list[str]]] = [
         "descent",
         "correction",
         "Excessive elbow flare (elbows at 90° from torso) places the shoulder "
-        "in a vulnerable position and increases rotator cuff impingement risk. "
-        "Optimal elbow angle is 45–75° from the torso depending on grip width. "
-        "Cue 'tuck your elbows' and 'bend the bar' to engage the lats and "
-        "protect the shoulder joint.",
+        "in a mechanically disadvantaged position and reduces force transfer "
+        "through the kinetic chain. Optimal elbow angle is 45–75° from the "
+        "torso depending on grip width. Cue 'tuck your elbows' and 'bend the "
+        "bar' to engage the lats and maintain shoulder stability.",
         ["elbow_flare", "shoulder_impingement", "lat_engagement"],
     ),
     (
@@ -183,10 +183,11 @@ SEED_ENTRIES: list[tuple[str, str, str, str, list[str]]] = [
         "bottom",
         "correction",
         "Bouncing the bar off the chest uses elastic rebound to move the weight "
-        "through the sticking point, masking weakness and risking sternum or rib "
-        "injury. A controlled touch (bar contacts chest with zero downward "
-        "velocity) followed by a deliberate press develops true strength through "
-        "the bottom range. Pause reps at 1–2 seconds build this control.",
+        "through the sticking point, masking real strength deficits and reducing "
+        "control at the touch point. A controlled touch (bar contacts chest with "
+        "zero downward velocity) followed by a deliberate press develops true "
+        "strength through the bottom range. Pause reps at 1–2 seconds build this "
+        "control.",
         ["bounce", "chest_touch", "pause_bench", "control"],
     ),
     (
