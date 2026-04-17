@@ -14,6 +14,7 @@ import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
 import type { CoachingIssue, Citation, RepMetricDetail } from "@/api/analyses";
 import { parseWithCitations } from "@/components/CitationTooltip";
 import ChatPanel from "@/components/ChatPanel";
+import { AgentReasoningSidebar } from "@/components/AgentReasoningSidebar";
 import {
   getConfidenceCategory,
   type ConfidenceCategory,
@@ -557,6 +558,7 @@ function CoachingOutputSection({ structured }: CoachingOutputProps) {
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const { analysis, isLoading, error } = useAnalysisDetail(id ?? "");
+  const [isReasoningOpen, setIsReasoningOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -673,9 +675,36 @@ export default function ResultsPage() {
         {/* Coaching output (FR-RESL-03) */}
         {coachingData && (
           <div className="rounded-lg bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-gray-900">
-              Coaching Feedback
-            </h2>
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Coaching Feedback
+              </h2>
+              {(analysis.coaching_result?.agent_trace_json?.nodes_executed?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsReasoningOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                  data-testid="open-reasoning-sidebar"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.8}
+                    stroke="currentColor"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"
+                    />
+                  </svg>
+                  How AI Reasoned
+                </button>
+              )}
+            </div>
             <CoachingOutputSection
               structured={
                 coachingData as Parameters<typeof CoachingOutputSection>[0]["structured"]
@@ -683,6 +712,12 @@ export default function ResultsPage() {
             />
           </div>
         )}
+
+        <AgentReasoningSidebar
+          isOpen={isReasoningOpen}
+          trace={analysis.coaching_result?.agent_trace_json ?? null}
+          onClose={() => setIsReasoningOpen(false)}
+        />
 
         {/* Follow-up chat (FR-RESL-09, FR-AICP-17) */}
         {coachingData && <ChatPanel analysisId={analysis.id} />}
