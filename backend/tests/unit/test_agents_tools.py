@@ -147,6 +147,45 @@ async def test_retrieve_coach_brain_applies_status_active_filter():
 
 
 @pytest.mark.asyncio
+async def test_retrieve_coach_brain_includes_seed_in_status_filter() -> None:
+    """B2 regression (FR-BRAIN-05 cold-start): seed entries must be retrievable
+    until distillation + Batch 3 review produces `status='active'` entries.
+    The filter MUST match status ∈ {"active", "seed"} — not "active" only —
+    or the 24 seed entries never surface and every retrieval degrades to
+    papers_only_fallback with 0 sources.
+    """
+    from qdrant_client.http import models as qdrant_models
+
+    retrieval_svc = AsyncMock()
+    retrieval_svc.hybrid_search = AsyncMock(return_value=[])
+
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="bench",
+        exercise_variant="flat",
+        confidence_score=0.9,
+    )
+
+    await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    call_kwargs = retrieval_svc.hybrid_search.await_args.kwargs
+    filters = call_kwargs.get("additional_filters") or []
+    assert len(filters) == 1, f"expected exactly one status filter, got {filters}"
+
+    status_filter = filters[0]
+    assert isinstance(status_filter, qdrant_models.FieldCondition)
+    assert status_filter.key == "status"
+    match = status_filter.match
+    assert isinstance(match, qdrant_models.MatchAny), (
+        f"expected MatchAny for seed cold-start, got {type(match).__name__}: {match}"
+    )
+    assert set(match.any) == {"active", "seed"}, (
+        f"expected status filter to include both active and seed, got {match.any}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_retrieve_coach_brain_empty_result_cold_start():
     state = make_initial_state(
         analysis_id=uuid.uuid4(),
