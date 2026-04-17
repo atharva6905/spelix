@@ -443,10 +443,56 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
 | P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | done — `3bffdd9` (PR #82, session 43) |
-| P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
+| P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | done — `70d736c` (PR #83, session 44) |
 | D-037 | Surface top 2 similar existing approved entries on review card (FR-ADMN-12 completeness — current impl shows 1 via nearest_entry_id from candidate schema) | S | P3-006 | FR-ADMN-12 | open |
 | D-038 | Add `compensation` to coach_brain_candidates.entry_type CHECK constraint + biomechanics reviewer routing (UI banner already renders forward-compatibly) | S | — | FR-ADMN-12 | open |
 | D-039 | Re-run CoVe after admin content edit on approve (current impl carries original cove_verified to entry.extra_metadata; needs throttling to avoid Haiku max_tokens blowup) | M | M-05 | FR-BRAIN-14 | open |
+
+---
+
+## Completed — L2 Sprint Day 8 — Phase 3 Batch 3 P3-007 "How AI Reasoned" Sidebar (2026-04-17, session 44)
+
+Phase 3 Batch 3 P3-007 surfaces the `coaching_results.agent_trace_json` JSONB column — persisted since Phase 3 Batch 1 landed on prod (session 32) — through `GET /api/v1/analyses/{id}` and renders it as a right-side drawer on ResultsPage. FR-RESL-07 (Phase 3, Must) + NFR-USAB-05 (Must). The drawer uses `@xyflow/react@12.10.2` (React 19 compatible, MIT, attribution removable on free tier) to render `nodes_executed[]` as a clickable vertical chain with plain-English labels (no raw snake_case reaches users — enforced by three mapping functions + humanizer fallbacks: `labelForNode`, `labelForOutputKey`, `labelForRetrievalSource`). Clicking a node opens a detail pane with duration / produced AgentState keys (as plain-English chips) / error (if any). Summary header shows the retrieval source (plain English), CoVe verification status, faithfulness %, step count, and a degraded-mode banner when coaching ran without research backing. A11y: `<div role="dialog" aria-modal="true" aria-labelledby=…>`, keyboard focus moves to Close button on open, Escape + scrim click close (full focus trap deferred).
+
+Single PR #83, merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash) as `70d736c`. Post-merge Deploy to Production green in 37s (not manual SSH). Droplet HEAD verified = merge commit; containers healthy. E2E verification via Playwright MCP: admin account upload of the 10s bench fixture → pipeline-completed analysis → sidebar rendered from real agent_trace_json. A design-time ADR-REASONING-SIDEBAR-01 captures the 8 locked decisions (xyflow over hand-rolled SVG; execution-order edges; index-based node IDs; all-optional payload fields; degraded-mode shown with banner; custom drawer not shadcn; a11y posture; plain-English defence-in-depth).
+
+### Pre-merge audit findings (both fixed inline)
+
+| ID | Reviewer | Severity | Finding | Fix commit |
+|---|---|---|---|---|
+| H-1 | spelix-auditor | HIGH | `labelForRetrievalSource` fell back to raw `src` (snake_case) on unknown values — NFR-USAB-05 violation | `4987307` (humanizer added) |
+| H-2 | spelix-auditor | HIGH | `output_keys` chips in detail pane rendered raw snake_case (`rep_metrics`, `papers_contexts`, …) — NFR-USAB-05 violation | `4987307` (`labelForOutputKey` map + fallback) |
+| MED | spelix-security-reviewer | MEDIUM | `NodeEvent.error` Python exception strings could leak `/tmp/...` paths | Deferred to D-### (owner-only visibility, low exploit) |
+
+### Batch commits
+
+| Ref | What | Commit |
+|----|----|----|
+| L2-PHASE3-B3-P3007-01 | Backend: expose `agent_trace_json` on `CoachingResultSchema` + MagicMock factory drift fix in `test_analysis_crud.py` | `c3b7a12` |
+| L2-PHASE3-B3-P3007-02 | Frontend: `AgentNodeEvent` / `AgentEvalScores` / `AgentRetrievalSource` / `AgentTracePayload` types (all fields optional to accommodate Phase 2 imperative-path partial writes) + `CoachingResultDetail` extension + ResultsPage fixture update + types round-trip test | `71759e1` |
+| L2-PHASE3-B3-P3007-03 | Install `@xyflow/react@12.10.2` | `c44356b` |
+| L2-PHASE3-B3-P3007-04 | `lib/agentTraceLabels.ts` — 10 deterministic nodes + reasoner + humanizer fallback + retrieval-source map + formatDuration; 8 tests | `bfe81a3` |
+| L2-PHASE3-B3-P3007-05 | `lib/agentTraceGraph.ts` — `buildTraceGraph()` sequential chain layout, index-based IDs; 9 tests | `89883da` |
+| L2-PHASE3-B3-P3007-06 | `components/AgentReasoningSidebar.tsx` — drawer with summary + xyflow graph + detail pane; 17 tests including 2 a11y (focus-on-mount + role/aria) | `dd083fb` |
+| L2-PHASE3-B3-P3007-07 | ResultsPage button + sidebar wire-up (conditional on `nodes_executed.length > 0`) + xyflow vi.mock at top of tests; 4 integration tests | `9aa749b` |
+| L2-PHASE3-B3-P3007-08 | Audit fix: `labelForRetrievalSource` humanizer fallback + `labelForOutputKey` map + sidebar chip wire-up + 4 new tests | `4987307` |
+| L2-PHASE3-B3-P3007-09 | PR #83 → CI 5/5 green → merge-not-squash → Deploy to Production (37s) → droplet HEAD match → E2E verified | `70d736c` (merge) |
+
+### Test counts (baseline → post-P3-007)
+
+- **Backend:** 1687 → 1690 passed (+3: one new detail-exposure test + two previously-failing tests unblocked by the `_make_mock_coaching_result` factory fix). 25 skipped (was 27 — two un-skipped by the factory fix). 0 failing. ruff clean. pyright 0 errors on `app/`.
+- **Frontend:** 290 → 333 passed (+43: 12 labels + 9 graph + 17 sidebar + 4 ResultsPage integration + 1 types round-trip). 0 failing. tsc clean.
+- **CI on PR #83:** 5/5 gate checks green (Backend Lint 35s, Backend Tests 2m0s, Frontend Lint 28s, Frontend Tests 1m25s, Secret Scanning 17s). Vercel preview + Deploy to Production both pass.
+
+### Deferred post-P3-007 follow-ups (new D-### items)
+
+| ID | Title | Size | Notes |
+|---|---|---|---|
+| D-### | Full focus trap inside AgentReasoningSidebar | S | Close-button autofocus + Escape + scrim close ship today; Tab-cycling focus trap needs ~15 LOC beyond MVP |
+| D-### | Adaptive-mode reasoner-loop UI polish | M | Iteration counters, tool-call nesting. Prod runs deterministic only (`SPELIX_AGENT_MODE=deterministic`) |
+| D-### | CoVe iteration drill-down pane | M | Surface question / answer / judgment per iteration. Summary currently shows `converged: bool` + count only |
+| D-### | LangSmith run link-out from summary header | S | Admin-only, reveals full LangGraph run in LangSmith UI |
+| D-### | Sanitize `NodeEvent.error` in `serialize_trace_for_storage` | S | spelix-security-reviewer MED. Strip `/tmp/...` and similar infra paths before JSONB write |
 
 ---
 

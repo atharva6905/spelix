@@ -680,3 +680,50 @@ The spelix-auditor (session 43) flagged three surface-coverage gaps against FR-A
 - `CandidateReviewService.approve` runs a denylist regex against `content_override` to reject obvious prompt-injection separator sequences (`\n\nHuman:`, `<|im_end|>`, `[INST]`, `IGNORE PREVIOUS INSTRUCTIONS`, etc.) before the content flows to Cohere embed and Qdrant upsert. Raised as `PromptInjectionDetected`, mapped to HTTP 422 `PROMPT_INJECTION_DETECTED`. Expert-review workflow remains the primary defense; this is defence-in-depth for admin-editor compromise.
 
 **Decision**: ship P3-006 at this scope for L2 launch. The core correctness properties (`confirmation_count=1` per FR-BRAIN-18, `SELECT FOR UPDATE` race guard, Qdrant rollback on upsert failure, admin-only RLS) are unaffected by the deferred surface work. D-037 and D-038 are explicitly prioritized ahead of Phase 4 eval work.
+
+## ADR-REASONING-SIDEBAR-01: P3-007 "How AI Reasoned" sidebar design choices
+
+**Date:** 2026-04-17 (Session 44, L2 Sprint Day 8)
+**Status:** Accepted
+**Related SRS:** FR-RESL-07 (Phase 3, Must), NFR-USAB-05 (Must)
+**PR:** #83 (merge SHA `70d736c`)
+
+**Context:** FR-RESL-07 requires a plain-English sidebar on ResultsPage rendering the LangGraph agent trace. The payload (`coaching_results.agent_trace_json`) has been persisted since Phase 3 Batch 1 (session 32); Batch 3 is the surface.
+
+**Decisions:**
+
+1. **Graph library: `@xyflow/react@12.10.2`.** React-Flow v12 renamed. React 19 compatible, MIT-licensed, `proOptions.hideAttribution` is free (not paywalled per [maintainer discussion #2961](https://github.com/xyflow/xyflow/discussions/2961)). Future-proofs adaptive-mode graphs (20+ nodes) and the Phase 4 eval dashboard over a hand-rolled SVG (would be ~40 LOC, ~2 KB, but no zoom/pan, no keyboard nav, no consistent styling).
+
+2. **Edge inference: execution order.** `nodes_executed[i] → nodes_executed[i+1]`. `NodeEvent` has no `input_keys` field; the deterministic graph is a strict 10-node chain anyway. Adaptive mode renders a visually approximate loop (reasoner → tool → reasoner → tool → …) with index-based IDs.
+
+3. **Node IDs: index-based** (`node-0, node-1, ...`). Adaptive-mode reasoner can repeat a node name (e.g. `reasoner` visited 3× in a loop); name-keyed IDs would collide in xyflow. Index-based works for both modes without special-casing.
+
+4. **`AgentTracePayload` fields all optional.** Two producers write `coaching_results.agent_trace_json`:
+   - Phase 3 graph path (`analysis_worker.py:~802`) writes the full shape: `{mode, nodes_executed, eval_scores, cove_iterations, converged, retrieval_source, degraded_mode}`.
+   - Phase 2 imperative path (`analysis_worker.py:~483`) writes a partial: `{cove_iterations, converged}` only.
+
+   Required-fields types would lie about Phase 2 data. The button-render gate `(agent_trace_json?.nodes_executed?.length ?? 0) > 0` distinguishes Phase 3 full writes from Phase 2 partials from legacy nulls in a single check.
+
+5. **Degraded-mode visibility: sidebar SHOWN with banner, not hidden.** The trace itself is instructive — the user sees that `retrieve_papers` returned zero passages, why `degraded_mode=true`, etc. Transparency is the spirit of FR-RESL-07. The per-sidebar banner is in addition to (not replacing) the existing coaching-block `degraded_mode` banner.
+
+6. **Drawer implementation: custom Tailwind `fixed` panel, not shadcn `Sheet`.** Repo has no shadcn today; adding it for one drawer is scope creep. The custom drawer is ~290 LOC inside the component, fully owned.
+
+7. **A11y posture: Close-button autofocus + Escape + scrim close ship today; full focus trap deferred.** Root element is `<div role="dialog" aria-modal="true" aria-labelledby="agent-reasoning-sidebar-title">`. Escape and scrim click invoke `onClose`. Focus moves to the Close button on open via `useRef` + `useEffect`. A proper focus trap (cycling Tab within the drawer) requires ~15 LOC beyond the MVP and is a D-### follow-up.
+
+8. **Plain-English mapping applies to node names AND output_keys AND retrieval sources.** `labelForNode`, `labelForOutputKey`, and `labelForRetrievalSource` all humanize unknown values as a defence-in-depth guarantee that no future backend addition leaks snake_case to users (NFR-USAB-05). This was the `spelix-auditor` H-1 + H-2 finding bundle addressed inline.
+
+**Consequences:**
+
+- New tool nodes added to the coaching LangGraph (Phase 3 Batch 4+) only need a label entry in `agentTraceLabels.ts` — the graph builder, detail pane, and all tests work unchanged.
+- Adding a new AgentState key requires a label entry in `OUTPUT_KEY_LABELS`; humanizer fallback is safe in the interim.
+- If the deterministic topology ever forks (parallel edges — e.g. Send-API fanout for concurrent retrieval), the graph builder must switch from sequential chaining to real topology inference, which means the trace payload will need edge metadata (new field).
+
+**L2 deviations deferred to D-### follow-ups:**
+- **D-### (M-05 unblock dependent):** Full focus trap inside the drawer (keyboard cycle, aria-modal semantics completion).
+- **D-###:** Adaptive-mode reasoner-loop UI polish (iteration badges, in-line tool-call nesting). Prod runs deterministic only today.
+- **D-###:** CoVe iteration drill-down pane (surface per-iteration question / answer / judgment). Summary currently shows only `converged: bool` + count.
+- **D-###:** LangSmith run link-out from the summary header (admin-only).
+- **D-###:** Sanitize `NodeEvent.error` strings in `serialize_trace_for_storage` to strip `/tmp/...` and other infrastructure paths before JSONB write (spelix-security-reviewer MED finding — low exploitability because owner-only visibility on rare error path).
+
+**Related:** FR-RESL-07, NFR-USAB-05, ADR-BRAIN-REVIEW-01 (sibling in P3-006), FR-AICP-18 (deterministic graph shape).
+
