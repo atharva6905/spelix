@@ -112,23 +112,35 @@ async def retrieve_coach_brain(
 ) -> dict[str, Any]:
     """Retrieve curated coaching cues from the ``coach_brain`` Qdrant collection.
 
-    Applies a ``status='active'`` payload filter (FR-BRAIN-04) and an
-    ``exercise``-type payload filter (FR-AICP-12), running dense+BM25+RRF
-    hybrid retrieval with Cohere reranking. Returns distilled coaching
-    knowledge — cues, heuristics, compensation entries — curated by the
-    kinesiology expert and/or produced by the Phase 3 distillation
-    pipeline.
+    Applies a ``status ∈ {'active','seed'}`` payload filter (FR-BRAIN-04 +
+    FR-BRAIN-05 cold-start) and an ``exercise``-type payload filter
+    (FR-AICP-12), running dense+BM25+RRF hybrid retrieval with Cohere
+    reranking. Returns distilled coaching knowledge — cues, heuristics,
+    compensation entries — curated by the kinesiology expert and/or
+    produced by the Phase 3 distillation pipeline.
+
+    Seed entries (``source=seed_manual_validated``, status='seed' in
+    migration 004's enum) are the initial retrievable population; they
+    remain first-class retrieval targets alongside `active` entries until
+    explicit deprecation via `status='deprecated'`. Deprecated entries are
+    excluded.
 
     Use this to source high-value coaching cues. Prefer Coach Brain when
     retrieval scores exceed 0.82 (FR-BRAIN-05 primary threshold); fall back
-    to papers_rag otherwise. Returns empty list on cold-start
-    (``brain_contexts = []``) — callers must degrade gracefully.
+    to papers_rag otherwise. Returns empty list on true cold-start
+    (``brain_contexts = []``, no seed match either) — callers must degrade
+    gracefully.
     """
     from qdrant_client import models as qdrant_models
 
+    # FR-BRAIN-05 cold-start: seeds are retrievable until distillation + expert
+    # review produces `status='active'` entries. Including both values here
+    # means the cold-start fallback path (`retrieval_source='papers_only_fallback'`)
+    # is only taken when the seed corpus itself can't produce a hit — not when
+    # all content is locked behind an unattainable `active` filter.
     status_filter = qdrant_models.FieldCondition(
         key="status",
-        match=qdrant_models.MatchValue(value="active"),
+        match=qdrant_models.MatchAny(any=["active", "seed"]),
     )
 
     query = (
