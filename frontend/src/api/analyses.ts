@@ -112,8 +112,63 @@ export interface CoachingOutput {
   degraded_mode?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Types — Agent trace (P3-007, FR-RESL-07, NFR-USAB-05)
+//
+// Shape produced by backend/app/agents/graph.py::run_coaching_graph and
+// persisted to coaching_results.agent_trace_json JSONB.
+//
+// IMPORTANT — two producers write this column:
+//   1. Phase 3 graph path (analysis_worker.py:~802) writes the FULL shape:
+//      mode / nodes_executed / eval_scores / cove_iterations / converged
+//      / retrieval_source / degraded_mode. Emitted when
+//      SPELIX_PHASE3_AGENT_ENABLED=1 (prod since session 32).
+//   2. Phase 2 imperative path (analysis_worker.py:~483) writes a PARTIAL
+//      shape: only { cove_iterations, converged }. Fired when the agent
+//      flag is off.
+//
+// Legacy Phase 1 / earlier analyses carry null.
+//
+// Every field is therefore optional — the sidebar guards access via
+// optional chaining and the "How AI Reasoned" button only renders when
+// nodes_executed.length > 0, which distinguishes Phase 3 writes from
+// Phase 2 partials and from legacy nulls in one check.
+// ---------------------------------------------------------------------------
+
+export interface AgentNodeEvent {
+  node: string;
+  started_at: string; // ISO-8601 UTC
+  duration_ms: number;
+  output_keys: string[];
+  error: string | null;
+}
+
+export interface AgentEvalScores {
+  faithfulness?: number;
+  cove_verified?: boolean;
+  // open-ended: Phase 4 eval metrics land here (groundedness, etc.)
+  [key: string]: unknown;
+}
+
+export type AgentRetrievalSource =
+  | "coach_brain_primary"
+  | "hybrid_brain_supplementary"
+  | "papers_only_fallback"
+  | null;
+
+export interface AgentTracePayload {
+  mode?: "deterministic" | "adaptive";
+  nodes_executed?: AgentNodeEvent[];
+  eval_scores?: AgentEvalScores;
+  cove_iterations?: unknown[];
+  converged?: boolean;
+  retrieval_source?: AgentRetrievalSource;
+  degraded_mode?: boolean;
+}
+
 export interface CoachingResultDetail {
   structured_output_json: CoachingOutput | null;
+  agent_trace_json: AgentTracePayload | null;
   created_at: string;
 }
 

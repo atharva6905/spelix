@@ -77,6 +77,7 @@ function makeAnalysis(overrides: Partial<AnalysisDetail> = {}): AnalysisDetail {
         disclaimer:
           "This feedback is for educational purposes only and is not a substitute for in-person coaching or medical advice.",
       },
+      agent_trace_json: null,
       created_at: "2026-04-08T10:05:00Z",
     },
     rep_metrics: [
@@ -786,6 +787,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
               },
             ],
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -821,6 +823,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
               },
             ],
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -848,6 +851,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
             disclaimer: "Educational purposes only.",
             degraded_mode: true,
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -899,5 +903,45 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
 
     renderResultsPage();
     expect(screen.queryByTestId("chat-panel")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 3: agent_trace_json type round-trip (P3-007, FR-RESL-07)
+  // -------------------------------------------------------------------------
+
+  it("exposes agent_trace_json on the analysis detail shape (types round-trip)", () => {
+    const analysis = makeAnalysis({
+      coaching_result: {
+        structured_output_json: {
+          summary: "ok",
+          strengths: [],
+          issues: [],
+          correction_plan: [],
+          disclaimer: "",
+        },
+        created_at: "2026-04-17T10:00:00Z",
+        agent_trace_json: {
+          mode: "deterministic",
+          nodes_executed: [
+            {
+              node: "get_rep_metrics",
+              started_at: "2026-04-17T10:00:00Z",
+              duration_ms: 12.3,
+              output_keys: ["rep_metrics"],
+              error: null,
+            },
+          ],
+          eval_scores: { faithfulness: 0.92 },
+          cove_iterations: [],
+          converged: true,
+          retrieval_source: "coach_brain_primary",
+          degraded_mode: false,
+        },
+      },
+    });
+    expect(analysis.coaching_result?.agent_trace_json?.mode).toBe("deterministic");
+    expect(analysis.coaching_result?.agent_trace_json?.nodes_executed?.[0]?.node).toBe(
+      "get_rep_metrics",
+    );
   });
 });
