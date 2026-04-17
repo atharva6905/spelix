@@ -11,6 +11,23 @@ and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
 Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
 Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
+## Completed — L2 Sprint Day 7 — P3-006 Coach Brain Expert Review Queue (2026-04-17, session 43)
+
+PR #82 merged to `main` as `3bffdd9` and deployed via CI. Closes P3-006 (FR-ADMN-12, FR-BRAIN-07, FR-BRAIN-18). Backend: 1681 → 1687 tests (+38 net including audit-fix additions), ruff + pyright clean. Frontend: 272 → 290 tests (+18), tsc clean. E2E smoke on prod: route live, non-admin → 403, graceful "Failed to load" state — both endpoints reachable at `api.spelix.app`. 11 real `coach_brain_candidates` from session 42 ready for admin review.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-PHASE3-B3-01 | Repo helpers — `list_pending_ordered` (overall → faithfulness → created_at DESC), `count_pending`, `get_by_id_for_update` (SELECT FOR UPDATE) | done | S | — | FR-ADMN-12 | `475e687` | `backend/app/repositories/coach_brain_candidate.py`, `backend/tests/unit/test_coach_brain_candidate_repo.py` |
+| L2-PHASE3-B3-02 | Pydantic v2 schemas — `CandidateListItem`, `ApproveRequest` (min_length=5 max_length=500), `RejectRequest` (strip + min_length=1), `ApproveResponse`, `RejectResponse`, `PendingQueueStats` | done | S | L2-PHASE3-B3-01 | FR-ADMN-12, FR-BRAIN-07 | `246e742` | `backend/app/schemas/candidate_review.py`, `backend/tests/unit/test_candidate_review_schemas.py` |
+| L2-PHASE3-B3-03 | `CandidateReviewService.approve` — INSERT entry (status=active, confirmation_count=1 per FR-BRAIN-18) → embed + Qdrant upsert → UPDATE candidate (review_status=approved, promoted_entry_id) → commit; rollback on Qdrant failure (`QdrantUpsertFailed`); concurrent-approve race guard via `CandidateAlreadyReviewed` | done | M | L2-PHASE3-B3-02 | FR-BRAIN-07, FR-BRAIN-18 | `eac2546` | `backend/app/services/candidate_review.py`, `backend/tests/unit/test_candidate_review_service.py` |
+| L2-PHASE3-B3-04 | `CandidateReviewService.reject` regression locks — status flip + rejected_reason + idempotency on non-pending | done | S | L2-PHASE3-B3-03 | FR-BRAIN-07 | `2bf7b92` | `backend/tests/unit/test_candidate_review_service.py` |
+| L2-PHASE3-B3-05 | Admin router — `GET /admin/coach-brain/candidates` + `/stats` + `POST /{id}/approve` + `POST /{id}/reject` with 404/409/502 error envelopes and admin-only `get_admin_user` guard | done | M | L2-PHASE3-B3-03 | FR-ADMN-12, FR-BRAIN-07 | `6649012` | `backend/app/api/v1/admin.py`, `backend/tests/unit/test_admin_candidates_api.py` |
+| L2-PHASE3-B3-06 | Frontend API client — `listCoachBrainCandidates`, `getCoachBrainCandidateStats`, `approveCoachBrainCandidate`, `rejectCoachBrainCandidate` + TS types | done | S | L2-PHASE3-B3-05 | FR-ADMN-12 | `f3c2ccc` | `frontend/src/api/admin.ts`, `frontend/src/api/__tests__/admin-candidates.test.ts` |
+| L2-PHASE3-B3-07 | `AdminCoachBrainCandidatesPage` — single-card review UI with 3-mode interaction (view/edit/reject), 4-dim eval scorecard, CoVe banner, compensation banner, nearest-entry badge, source-analysis links, `a/r/e/s` keyboard shortcuts; route registered + admin dashboard link | done | L | L2-PHASE3-B3-06 | FR-ADMN-12, FR-BRAIN-07, NFR-USAB-05 | `6d9b618` | `frontend/src/pages/AdminCoachBrainCandidatesPage.tsx`, `frontend/src/pages/__tests__/AdminCoachBrainCandidatesPage.test.tsx`, `frontend/src/routes.tsx`, `frontend/src/pages/AdminPage.tsx` |
+| L2-PHASE3-B3-08 | ADR-BRAIN-REVIEW-01 (near-atomic approve; FR-BRAIN-18 interpretation; L2 deviations deferred to D-037/038/039) + backlog close | done | S | — | — | `606306f` | `decisions.md`, `backlog.md` |
+| L2-PHASE3-B3-09 | Audit fixes from spelix-auditor + spelix-security-reviewer — null-out error detail (no vendor-exc leak), prompt-injection denylist (HTTP 422), 4-dim eval scorecard (FR-ADMN-12 H-01), vector-client dep wrap (HTTP 503) | done | M | L2-PHASE3-B3-07, L2-PHASE3-B3-08 | FR-ADMN-12 | `88682cd` | `backend/app/api/v1/admin.py`, `backend/app/services/candidate_review.py`, `backend/tests/unit/test_candidate_review_service.py`, `backend/tests/unit/test_admin_candidates_api.py`, `frontend/src/pages/AdminCoachBrainCandidatesPage.tsx`, `decisions.md` |
+| L2-PHASE3-B3-10 | PR #82 → CI green (backend tests 1m58s, frontend 1m26s, ruff 36s, pyright, Vercel) → merge (`merge_method="merge"`) → Deploy to Production via SSH → droplet HEAD `3bffdd9`, containers healthy → Playwright smoke confirms route live + 403 auth guard | done | M | L2-PHASE3-B3-09 | — | `3bffdd9` | PR #82 |
+
 ## Completed — Coach Brain + Papers Retrieval Unblock (2026-04-17, session 42)
 
 Five bugs silently inert-ed the entire retrieval-eval-distillation chain since Phase 2 shipped. Discovered during Priority 1 flag-flip verification when a real bench upload completed with `eval_scores=NULL`. Five PRs (#78–#81) merged, all 5 fixed, end-to-end verification produced 11 real `coach_brain_candidates` rows for analysis `73f9a137-c528-4f11-b833-48c638b5d5fc`.
@@ -425,7 +442,7 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | done (session 43, branch `feat/p3-006-review-queue`) |
+| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | done — `3bffdd9` (PR #82, session 43) |
 | P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
 | D-037 | Surface top 2 similar existing approved entries on review card (FR-ADMN-12 completeness — current impl shows 1 via nearest_entry_id from candidate schema) | S | P3-006 | FR-ADMN-12 | open |
 | D-038 | Add `compensation` to coach_brain_candidates.entry_type CHECK constraint + biomechanics reviewer routing (UI banner already renders forward-compatibly) | S | — | FR-ADMN-12 | open |
