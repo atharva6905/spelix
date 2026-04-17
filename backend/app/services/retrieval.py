@@ -232,9 +232,13 @@ class RetrievalService:
         contexts: list[RetrievedContext] = []
         for point in result.points:
             payload = point.payload or {}
+            # coach_brain payloads store the body under "content" (per
+            # seed_coach_brain.py + ingestion.py); papers_rag uses "text".
+            # Fall back across both so retrieval works for either collection
+            # without forcing collection-specific branching here.
             chunk = ChunkPayload(
                 id=payload.get("id", ""),
-                text=payload.get("text", ""),
+                text=payload.get("text") or payload.get("content", ""),
                 paper_id=payload.get("paper_id", ""),
                 chunk_index=int(payload.get("chunk_index", 0)),
                 section=payload.get("section"),
