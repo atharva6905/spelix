@@ -1,28 +1,29 @@
 """
-Rep detection state machine for Phase 0 CV pipeline.
+Rep detection via peak/valley extraction for the Spelix CV pipeline.
 
 Implements FR-CVPL-15, FR-REPM-01, FR-REPM-05.
-State machine: STANDING → DESCENDING → BOTTOM → ASCENDING → STANDING.
+
+Approach: `scipy.signal.find_peaks` on the inverted primary angle
+time-series. Valleys (rep bottoms) are located by a signal-relative
+prominence threshold; `start_frame` and `end_frame` are the surrounding
+local maxima. No absolute angle thresholds are used — this correctly
+handles partial-lockout lifts (bodyweight bench, fatigued reps, RDLs)
+that the previous fixed-threshold state machine silently failed on.
+
 All functions are pure — no side effects, no DB, no IO.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
 import numpy as np
+from scipy.signal import find_peaks
+
 
 # ---------------------------------------------------------------------------
-# Types
+# Public types (unchanged API)
 # ---------------------------------------------------------------------------
-
-
-class RepState(Enum):
-    STANDING = "standing"
-    DESCENDING = "descending"
-    BOTTOM = "bottom"
-    ASCENDING = "ascending"
 
 
 @dataclass
@@ -35,51 +36,24 @@ class DetectedRep:
 
 
 # ---------------------------------------------------------------------------
-# Per-exercise thresholds
+# Tuning knobs
 # ---------------------------------------------------------------------------
 
-# Standing threshold: angle must be above this to be considered "standing".
-# Squat uses 150° (FR-CVPL-07): tolerates athletes who do not fully lock out
-# between reps.  Bench and deadlift keep 160° — different joint geometry.
-_STANDING_THRESHOLD: dict[str, float] = {
-    "squat": 150.0,
-    "bench": 160.0,
-    "deadlift": 160.0,
+# Minimum peak prominence (degrees) on the inverted signal — i.e. the
+# minimum depth of a valley below its bracketing peaks. Tuned against the
+# in-repo fixture library (see plan Task 5 Step 6). Signal-relative, so
+# it handles partial-lockout lifts that never reach absolute standing.
+# Unknown exercise_type values fall back to 20.0 via dict.get default.
+_PROMINENCE_DEG: dict[str, float] = {
+    "squat": 20.0,
+    "bench": 20.0,
+    "deadlift": 20.0,
 }
 
-# Depth threshold: angle must be below this to register "bottom".
-# Squat uses 110° (FR-CVPL-07): catches parallel-depth squats (~90–110° hip).
-# Old value was 90° (effective 85° with hysteresis), which silently skipped
-# reps where the athlete stopped at parallel rather than going below it.
-_DEPTH_THRESHOLD: dict[str, dict[str, float]] = {
-    "squat": {"default": 110.0},
-    "bench": {"default": 90.0},
-    "deadlift": {
-        "conventional": 70.0,
-        "sumo": 70.0,
-        "romanian": 90.0,
-        "rdl": 90.0,
-    },
-}
-
-_HYSTERESIS_DEG = 5.0
+# Minimum rep duration in seconds — applied after peak/valley extraction
+# as `end_frame - start_frame >= min_rep_frames`. Prevents spurious
+# reps from single-frame noise spikes that slipped through prominence.
 _MIN_REP_DURATION_S = 0.5
-
-
-# ---------------------------------------------------------------------------
-# Threshold helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_standing_threshold(exercise_type: str) -> float:
-    return _STANDING_THRESHOLD.get(exercise_type.lower(), 160.0)
-
-
-def _get_depth_threshold(exercise_type: str, exercise_variant: str) -> float:
-    ex = exercise_type.lower()
-    var = exercise_variant.lower()
-    depth_map = _DEPTH_THRESHOLD.get(ex, {"default": 90.0})
-    return depth_map.get(var, depth_map.get("default", 90.0))
 
 
 # ---------------------------------------------------------------------------
@@ -95,88 +69,90 @@ def detect_reps(
     fps: float,
 ) -> list[DetectedRep]:
     """
-    Detect reps from smoothed angle time-series using a state machine.
+    Detect reps from smoothed angle time-series via peak/valley extraction.
 
     Parameters
     ----------
     angle_timeseries:
         1-D array of smoothed primary angle per frame (degrees).
+        For squat/deadlift this is the hip angle; for bench it is the
+        elbow angle.
     landmarks_per_frame:
         List of (33, 5) arrays, one per frame. Retained for API compat;
-        confidence is now computed by pipeline Step 7 (Tier 5).
+        confidence is computed by pipeline Step 7 (Tier 5).
     exercise_type:
-        One of "squat", "bench", "deadlift".
+        One of "squat", "bench", "deadlift". Selects the prominence knob.
     exercise_variant:
-        Exercise variant (e.g. "conventional", "sumo", "rdl", "standard").
+        Retained for API compat — the peak/valley approach is variant-
+        agnostic (old per-variant depth thresholds are gone). Kept in
+        the signature so callers in `app/services/pipeline.py` need no
+        change.
     fps:
-        Frames per second — used for min rep duration check.
+        Frames per second — used for min rep duration filter.
 
     Returns
     -------
     list[DetectedRep]
-        Detected reps with frame ranges, confidence, and min angle.
+        Detected reps with frame ranges, 0.0 placeholder confidence
+        (pipeline Step 7 backfills Tier 5), and min_angle at the valley.
     """
-    if len(angle_timeseries) == 0:
+    n = len(angle_timeseries)
+    if n < 3:
         return []
 
-    standing_thresh = _get_standing_threshold(exercise_type)
-    depth_thresh = _get_depth_threshold(exercise_type, exercise_variant)
-    min_rep_frames = int(_MIN_REP_DURATION_S * fps)
+    prominence = _PROMINENCE_DEG.get(exercise_type.lower(), 20.0)
+    min_rep_frames = max(1, int(_MIN_REP_DURATION_S * fps))
 
-    state = RepState.STANDING
+    # find_peaks on -angle: peaks of inverted signal = valleys of original
+    inverted = -np.asarray(angle_timeseries, dtype=float)
+    valley_indices, _ = find_peaks(
+        inverted,
+        prominence=prominence,
+        distance=min_rep_frames,
+    )
+
+    if len(valley_indices) == 0:
+        return []
+
     reps: list[DetectedRep] = []
-    rep_start_frame = 0
-    min_angle_in_rep = float("inf")
+    prev_end = 0
+    for i, v_idx in enumerate(valley_indices):
+        v_idx_int = int(v_idx)
 
-    for i, angle in enumerate(angle_timeseries):
-        angle_f = float(angle)
+        # start_frame: argmax in [prev_end, valley]
+        start_lo = prev_end
+        start_hi = v_idx_int
+        if start_hi <= start_lo:
+            start_frame = start_lo
+        else:
+            start_frame = start_lo + int(np.argmax(angle_timeseries[start_lo : start_hi + 1]))
 
-        if state == RepState.STANDING:
-            # Transition to DESCENDING when angle drops below standing - hysteresis
-            if angle_f < standing_thresh - _HYSTERESIS_DEG:
-                state = RepState.DESCENDING
-                rep_start_frame = i
-                min_angle_in_rep = angle_f
+        # end_frame: argmax in [valley, next_valley_or_signal_end]
+        if i + 1 < len(valley_indices):
+            end_hi = int(valley_indices[i + 1])
+        else:
+            end_hi = n - 1
+        if end_hi <= v_idx_int:
+            end_frame = v_idx_int
+        else:
+            end_frame = v_idx_int + int(
+                np.argmax(angle_timeseries[v_idx_int : end_hi + 1])
+            )
 
-        elif state == RepState.DESCENDING:
-            min_angle_in_rep = min(min_angle_in_rep, angle_f)
-            # Transition to BOTTOM when angle drops below depth + hysteresis
-            if angle_f < depth_thresh - _HYSTERESIS_DEG:
-                state = RepState.BOTTOM
-                min_angle_in_rep = min(min_angle_in_rep, angle_f)
-
-            # If angle goes back above standing threshold, abort this rep attempt
-            elif angle_f > standing_thresh + _HYSTERESIS_DEG:
-                state = RepState.STANDING
-
-        elif state == RepState.BOTTOM:
-            min_angle_in_rep = min(min_angle_in_rep, angle_f)
-            # Transition to ASCENDING when angle rises above depth + hysteresis
-            if angle_f > depth_thresh + _HYSTERESIS_DEG:
-                state = RepState.ASCENDING
-
-        elif state == RepState.ASCENDING:
-            min_angle_in_rep = min(min_angle_in_rep, angle_f)
-            # Transition to STANDING when angle rises above standing - hysteresis
-            if angle_f > standing_thresh - _HYSTERESIS_DEG:
-                rep_end_frame = i
-                rep_duration_frames = rep_end_frame - rep_start_frame
-
-                # Check min rep duration
-                if rep_duration_frames >= min_rep_frames:
-                    # Confidence placeholder — pipeline Step 7 backfills
-                    # with Tier 5 value (FR-CVPL-20–25)
-                    reps.append(
-                        DetectedRep(
-                            rep_index=len(reps),
-                            start_frame=rep_start_frame,
-                            end_frame=rep_end_frame,
-                            confidence_score=0.0,
-                            min_angle=min_angle_in_rep,
-                        )
-                    )
-
-                state = RepState.STANDING
-                min_angle_in_rep = float("inf")
+        # Min-duration post-filter. Advance prev_end ONLY on kept reps —
+        # if a valley is filtered here, the next rep's start-frame search
+        # window correctly extends back across the filtered region and
+        # argmax still lands on the highest intermediate peak (or earlier).
+        if end_frame - start_frame >= min_rep_frames:
+            reps.append(
+                DetectedRep(
+                    rep_index=len(reps),
+                    start_frame=start_frame,
+                    end_frame=end_frame,
+                    confidence_score=0.0,
+                    min_angle=float(angle_timeseries[v_idx_int]),
+                )
+            )
+            prev_end = end_frame
 
     return reps
