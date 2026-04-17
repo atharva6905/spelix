@@ -101,6 +101,13 @@ class RejectResponse(BaseModel):
     rejected_reason: str
 
 
+class PendingQueueResponse(BaseModel):
+    """Paginated list response for GET /admin/coach-brain/candidates."""
+
+    items: list[CandidateListItem]
+    total_pending: int
+
+
 class PendingQueueStats(BaseModel):
     """Response for GET /admin/coach-brain/candidates/stats."""
 
