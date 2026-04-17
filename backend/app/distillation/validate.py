@@ -24,10 +24,23 @@ _OVERALL_REVIEW_FLOOR = 0.60
 
 
 async def validate_quality(state: DistillationState) -> dict[str, Any]:
-    """Decide whether candidates proceed, proceed-for-review, or reject."""
+    """Decide whether candidates proceed, proceed-for-review, or reject.
+
+    Phase 2 only populates `faithfulness` (ADR-RAG-04 — Phase 4 will add the
+    full multi-component RAGAS suite that produces `overall` + `correctness`).
+    Until then, fall back to `faithfulness` for the overall-style score and
+    skip the correctness sub-gate (`pass` is unreachable on faithfulness-only,
+    `review` is the right routing). When Phase 4 ships `overall`/`correctness`,
+    they take precedence automatically.
+    """
     eval_scores = state.get("eval_scores") or {}
     overall = eval_scores.get("overall")
     correctness = eval_scores.get("correctness")
+
+    # Phase 2 fallback: use faithfulness as the overall-style score when
+    # multi-component RAGAS hasn't shipped yet.
+    if overall is None:
+        overall = eval_scores.get("faithfulness")
 
     if overall is None or overall < _OVERALL_REVIEW_FLOOR:
         return {"validation_decision": "reject"}

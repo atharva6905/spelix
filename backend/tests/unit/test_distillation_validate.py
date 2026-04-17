@@ -49,6 +49,40 @@ async def test_validate_quality_missing_scores_rejects() -> None:
     assert update["validation_decision"] == "reject"
 
 
+@pytest.mark.asyncio
+async def test_validate_quality_falls_back_to_faithfulness_when_overall_absent() -> None:
+    """Phase 2 only populates eval_scores.faithfulness (ADR-RAG-04). Until the
+    Phase 4 RAGAS aggregate ships an `overall` key, validate_quality must
+    fall back to `faithfulness` so distillation candidates are written instead
+    of being silently rejected. Regression guard from prod 2026-04-17."""
+    state = make_initial_distillation_state(
+        analysis_id=uuid.uuid4(),
+        exercise_type="bench",
+        coaching_output=_stub_coaching_output(),
+        retrieved_papers_contexts=[],
+        # Phase 2 prod shape — no `overall`, only `faithfulness`
+        eval_scores={"faithfulness": 0.92, "faithfulness_passed": True},
+    )
+    update = await validate_quality(state)
+    # 0.92 is above 0.6 floor but no `correctness` so route to review,
+    # not pass — the candidates still flow through.
+    assert update["validation_decision"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_faithfulness_below_floor_rejects() -> None:
+    """Faithfulness fallback also respects the 0.6 floor."""
+    state = make_initial_distillation_state(
+        analysis_id=uuid.uuid4(),
+        exercise_type="bench",
+        coaching_output=_stub_coaching_output(),
+        retrieved_papers_contexts=[],
+        eval_scores={"faithfulness": 0.4},
+    )
+    update = await validate_quality(state)
+    assert update["validation_decision"] == "reject"
+
+
 def _stub_coaching_output():
     return CoachingOutput(
         summary="s",
