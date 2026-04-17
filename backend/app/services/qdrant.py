@@ -193,12 +193,13 @@ class QdrantClientWrapper:
             )
             logger.info("ensure_collections: created %r", name)
 
-        # Always ensure payload indexes exist — Qdrant ignores duplicate index
-        # creation, so this is safe to run on existing collections. This also
-        # recovers from collections created by a previous version of this code
-        # that didn't provision the needed indexes (prod papers_rag pre-fix).
-        if payload_index_fields:
-            await self._ensure_payload_indexes(name, payload_index_fields)
+        # Ensure payload indexes exist for the given fields — Qdrant ignores
+        # duplicate index creation, so this is safe to run on existing
+        # collections. This also recovers from collections created by a
+        # previous version of this code that didn't provision the needed
+        # indexes (prod papers_rag pre-fix). The call is a no-op on an empty
+        # tuple; the iteration in _ensure_payload_indexes handles that.
+        await self._ensure_payload_indexes(name, payload_index_fields)
 
     async def _ensure_payload_indexes(
         self, collection_name: str, fields: tuple[str, ...]
@@ -221,6 +222,10 @@ class QdrantClientWrapper:
                     field,
                 )
             except Exception as exc:
+                # Qdrant returns 4xx when the index already exists. Swallow and
+                # continue — the index we need is present, which is the desired
+                # end state. This branch is the idempotent-rerun path, not an
+                # unexpected failure.
                 logger.info(
                     "ensure_collections: index on %r.%s already present or unchanged (%s)",
                     collection_name,
