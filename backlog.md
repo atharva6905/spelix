@@ -425,8 +425,11 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
 | ID | Title | Size | Deps | SRS IDs | Status |
 |----|-------|------|------|---------|--------|
-| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | pending |
+| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen review cards with eval scorecard, CoVe result, approve/reject/edit actions. Compensation entries flagged for biomechanics-qualified review. | L | P3-004 | FR-ADMN-12, FR-BRAIN-07 | done (session 43, branch `feat/p3-006-review-queue`) |
 | P3-007 | "How AI Reasoned" sidebar on results page — readable LangGraph agent trace rendered from LangSmith data | M | P3-003 | FR-RESL-07 | pending |
+| D-037 | Surface top 2 similar existing approved entries on review card (FR-ADMN-12 completeness — current impl shows 1 via nearest_entry_id from candidate schema) | S | P3-006 | FR-ADMN-12 | open |
+| D-038 | Add `compensation` to coach_brain_candidates.entry_type CHECK constraint + biomechanics reviewer routing (UI banner already renders forward-compatibly) | S | — | FR-ADMN-12 | open |
+| D-039 | Re-run CoVe after admin content edit on approve (current impl carries original cove_verified to entry.extra_metadata; needs throttling to avoid Haiku max_tokens blowup) | M | M-05 | FR-BRAIN-14 | open |
 
 ---
 

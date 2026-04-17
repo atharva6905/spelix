@@ -643,3 +643,22 @@ Use the buffer to pull Phase 3 Batch 1 (P3-001/002/003) forward from the schedul
 - Any future Phase 2 code that introduces a NEW `eval_scores`-gated decision MUST follow this fallback pattern. Add a code-quality reviewer check at the next eval-touching PR.
 - M-06 backlog item: when Phase 4 ships `overall` + `correctness`, audit both fallback sites to confirm `overall` takes precedence and document the deprecation path for the fallback (don't remove it — Phase 2 analyses in the historical table still need it for replay/audit).
 - Test coverage added: 4 regression tests across `tests/integration/test_distillation_worker_e2e.py` (2 new) and `tests/unit/test_distillation_validate.py` (2 new) explicitly assert the faithfulness-fallback semantics.
+
+## ADR-BRAIN-REVIEW-01: Near-atomic approve — Postgres INSERT + Qdrant upsert in one request (Session 43)
+
+**Context**: The expert review queue (P3-006) promotes `coach_brain_candidates.review_status='pending'` rows into `coach_brain_entries.status='active'` AND indexes them into the Qdrant `coach_brain` collection. Two options:
+
+- (a) In-request: INSERT Postgres row → embed + upsert Qdrant → UPDATE candidate → COMMIT, rolling back DB on any failure.
+- (b) Deferred: INSERT Postgres row → enqueue an embed job → COMMIT immediately; worker picks it up and back-fills the Qdrant point later.
+
+**Decision**: Option (a). At L2 volume (<10 analyses/day → ≤~10 candidates/day), the review rate is bounded by the human reviewer (~30 sec/entry); Cohere embed + Qdrant upsert adds ~200–400 ms and is not the latency floor. The in-request path also prevents the most-likely failure mode — a Postgres `coach_brain_entries` row with no corresponding Qdrant point is retrievable by admin tools but invisible to real-time coaching. That's the exact "coach_brain_primary returns 0 hits so we silently degrade" failure that bit us in session 42.
+
+**Not truly atomic — the narrow window**: The operation is NOT atomic in the strict 2-phase-commit sense. Execution order is INSERT+flush (Postgres) → Qdrant upsert → UPDATE candidate → `db.commit()`. If the final `db.commit()` fails after a successful Qdrant upsert, we have a Qdrant-only point with no Postgres entry row. In practice this is vanishingly rare: Postgres commits over PgBouncer at L2 volume have sub-ppm failure rates, and the in-session work just before commit is minimal. When it does happen, Qdrant upserts are idempotent by ID (point_id = `str(entry.id)`) so an admin retry re-upserts the same point without duplicates; the orphan is detectable by a nightly audit query (`SELECT point_id FROM qdrant WHERE id NOT IN (SELECT id FROM coach_brain_entries)`). Adding a second Qdrant `delete_points` call in a `try/except` around the commit would complicate the error envelope without materially reducing risk at this volume.
+
+**FR-BRAIN-18 interpretation**: SRS says `confirmation_count` is "incremented when a human reviewer approves a candidate entry that was initially auto-held for review." Candidates don't have their own `confirmation_count` column — only the promoted `coach_brain_entries` row does. We set `confirmation_count=1` on the new entry at approval time. Semantically: the human approval IS the first confirmation, matching the seed-entry convention (FR-BRAIN-18 explicitly sets seed initial value = 1). Zero would mean "entry exists but nobody has vouched for it," which contradicts the approval act itself.
+
+**Consequences**: One failed Cohere / Qdrant call fails the whole approve request with HTTP 502 `QDRANT_UPSERT_FAILED`. The admin retries. If Cohere is persistently down, approvals block — acceptable at current volume. At higher volume (>100/day), revisit with option (b): add a `pending_embed` sub-state on the entry that retrieval excludes until the Qdrant point lands.
+
+**Implementation**: `CandidateReviewService.approve` owns the transaction. A `QdrantUpsertFailed` catch-block calls `db.rollback()` before raising. Reject path has no Qdrant side effects, so its transaction is a straight UPDATE + COMMIT.
+
+**Related**: ADR-DISTILL-01 (candidate storage in a separate table); FR-ADMN-12; FR-BRAIN-07; FR-BRAIN-18.
