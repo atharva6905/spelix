@@ -1,153 +1,230 @@
-# Session 40 Handoff → Session 41: D-028 closed; next session starts Phase 3 Batch 2 (distillation StateGraph)
+# Session 41 Handoff → Session 42: Phase 3 Batch 2 shipped; next session flips `SPELIX_DISTILLATION_ENABLED=1` and verifies the first real candidate row on prod
 
-**Context refresh:** Session 40 was short and focused. Opened with a read of handoff/backlog/decisions/STRATEGY, confirmed that session 39's Priority 1 (streaq timeout 1800→900s) had already shipped last session as PR #73 (`3febef7` / feature `590e4db`), picked up D-028 — the Priority 3 cosmetic-banner fix — and shipped it via PR #75 (`b130ccb`). No other work this session. The L2 sprint still has 17 days to the 2026-05-03 hard gate; Phase 3 Batch 1 is live on prod since session 32; Batch 2 (distillation StateGraph + knowledge lifecycle + CoVe verification) has not been started and is the primary work for session 41.
+**Context refresh:** Session 41 was the planned Phase 3 Batch 2 execution session (L2 sprint Day 6, 2026-04-16 → 04-17). Scope was locked by the previous handoff: P3-004 distillation StateGraph + P3-005 knowledge lifecycle + FR-BRAIN-14 CoVe, with P3-006/007 and FR-BRAIN-08 explicitly out-of-scope for Batch 3 / post-L2. Full session executed brainstorming → spec → writing-plans → subagent-driven-development → finishing-a-development-branch in one sitting. PR #77 merged to `main` as `8e587c3` and deployed via the standard CI "Deploy to Production" path; droplet HEAD verified matching, all containers healthy. 4 post-merge docs commits on `main` directly (plan-file enum fixes, backlog close-out, ADR-DISTILL-05, this handoff) — none change runtime behavior, all are sub-200-line docs-only.
 
 ## 1. Completed
 
-| Ref | What |
-|---|---|
-| PR #75 merged `b130ccb` | `fix(frontend): D-028 suppress reconnect banner on intentional unsubscribe` (feature commit `cdf786d`) |
-| Backlog | D-028 flipped `pending` → `done` as part of PR #75 |
+### PR #77 (`8e587c3`) — Phase 3 Batch 2 Distillation Pipeline
 
-**D-028 fix details (frontend only, `frontend/src/hooks/useAnalysisStatus.ts`):**
-- Added `intentionalUnsubscribeRef: Ref<boolean>` to the hook.
-- Set the ref to `true` right before both `channel.unsubscribe()` call sites (terminal status via Realtime UPDATE payload, and terminal status via initial fetch).
-- The subscribe-status callback's `CHANNEL_ERROR | TIMED_OUT | CLOSED` branch now short-circuits with `if (intentionalUnsubscribeRef.current) return;` before flipping `isReconnecting=true` + starting polling.
-- The ref resets to `false` at the top of the `useEffect` body so a new `analysisId` value doesn't inherit a stale flag from a previous analysis.
+18 commits on `feat/phase3-batch2-distillation`, squash-rejected per memory (merge commit, not squash). Matches the 16 planned tasks from `docs/superpowers/plans/2026-04-16-phase3-batch2-distillation.md` plus 2 fixup rounds.
 
-**Tests (`frontend/src/hooks/__tests__/useAnalysisStatus.test.ts`, +3 cases, now 11/11 green):**
-- `does NOT set isReconnecting=true after intentional unsubscribe on terminal status` — exercises the D-028 bug directly.
-- `sets isReconnecting=true on unsolicited CHANNEL_ERROR (pre-terminal)` — regression proving legit reconnects still surface the banner.
-- `resets intentional-unsubscribe flag when analysisId changes` — regression for the cross-analysis leak I noticed mid-implementation.
+| Ref | What | Commit |
+|---|---|---|
+| L2-PHASE3-B2-01 | Alembic migration 011 + `CoachBrainCandidate` SQLAlchemy model (admin-only RLS, 3 indexes, no DDL FK) | `ac1ec15` |
+| L2-PHASE3-B2-02 | `CoachBrainCandidateCreate` / `CoachBrainCandidate` Pydantic schemas + `CoachBrainCandidateRepository` | `c44b578` |
+| L2-PHASE3-B2-03 | `DistillationState` TypedDict + `CandidateInsight` / `LifecycleDecision` / `BrainCoveResult` + `make_initial_distillation_state` | `cbdb494` |
+| L2-PHASE3-B2-04 | `extract_insights` node (Haiku 4.5 + instructor, never raises) | `f6995af` |
+| L2-PHASE3-B2-05 | `validate_quality` pure gate (pass / review / reject on eval_scores) | `705906f` |
+| L2-PHASE3-B2-06 | `lifecycle_decision` node (Cohere embed + Qdrant cosine → ADD / UPDATE / NOOP) | `97e6299` |
+| L2-PHASE3-B2-07 | `BrainCoveService.verify_claim` + `cove_verify` node (FR-BRAIN-14, single-claim, skips NOOP) | `e42d33a` + `5cfae29` (Chunk addition) |
+| L2-PHASE3-B2-08 | `format_entry` pure node (contradiction_flag on UPDATE + cove_unverified) | `bbfbec0` |
+| L2-PHASE3-B2-09 | `store_entry` node (INSERT candidate + FR-BRAIN-18 `confirmation_count` bump same-txn) | `c73c434` |
+| L2-PHASE3-B2-10 | Compiled `StateGraph` + conditional edge on validate_quality + `_wrap_trace` + `run_distillation_graph` | `5f8988b` |
+| L2-PHASE3-B2-11 | `distill_analysis` streaq task + `build_distillation_ctx` + `_maybe_enqueue_distillation` tail in both coaching paths | `e1d864d` |
+| L2-PHASE3-B2-11b | Consent cascade extended to `coach_brain_candidates` (FR-BRAIN-16) | `8a1c568` |
+| L2-PHASE3-B2-12 | `backend/CLAUDE.md` Phase 3 Distillation Architecture section | `f367967` |
+| L2-PHASE3-B2-13 | ADR-DISTILL-01/02/03/04 + backlog P3-004/005/008 rows | `5a7f98a` |
+| L2-PHASE3-B2-14 | Address audit findings — auditor C-01 (`>=` → `>` at NOOP 0.92 boundary + regression test); security H-1 (cascade return dict); security H-2 (cove_explanation sanitization) | `698acab` |
+| L2-PHASE3-B2-15 | CI fixes — pyright narrow on `ChunkPayload \| Chunk` in `coaching.py`; coverage tests for `deps.py` + `distillation_worker.py` (89.44 % → 90.31 %) | `6ca3f1c` |
+| L2-PHASE3-B2-16 | Open PR #77 → 2 CI rounds green → `mcp__github__merge_pull_request merge_method="merge"` → droplet verified | PR #77 `8e587c3` |
 
-**Red-Green verified:** the first new test failed as expected (`expected false, received true`) before the fix; passed after. No test was added after the implementation.
+### Post-merge docs commits on `main` (session 41)
 
-**Pre-existing (confirmed from last session, not re-shipped this session):**
-- D-035 follow-up (streaq `process_analysis` timeout 1800s → 900s) landed last session as PR #73 merge `3febef7`, feature `590e4db`. Verified still in place at `backend/app/workers/streaq_worker.py:149` (`@worker.task(timeout=900)` with justifying comment referencing ADR-060).
+| Ref | What | Commit |
+|---|---|---|
+| — | `docs(plan)` fix CoachingOutput enum Title-Case values + min_length=1 fills in test stubs (post-hoc) | `cad4da9` |
+| — | `docs(backlog)` close L2-PHASE3-BATCH2 + P3-004/005 + new Completed — Phase 3 Batch 2 section | `0629339` |
+| — | `docs(decisions)` ADR-DISTILL-05 — never persist raw `str(exc)` to admin-visible DB columns (derived from security H-2) | `7730ea5` |
+| — | `docs(handoff)` this file | — (this commit) |
+
+### Audit verdicts (pre-merge, post-fix)
+
+- **spelix-auditor** — PASS_WITH_FINDINGS; 1 CRITICAL (FR-BRAIN-17 NOOP boundary `>=` vs `>`) fixed in `698acab` with regression test at cosine=0.92; 2 MEDIUM items documented, deferred.
+- **spelix-security-reviewer** — PASS_WITH_FINDINGS; 2 HIGH (H-1 cascade return dict; H-2 exception-message leak) fixed in `698acab`; 2 MEDIUM items (one pre-existing "medical advice" wording, tracked for a dedicated SaMD sweep; one prompt-injection defence-in-depth) deferred.
 
 ## 2. Remaining
 
-### Sprint-visible non-started work (Phase 3 Batch 2 + Batch 3)
+### Sprint-visible non-started work (Phase 3 Batch 3 + smoke test)
 
 | ID | Title | SRS | Deps | Status |
 |---|---|---|---|---|
-| P3-004 | Distillation StateGraph — `extract_insights → validate_quality → format_entry → store_entry` with eval gate `overall ≥ 0.85 AND correctness ≥ 0.8`, runs async, never blocks coaching | FR-BRAIN-06 | none | not started — **Priority 1 session 41** |
-| P3-005 | Knowledge lifecycle ADD/UPDATE/NOOP with cosine thresholds (>0.92 NOOP / 0.75–0.92 UPDATE `confirmation_count` / <0.75 ADD candidate) + contradiction flagging | FR-BRAIN-17 | P3-004 | not started |
-| FR-BRAIN-14 | CoVe verification against `papers_rag` before every Coach Brain promotion | Should (Batch 2) | P3-004 | not started |
-| P3-006 | Coach Brain expert review queue in admin — single-screen cards with eval scorecard + CoVe result + approve/reject/edit, <30 sec/entry target | FR-ADMN-12, FR-BRAIN-07 | P3-004, P3-005 | not started (Batch 3, scheduled Days 17-19 per STRATEGY) |
+| P3-006 | Coach Brain expert review queue for distillation candidates — single-screen cards with eval scorecard + CoVe result + approve/reject/edit; compensation entries flagged; <30 sec/entry target | FR-ADMN-12, FR-BRAIN-07 | P3-004 (done), P3-005 (done) | **Priority 2 session 42** (Batch 3, Days 17-19 per STRATEGY) |
 | P3-007 | "How AI Reasoned" sidebar on `ResultsPage` — `@xyflow/react` graph rendered from LangSmith trace, plain English per NFR-USAB-05 | FR-RESL-07 | Phase 3 Batch 1 (done) | not started (Batch 3) |
 
-### Known-deferred backlog items (D-series, non-sprint-blocking)
+### Deferred post-L2 (explicitly not session-42 work)
 
 | ID | Title | Size | Status |
 |---|---|---|---|
-| D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` across DB column + SQLAlchemy model + Pydantic schema + frontend TypeScript + DOM `name` | M | pending — LOW priority, needs a migration |
+| P3-008 | FR-BRAIN-08 auto-triage — confidence-based auto-approve/auto-reject thresholds | M | deferred post-L2 — blocks on ≥50 human-reviewed candidates for threshold calibration |
+| D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` across DB column + schema + frontend TS + DOM `name` | M | pending — LOW priority, needs migration |
 | D-030 | Orphan `rag_documents` rows in `review_status='uploading'` — add nightly cleanup cron | S | pending — LOW |
 | D-031 | Admin `GET /rag/documents` — replace free-text `review_status` with `Literal` constraint | S | pending — LOW |
-| D-036 | GPU offload for pose extraction (Modal / Replicate / self-hosted) | L | deferred post-beta, trigger-gated (queue depth OR 3+ users request longer clips) |
+| D-036 | GPU offload for pose extraction (Modal / Replicate / self-hosted) | L | deferred post-beta, trigger-gated |
 
-### Non-code L2 sprint blockers (STRATEGY.md Day 1-2 track)
+### Known follow-ups from this session's audits (not blocking Batch 3 start)
 
-- **Kin expert onboarding call** — still pending from session 30 handoff. Expert portal PDF upload is wired (Day 1-2 of the compressed 19-day sprint already shipped per STRATEGY v3), but zero real PDFs uploaded yet. Target 10+ papers by May 3.
-- **Landing page V1** — status unclear from this session's read-through. Need to re-verify it is live on prod (migration 008 `beta_requests` should already be applied per D-027 note in backlog).
+- **Audit MEDIUM M-01** (lifecycle `cosine_sim=0.0` vs `None` on empty Qdrant — misleading in Batch 3 UI) → address while building P3-006 review queue.
+- **Audit MEDIUM M-02** (`store_entry` uses raw `select(CoachBrainEntry)` instead of going through `CoachBrainRepository`) → either extract a `repo.increment_confirmation()` method or document the direct-session pattern in `backend/CLAUDE.md`.
+- **Audit MEDIUM M-03** (`_HAIKU_MODEL` constant duplicated across `extract.py` and `cove_brain.py`) → extract to a shared constant.
+- **Security MEDIUM M-1** (prompt-injection defence-in-depth on `CoachingOutput` fields) → strip separator sequences before prompt interpolation when touching distillation extract prompt.
+- **Security MEDIUM M-2** (pre-existing "medical advice" string in PDF disclaimer) → defer to a dedicated SaMD language-sweep PR.
+
+### Non-code L2 sprint blockers
+
+- **Kin expert onboarding call** — still pending since session 30. Expert portal PDF upload is wired; zero PDFs uploaded. Target 10+ papers by 2026-05-03. Day-by-day slip against compounding-throughput target.
+- **Landing page V1** — status unclear; needs re-verification on prod.
 
 ## 3. Test counts
 
-**Ran this session:**
-- Frontend: `npx vitest run` → **272 passing, 0 failing** (11/11 in `useAnalysisStatus.test.ts` including the 3 new D-028 cases). 54.6s run.
-- Frontend typecheck: `npx tsc -b --noEmit` → exit 0, clean.
-- Backend: NOT re-run this session (zero backend code changes — the D-028 fix was frontend-only and the D-035 follow-up landed last session).
+**Backend** (final local run in worktree, pre-merge):
+- `uv run pytest -x -q --ignore=tests/e2e` → **1637 passing, 27 skipped, 0 failing**, 90.31 % coverage. 171 s wall-clock.
+- `uv run ruff check .` → clean.
+- `uv run pyright` → 0 errors, 0 warnings, 0 informations.
+- Migration round-trip (`downgrade -1 && upgrade head`) → clean, head = `011_coach_brain_candidates`.
 
-**Last known backend counts (from session 39 handoff, unchanged):**
-- Backend: **1539 passing, 19 skipped, 0 failing**. Coverage 90%+.
-- One pre-existing flaky frontend test: `EmailCaptureForm` timeout (unrelated to this work, pre-dates session 36).
+**Frontend**: NOT re-run this session — zero frontend code changes in PR #77. Last known counts from session 40: **272 passing, 0 failing**.
+
+**Delta vs session 40 baseline**: +51 new backend tests across the distillation package, consent cascade extension, and worker body coverage (1586 → 1637).
+
+**Two pre-existing pyright errors** in `backend/tests/unit/test_consent_cascade.py` lines 205 + 259 (`dict[str, Unknown]` vs `CurrentUser`) — predate Task 11b, not introduced by this work, carried forward.
 
 ## 4. E2E verification
 
-**Not run this session.** The D-028 fix is user-visible on the `AnalysisStatusPage` after any terminal analysis (hiding the "Connection lost — reconnecting…" banner that previously appeared on every completed run), and per CLAUDE.md "touches status flow" this normally qualifies for Playwright E2E on spelix.app. It was explicitly skipped because:
+**Not run this session.** Merge is a no-op behavioural change because `SPELIX_DISTILLATION_ENABLED=0` is the default in both the env-var table (`backend/CLAUDE.md`) and the gate code (`analysis_worker.py::_maybe_enqueue_distillation`). No user-facing flow was modified by this PR. Per CLAUDE.md "Skip verification for: ... CI fixes that don't change runtime behavior, ..." — the entire merge is runtime-neutral without the flag flip.
 
-1. The fix is cosmetic-only — analysis results still rendered correctly before, only an extra banner was visible.
-2. Vitest red-green cycle proves the specific behavior (CLOSED-after-intentional-unsubscribe no longer flips `isReconnecting`).
-3. The user's explicit next-step instruction was to close D-028 and pause; running a fresh upload + 11-minute pipeline wait for cosmetic verification was not authorized.
+**Droplet-level verification** (confirming the deploy landed):
+- `ssh spelix-droplet "git log --oneline -1"` → `8e587c3 Merge pull request #77 from atharva6905/feat/phase3-batch2-distillation` ✓
+- `ssh spelix-droplet "docker ps --format '{{.Names}} {{.Status}}'"` → `spelix-backend-1 Up 46 seconds (healthy)`, `spelix-worker-1 Up 46 seconds`, `spelix-redis-1 Up 2 days (healthy)` ✓
+- CI run `24547670544` on main → all 6 checks green, **Deploy to Production ✓ (35 s)**.
 
-**Recommendation for session 41:** piggyback D-028 E2E onto the next prod analysis that lands for any reason (Phase 3 Batch 2 testing, kin expert upload, or a deliberate smoke test). Assert zero "Connection lost — reconnecting…" banner on the `AnalysisStatusPage` after `completed`.
-
-**Post-merge deploy verified:** droplet `HEAD = b130ccb` matched the merge commit; `spelix-backend-1` + `spelix-redis-1` healthy; `spelix-worker-1` running (no healthcheck configured for worker, which is expected).
+**E2E is deferred to session 42's flag-flip step** — see Next session start §6. The very first real candidate row after the flag flip is the actual verification event.
 
 ## 5. Blockers
 
-**None code-side.** D-028 is closed, tests green, prod deployed.
+**None code-side.** PR #77 merged clean, all tests green, prod deploy verified.
 
-**Soft non-code blocker for L2 gate:** kin expert onboarding call has not happened since session 30. Without it, the `papers_rag` corpus can't grow and the "30+ expert-reviewed papers in production by July 1" narrative from STRATEGY.md §Kinesiology Expert Activation Plan won't materialize. This is now a day-by-day slip against the compounding throughput target.
+**Soft blockers:**
+- Kin expert onboarding call (same carry-over from session 40) — without ≥10 real PDFs in `papers_rag` by 2026-05-03, the distillation CoVe step will always short-circuit with `verified=false, explanation="no_papers_evidence"`. That's not a code bug — the guard is intentional — but it means candidate rows at L2 launch will ALL carry `cove_verified=false` until the corpus grows. Review queue must display this banner clearly in Batch 3.
+
+**Worktree state**: `../spelix-phase3-batch2` removed, local branch `feat/phase3-batch2-distillation` deleted. No cleanup remaining.
 
 ## 6. Next session start
 
-The user pre-declared the session-41 scope with the /handoff args: **"in the next session we will start phase 3 batch 2"**. The workflow is Plan → Execute → Review, with the new `spelix-langgraph-engineer` specialist agent doing the core implementation.
+The user-pre-declared session-42 priorities: (1) flip the feature flag on prod and verify a first real candidate row lands, (2) start Phase 3 Batch 3 (P3-006 review queue UI + P3-007 reasoning sidebar).
 
 ```bash
 /status
 
-# PRIORITY 1 — Start Phase 3 Batch 2. Activate spelix-langgraph-engineer.
+# PRIORITY 1 — Post-merge op: flag flip + first real candidate verification.
 #
+# 1a. SSH to droplet, edit /home/deploy/spelix/.env.prod:
+#         SPELIX_DISTILLATION_ENABLED=1
+#     then `docker compose restart worker` (backend container does NOT need
+#     restart — only the worker reads the flag).
+#
+# 1b. Use the fresh E2E test account (rate-limit safe):
+#         email: atharva6905+e2e-d035@gmail.com
+#         password: SpelixE2E-D035-2026!
+#     Upload one real squat/bench/deadlift video, wait for `status=completed`.
+#
+# 1c. Query candidate rows:
+#         docker exec spelix-backend-1 python -c "
+#         import asyncio, os
+#         from sqlalchemy import select
+#         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+#         from app.models.coach_brain_candidate import CoachBrainCandidate
+#         async def main():
+#             e = create_async_engine(os.environ['DATABASE_URL'].replace('postgresql://', 'postgresql+asyncpg://', 1), connect_args={'statement_cache_size': 0})
+#             async with async_sessionmaker(e, expire_on_commit=False)() as s:
+#                 rows = (await s.execute(select(CoachBrainCandidate).order_by(CoachBrainCandidate.created_at.desc()).limit(5))).scalars().all()
+#                 for r in rows:
+#                     print(r.id, r.lifecycle_decision, r.cove_verified, r.review_status, r.nearest_cosine_sim)
+#         asyncio.run(main())"
+#     Acceptance: ≥1 row with lifecycle_decision in ('ADD', 'UPDATE', 'NOOP'),
+#     cove_verified in (False, True) (False expected if papers_rag is thin),
+#     review_status in ('pending', 'superseded').
+#
+# 1d. If nothing lands: check worker log for "distill_analysis" messages
+#     and "distillation enqueue failed" warnings. The enqueue path swallows
+#     errors — grep there first, not in the candidate table.
+#
+# 1e. Once verified on prod: piggyback a Playwright MCP walk of the user
+#     flow (upload → status → results → download) to confirm distillation
+#     does NOT regress coaching latency. Record in this handoff under
+#     "E2E Findings" before touching Batch 3.
+
+# PRIORITY 2 — Start Phase 3 Batch 3 (P3-006 + P3-007, Days 17-19 per STRATEGY).
+#
+# Activate: spelix-langgraph-engineer stays; add a Plan → Execute → Review loop.
 # Read order:
-#   1. docs/SRS.md § FR-BRAIN-06 (distillation StateGraph) +
-#      FR-BRAIN-17 (lifecycle) + FR-BRAIN-14 (CoVe, Should)
-#   2. decisions.md: ADR-BRAIN-06 (LangGraph StateGraph choice),
-#      ADR-BRAIN-07 (standalone distillation graph, async, eval-gated)
-#   3. backend/app/agents/  (Phase 3 Batch 1 lives here — mode=deterministic
-#      graph + 10 composable tools, shipped via PR #52)
+#   1. docs/SRS.md §FR-ADMN-12 (expert review queue) + §FR-BRAIN-07
+#      (promote/reject/edit actions) + §FR-RESL-07 (reasoning sidebar,
+#      NFR-USAB-05 plain-English constraint)
+#   2. docs/superpowers/specs/2026-04-16-phase3-batch2-distillation-design.md
+#      §5.2 "store_entry" (describes the audit-only 'superseded' review_status
+#      that Batch 3 MUST filter out of the queue)
+#   3. decisions.md ADR-DISTILL-01 (review queue queries coach_brain_candidates,
+#      NOT coach_brain_entries; promotion INSERTs into coach_brain_entries)
 #
 # Plan, don't implement yet:
-#   /plan "Phase 3 Batch 2 — distillation StateGraph + knowledge lifecycle"
+#   /plan "Phase 3 Batch 3 — expert review queue + reasoning sidebar"
 #
-# Scope (per STRATEGY.md Days 13-16, now pulled forward to Day 6 buffer):
-#   - P3-004: StateGraph nodes extract_insights → validate_quality →
-#     format_entry → store_entry with gate `overall >= 0.85 AND
-#     correctness >= 0.8`. Runs async in its own worker task,
-#     never blocks coaching.
-#   - P3-005: cosine dedup against existing `coach_brain` entries;
-#     >0.92 NOOP / 0.75-0.92 UPDATE `confirmation_count` / <0.75 ADD
-#     candidate. Contradiction flag when semantic sim high but
-#     opposing directionality.
-#   - FR-BRAIN-14 (Should): CoVe verification — after distillation
-#     produces a candidate, generate verification questions against
-#     `papers_rag`, answer them, flag any claim the corpus doesn't
-#     support. Cite ACL 2024 Dhuliawala et al.
+# Scope (per STRATEGY.md Days 17-19):
+#   - P3-006: single-screen review card at /admin/coach-brain/candidates.
+#     Query coach_brain_candidates where review_status='pending' ORDER BY
+#     eval_scores->>'overall' DESC, created_at DESC. Display: content,
+#     exercise, phase, entry_type, lifecycle_decision + nearest_cosine_sim,
+#     cove_verified + cove_explanation, eval_scores scorecard.
+#     Actions: approve → INSERT coach_brain_entries + UPDATE candidates
+#     promoted_entry_id; reject → UPDATE candidates rejected_reason;
+#     edit → inline content edit then approve. <30 sec/entry target.
+#     Compensation entries (entry_type='compensation' — not in current
+#     CHECK, needs a Batch 3 migration to add) flagged for biomechanics
+#     reviewer.
+#   - P3-007: "How AI Reasoned" sidebar on ResultsPage, reading from
+#     coaching_results.agent_trace_json (persisted in Batch 1). Render
+#     via @xyflow/react as a graph: nodes=graph nodes executed,
+#     edges=data dependencies. Click a node → show input_keys,
+#     output_keys, duration_ms. Plain English per NFR-USAB-05 (no
+#     "Tier 1 landmark_conf" jargon in node labels).
 #
 # TDD gates:
-#   - Backend: pytest coverage on new graph nodes, including the
-#     eval-gate failure path (candidate rejected when overall < 0.85).
-#   - Integration: one test that runs the full graph end-to-end on a
-#     synthetic coaching output fixture, asserts an entry lands in
-#     `coach_brain_candidates` (NOT `coach_brain` — expert approval
-#     promotes in Batch 3).
-#
-# DO NOT start Batch 3 (review queue + reasoning sidebar) in this
-# session. Keep the PR surface tight; ship Batch 2 green first.
+#   - Backend: pytest over the new admin endpoints; RLS still admin-only.
+#   - Frontend: vitest over the review-queue component states (loading,
+#     empty, one candidate, approve/reject actions).
+#   - E2E: admin login → /admin/coach-brain/candidates → approve one →
+#     verify it lands in coach_brain_entries + new coaching analysis
+#     hits it via retrieval.
 
-# PRIORITY 2 (backfill only if Batch 2 blocks on something external):
-#   - D-028 Playwright E2E verification on the next real prod analysis
-#     (see §4 above).
-#   - Kin expert onboarding call — schedule a window this week.
+# PRIORITY 3 (backfill only if Batch 3 slips):
+#   - Kin expert onboarding call — schedule this week.
+#   - Follow up on audit MEDIUM items (M-01 cosine_sim None, M-03 Haiku
+#     constant dedup).
 
 # ENVIRONMENT NOTES:
-#   - Local main is up to date with origin/main at b130ccb.
-#   - Fresh E2E test account still usable (burns less of the 10/day
-#     rate limit on the primary account):
-#     email: atharva6905+e2e-d035@gmail.com
-#     password: SpelixE2E-D035-2026!
-#   - streaq process_analysis timeout = 900s (post-D-035 close).
-#   - Phase 3 feature flag: already flipped ON in prod since session 32.
+#   - Local main = origin/main = `7730ea5` (post-ADR-DISTILL-05 commit).
+#     If this handoff lands as a separate commit, update that reference.
+#   - Phase 3 Batch 2 feature flag: SPELIX_DISTILLATION_ENABLED=0 as of
+#     session 41 merge. Session 42 Priority 1 flips it.
+#   - streaq process_analysis timeout = 900s; distill_analysis timeout
+#     = 300s (both in backend/app/workers/streaq_worker.py).
+#   - Phase 3 agent feature flag: SPELIX_PHASE3_AGENT_ENABLED=1 on prod
+#     since session 32 — both coaching paths (graph + imperative fallback)
+#     trigger distillation identically, so the flag flip in 1a covers both.
 ```
 
 ## 7. Session timing
 
-- 21:30 UTC (2026-04-16): session opened with a read of handoff/backlog/decisions/STRATEGY; confirmed D-035 follow-up already shipped last session
-- 21:34-21:40 UTC: D-028 fix via TDD — failing test first, intentional-unsubscribe ref added, three test cases green
-- 21:42 UTC: commit `cdf786d`, pushed, PR #75 opened
-- 21:47 UTC: CI green (6/6), PR #75 merged as `b130ccb` via merge commit
-- 21:48 UTC: "Deploy to Production" succeeded in 31s; droplet HEAD verified at `b130ccb`, containers healthy
-- 21:50 UTC: confirmed D-028 backlog row flipped to `done`; confirmed D-035 follow-up from last session still in place
-- 21:55 UTC: handoff written
+- 20:30 UTC (2026-04-16): session opened, read handoff/SRS/STRATEGY, brainstormed design
+- 20:45 UTC: design doc written to `docs/superpowers/specs/...-design.md`
+- 21:00 UTC: plan doc written to `docs/superpowers/plans/...-distillation.md`
+- 21:15 UTC: worktree created, baseline tests verified (1586 passed)
+- 21:20–03:00 UTC (16 tasks over ~6 h): subagent-driven-development loop with `spelix-migration`, `spelix-tdd`, `spelix-langgraph-engineer` agents; one agent interrupted (Task 11b consent cascade) and recovered inline
+- 03:00–03:45 UTC: `spelix-auditor` + `spelix-security-reviewer` parallel run, 3 findings fixed
+- 03:50 UTC: push + PR #77 opened
+- 04:00 UTC: CI round 1 red (coverage + pyright), fixes pushed as `6ca3f1c`
+- 04:05 UTC: CI round 2 green, PR #77 merged as `8e587c3`
+- 04:10 UTC: Deploy to Production green (35 s), droplet HEAD verified
+- 04:15–04:45 UTC: post-merge docs — plan fixup, backlog, ADR-DISTILL-05, this handoff
 
 ---
