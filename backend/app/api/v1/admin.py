@@ -18,8 +18,17 @@ from app.models.coach_brain_entry import CoachBrainEntry as CoachBrainEntryModel
 from app.repositories.analysis import AnalysisRepository
 from app.repositories.analysis_expert_review import AnalysisExpertReviewRepository
 from app.repositories.coach_brain import CoachBrainRepository
+from app.repositories.coach_brain_candidate import CoachBrainCandidateRepository
 from app.repositories.rag_document import RagDocumentRepository
 from app.repositories.user_profile import UserProfileRepository
+from app.schemas.candidate_review import (
+    ApproveRequest,
+    ApproveResponse,
+    CandidateListItem,
+    PendingQueueStats,
+    RejectRequest,
+    RejectResponse,
+)
 from app.schemas.coach_brain import (
     CoachBrainEntry as CoachBrainEntrySchema,
     CoachBrainEntryCreate,
@@ -28,11 +37,24 @@ from app.schemas.coach_brain import (
 from app.schemas.expert_review import AdminExpertQueueItem, AdminExpertQueueStats
 from app.schemas.rag_document import RagDocumentResponse, ReEmbedResponse
 from app.services.admin import AdminService
+from app.services.brain_embedding import BrainEmbeddingService
+from app.services.candidate_review import (
+    CandidateAlreadyReviewed,
+    CandidateNotFound,
+    CandidateReviewService,
+    PromptInjectionDetected,
+    QdrantUpsertFailed,
+)
+from app.services.cohere_client import get_cohere_client
+from app.services.qdrant import get_qdrant_client
 
 # Keep references alive so ruff doesn't strip them (used in response_model)
 _USED = (
     AnalysisExpertReviewRepository,
     CoachBrainRepository,
+    CoachBrainCandidateRepository,
+    CandidateReviewService,
+    PromptInjectionDetected,
     CoachBrainEntryModel,
     CoachBrainEntrySchema,
     CoachBrainEntryCreate,
@@ -429,3 +451,183 @@ async def delete_coach_brain_entry(
             detail={"error": {"code": "NOT_FOUND", "message": "Coach Brain entry not found.", "detail": None}},
         )
     await repo.delete_by_id(entry_id)
+
+
+# ---------------------------------------------------------------------------
+# Coach Brain Expert Review Queue (P3-006, FR-ADMN-12, FR-BRAIN-07)
+# ---------------------------------------------------------------------------
+
+
+async def _get_candidate_repo(
+    db: AsyncSession = Depends(get_db),
+) -> CoachBrainCandidateRepository:
+    return CoachBrainCandidateRepository(db)
+
+
+async def _get_review_service(
+    db: AsyncSession = Depends(get_db),
+) -> CandidateReviewService:
+    cand_repo = CoachBrainCandidateRepository(db)
+    entry_repo = CoachBrainRepository(db)
+    try:
+        cohere = get_cohere_client()
+        qdrant = await get_qdrant_client()
+    except Exception as exc:
+        # Wrap vendor-client construction failures so env-misconfiguration
+        # surfaces as 503 with a clean envelope instead of a raw 500 whose
+        # traceback may echo secrets (QDRANT_URL, COHERE_API_KEY values).
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "code": "VECTOR_STORE_UNAVAILABLE",
+                    "message": "Vector store client unavailable. Retry later.",
+                    "detail": None,
+                }
+            },
+        ) from exc
+    brain_embedding = BrainEmbeddingService(
+        cohere_client=cohere,
+        qdrant_client=qdrant,  # type: ignore[arg-type]
+    )
+    return CandidateReviewService(
+        db=db,
+        candidate_repo=cand_repo,
+        entry_repo=entry_repo,
+        brain_embedding=brain_embedding,
+    )
+
+
+@router.get(
+    "/coach-brain/candidates",
+    response_model=list[CandidateListItem],
+)
+async def list_coach_brain_candidates(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_admin_user),
+    repo: CoachBrainCandidateRepository = Depends(_get_candidate_repo),
+) -> list[Any]:
+    rows = await repo.list_pending_ordered(limit=limit, offset=offset)
+    return [CandidateListItem.model_validate(r.model_dump()) for r in rows]
+
+
+@router.get(
+    "/coach-brain/candidates/stats",
+    response_model=PendingQueueStats,
+)
+async def coach_brain_candidate_stats(
+    user: CurrentUser = Depends(get_admin_user),
+    repo: CoachBrainCandidateRepository = Depends(_get_candidate_repo),
+) -> dict[str, int]:
+    total = await repo.count_pending()
+    return {"total_pending": total}
+
+
+@router.post(
+    "/coach-brain/candidates/{candidate_id}/approve",
+    response_model=ApproveResponse,
+)
+async def approve_coach_brain_candidate(
+    candidate_id: UUID,
+    body: ApproveRequest,
+    user: CurrentUser = Depends(get_admin_user),
+    service: CandidateReviewService = Depends(_get_review_service),
+) -> ApproveResponse:
+    try:
+        return await service.approve(
+            candidate_id=candidate_id,
+            admin_user_id=user["id"],
+            content_override=body.content_override,
+        )
+    except CandidateNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Candidate not found.",
+                    "detail": None,
+                }
+            },
+        )
+    except CandidateAlreadyReviewed:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "ALREADY_REVIEWED",
+                    "message": "Candidate has already been reviewed.",
+                    "detail": None,
+                }
+            },
+        )
+    except PromptInjectionDetected:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "PROMPT_INJECTION_DETECTED",
+                    "message": (
+                        "Edited content matched a prompt-injection denylist "
+                        "pattern (e.g. role separators, 'IGNORE PREVIOUS INSTRUCTIONS'). "
+                        "Rephrase the cue without those sequences."
+                    ),
+                    "detail": None,
+                }
+            },
+        )
+    except QdrantUpsertFailed:
+        # Do not leak vendor exception strings (may contain cluster hostnames
+        # or credential fragments in some client SDKs). Full cause is already
+        # logged via logger.exception in CandidateReviewService.approve.
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": {
+                    "code": "QDRANT_UPSERT_FAILED",
+                    "message": "Vector store upsert failed. Retry later; full cause in server logs.",
+                    "detail": None,
+                }
+            },
+        )
+
+
+@router.post(
+    "/coach-brain/candidates/{candidate_id}/reject",
+    response_model=RejectResponse,
+)
+async def reject_coach_brain_candidate(
+    candidate_id: UUID,
+    body: RejectRequest,
+    user: CurrentUser = Depends(get_admin_user),
+    service: CandidateReviewService = Depends(_get_review_service),
+) -> RejectResponse:
+    try:
+        return await service.reject(
+            candidate_id=candidate_id,
+            admin_user_id=user["id"],
+            reason=body.reason,
+        )
+    except CandidateNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Candidate not found.",
+                    "detail": None,
+                }
+            },
+        )
+    except CandidateAlreadyReviewed as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "ALREADY_REVIEWED",
+                    "message": "Candidate has already been reviewed.",
+                    "detail": str(exc),
+                }
+            },
+        )

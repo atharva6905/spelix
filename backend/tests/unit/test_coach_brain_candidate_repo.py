@@ -71,3 +71,85 @@ async def test_list_pending_returns_only_pending(db_session: AsyncSession) -> No
     ids = [p.id for p in pending]
     assert a.id in ids
     assert all(p.review_status == "pending" for p in pending)
+
+
+async def _insert_for_sort(
+    repo: CoachBrainCandidateRepository,
+    *,
+    faithfulness: float | None = None,
+    overall: float | None = None,
+    review_status: str = "pending",
+    content: str = "Tuck elbows at 45 degrees.",
+) -> object:
+    eval_scores: dict[str, float] = {}
+    if faithfulness is not None:
+        eval_scores["faithfulness"] = faithfulness
+    if overall is not None:
+        eval_scores["overall"] = overall
+    create = CoachBrainCandidateCreate(
+        exercise="bench",
+        phase="descent",
+        entry_type="cue",
+        content=content,
+        trigger_tags=[],
+        source_analysis_ids=[uuid.uuid4()],
+        eval_scores=eval_scores,
+        lifecycle_decision="ADD",
+        review_status=review_status,
+    )
+    return await repo.create(create)
+
+
+@pytest.mark.asyncio
+async def test_list_pending_ordered_prefers_overall_then_faithfulness_then_created_at(
+    db_session: AsyncSession,
+) -> None:
+    repo = CoachBrainCandidateRepository(db_session)
+    low = await _insert_for_sort(repo, faithfulness=0.5, content="A")
+    top = await _insert_for_sort(repo, overall=0.95, faithfulness=0.6, content="B")
+    mid = await _insert_for_sort(repo, faithfulness=0.85, content="C")
+    _ = await _insert_for_sort(
+        repo, faithfulness=0.99, review_status="rejected", content="D"
+    )
+
+    # Use a large limit to capture all pending rows; filter to the 3 we inserted
+    # so the assertion is robust against pre-existing pending rows in the test DB.
+    rows = await repo.list_pending_ordered(limit=1000, offset=0)
+
+    our_ids = {low.id, top.id, mid.id}
+    ordered = [r for r in rows if r.id in our_ids]
+    assert len(ordered) == 3
+    assert ordered[0].id == top.id
+    assert ordered[1].id == mid.id
+    assert ordered[2].id == low.id
+    assert all(r.review_status == "pending" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_count_pending_excludes_non_pending(db_session: AsyncSession) -> None:
+    repo = CoachBrainCandidateRepository(db_session)
+    before = await repo.count_pending()
+    await _insert_for_sort(repo)
+    await _insert_for_sort(repo, review_status="approved")
+    await _insert_for_sort(repo, review_status="rejected")
+    await _insert_for_sort(repo, review_status="superseded")
+
+    # Only the one pending insert should increment the count.
+    assert await repo.count_pending() == before + 1
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_for_update_returns_orm_row(db_session: AsyncSession) -> None:
+    repo = CoachBrainCandidateRepository(db_session)
+    created = await _insert_for_sort(repo)
+
+    locked = await repo.get_by_id_for_update(created.id)
+
+    assert locked is not None
+    assert locked.id == created.id
+    assert locked.review_status == "pending"
+    locked.review_status = "approved"
+    await db_session.flush()
+    refetched = await repo.get_by_id(created.id)
+    assert refetched is not None
+    assert refetched.review_status == "approved"

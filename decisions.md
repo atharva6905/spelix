@@ -643,3 +643,40 @@ Use the buffer to pull Phase 3 Batch 1 (P3-001/002/003) forward from the schedul
 - Any future Phase 2 code that introduces a NEW `eval_scores`-gated decision MUST follow this fallback pattern. Add a code-quality reviewer check at the next eval-touching PR.
 - M-06 backlog item: when Phase 4 ships `overall` + `correctness`, audit both fallback sites to confirm `overall` takes precedence and document the deprecation path for the fallback (don't remove it — Phase 2 analyses in the historical table still need it for replay/audit).
 - Test coverage added: 4 regression tests across `tests/integration/test_distillation_worker_e2e.py` (2 new) and `tests/unit/test_distillation_validate.py` (2 new) explicitly assert the faithfulness-fallback semantics.
+
+## ADR-BRAIN-REVIEW-01: Near-atomic approve — Postgres INSERT + Qdrant upsert in one request (Session 43)
+
+**Context**: The expert review queue (P3-006) promotes `coach_brain_candidates.review_status='pending'` rows into `coach_brain_entries.status='active'` AND indexes them into the Qdrant `coach_brain` collection. Two options:
+
+- (a) In-request: INSERT Postgres row → embed + upsert Qdrant → UPDATE candidate → COMMIT, rolling back DB on any failure.
+- (b) Deferred: INSERT Postgres row → enqueue an embed job → COMMIT immediately; worker picks it up and back-fills the Qdrant point later.
+
+**Decision**: Option (a). At L2 volume (<10 analyses/day → ≤~10 candidates/day), the review rate is bounded by the human reviewer (~30 sec/entry); Cohere embed + Qdrant upsert adds ~200–400 ms and is not the latency floor. The in-request path also prevents the most-likely failure mode — a Postgres `coach_brain_entries` row with no corresponding Qdrant point is retrievable by admin tools but invisible to real-time coaching. That's the exact "coach_brain_primary returns 0 hits so we silently degrade" failure that bit us in session 42.
+
+**Not truly atomic — the narrow window**: The operation is NOT atomic in the strict 2-phase-commit sense. Execution order is INSERT+flush (Postgres) → Qdrant upsert → UPDATE candidate → `db.commit()`. If the final `db.commit()` fails after a successful Qdrant upsert, we have a Qdrant-only point with no Postgres entry row. In practice this is vanishingly rare: Postgres commits over PgBouncer at L2 volume have sub-ppm failure rates, and the in-session work just before commit is minimal. When it does happen, Qdrant upserts are idempotent by ID (point_id = `str(entry.id)`) so an admin retry re-upserts the same point without duplicates; the orphan is detectable by a nightly audit query (`SELECT point_id FROM qdrant WHERE id NOT IN (SELECT id FROM coach_brain_entries)`). Adding a second Qdrant `delete_points` call in a `try/except` around the commit would complicate the error envelope without materially reducing risk at this volume.
+
+**FR-BRAIN-18 interpretation**: SRS says `confirmation_count` is "incremented when a human reviewer approves a candidate entry that was initially auto-held for review." Candidates don't have their own `confirmation_count` column — only the promoted `coach_brain_entries` row does. We set `confirmation_count=1` on the new entry at approval time. Semantically: the human approval IS the first confirmation, matching the seed-entry convention (FR-BRAIN-18 explicitly sets seed initial value = 1). Zero would mean "entry exists but nobody has vouched for it," which contradicts the approval act itself.
+
+**Consequences**: One failed Cohere / Qdrant call fails the whole approve request with HTTP 502 `QDRANT_UPSERT_FAILED`. The admin retries. If Cohere is persistently down, approvals block — acceptable at current volume. At higher volume (>100/day), revisit with option (b): add a `pending_embed` sub-state on the entry that retrieval excludes until the Qdrant point lands.
+
+**Implementation**: `CandidateReviewService.approve` owns the transaction. A `QdrantUpsertFailed` catch-block calls `db.rollback()` before raising. Reject path has no Qdrant side effects, so its transaction is a straight UPDATE + COMMIT.
+
+**Related**: ADR-DISTILL-01 (candidate storage in a separate table); FR-ADMN-12; FR-BRAIN-07; FR-BRAIN-18.
+
+**L2-launch deviations from FR-ADMN-12 (explicit down-scoping, session 43 audit)**:
+
+The spelix-auditor (session 43) flagged three surface-coverage gaps against FR-ADMN-12's "Must" information set. All three are down-scoped to D-037 and D-038 follow-ups rather than blocking L2 launch:
+
+1. **Top-2 similar existing approved entries** (auditor H-02). Implementation shows only the single nearest entry (`nearest_entry_id` + `nearest_cosine_sim` already persisted on the candidate by the distillation `lifecycle_decision` node). Showing a second requires a per-card Qdrant live search, adding ~50–150 ms per card view. At L2 volume (11 live candidates, <10/day new) the marginal safety gain is small. Tracked in D-037.
+
+2. **confirmation_count field on the review card** (auditor H-03). The candidate row itself has no `confirmation_count` column — only `coach_brain_entries` does. SRS likely meant "show how often the nearest existing entry has been confirmed," which is redundant with the top-2-similar-entries feature (D-037). Bundled into D-037.
+
+3. **entry_type='compensation' CHECK constraint** (auditor M-01). The UI banner is forward-compatible (TSX cast), so no live rows can land today. The CHECK migration and biomechanics reviewer routing are tracked in D-038.
+
+**Security hardening applied from session 43 reviewer (inline, not deferred)**:
+
+- HTTP 409 (`ALREADY_REVIEWED`) and 502 (`QDRANT_UPSERT_FAILED`) response bodies set `detail: null` instead of echoing `str(exc)`. Vendor SDK exception strings can include cluster hostnames or credential fragments in debug output. Full cause is retained via `logger.exception` at the service layer.
+- `_get_review_service` wraps `get_cohere_client()` / `await get_qdrant_client()` in try/except and surfaces env-misconfiguration as a clean HTTP 503 (`VECTOR_STORE_UNAVAILABLE`) envelope.
+- `CandidateReviewService.approve` runs a denylist regex against `content_override` to reject obvious prompt-injection separator sequences (`\n\nHuman:`, `<|im_end|>`, `[INST]`, `IGNORE PREVIOUS INSTRUCTIONS`, etc.) before the content flows to Cohere embed and Qdrant upsert. Raised as `PromptInjectionDetected`, mapped to HTTP 422 `PROMPT_INJECTION_DETECTED`. Expert-review workflow remains the primary defense; this is defence-in-depth for admin-editor compromise.
+
+**Decision**: ship P3-006 at this scope for L2 launch. The core correctness properties (`confirmation_count=1` per FR-BRAIN-18, `SELECT FOR UPDATE` race guard, Qdrant rollback on upsert failure, admin-only RLS) are unaffected by the deferred surface work. D-037 and D-038 are explicitly prioritized ahead of Phase 4 eval work.

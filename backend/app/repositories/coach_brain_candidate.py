@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.coach_brain_candidate import CoachBrainCandidate as CoachBrainCandidateRow
@@ -61,7 +61,64 @@ class CoachBrainCandidateRepository:
         return [CoachBrainCandidate.model_validate(r) for r in result.scalars().all()]
 
     async def get_by_id(self, candidate_id: uuid.UUID) -> CoachBrainCandidate | None:
-        stmt = select(CoachBrainCandidateRow).where(CoachBrainCandidateRow.id == candidate_id)
+        stmt = select(CoachBrainCandidateRow).where(
+            CoachBrainCandidateRow.id == candidate_id
+        )
         result = await self._db.execute(stmt)
         row = result.scalars().one_or_none()
         return CoachBrainCandidate.model_validate(row) if row is not None else None
+
+    async def list_pending_ordered(
+        self, *, limit: int = 50, offset: int = 0
+    ) -> Sequence[CoachBrainCandidate]:
+        """Pending candidates sorted for review: highest quality first.
+
+        Sort key precedence:
+          1. eval_scores->>'overall' DESC NULLS LAST
+          2. eval_scores->>'faithfulness' DESC NULLS LAST
+          3. created_at DESC
+
+        Mirrors the distillation gate fallback (PR #80 / PR #81): `overall`
+        is Phase-4-populated; until then `faithfulness` carries the sort.
+        """
+        overall_sort = (
+            literal_column("(eval_scores->>'overall')::float").desc().nulls_last()
+        )
+        faith_sort = (
+            literal_column("(eval_scores->>'faithfulness')::float").desc().nulls_last()
+        )
+        stmt = (
+            select(CoachBrainCandidateRow)
+            .where(CoachBrainCandidateRow.review_status == "pending")
+            .order_by(
+                overall_sort, faith_sort, CoachBrainCandidateRow.created_at.desc()
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._db.execute(stmt)
+        return [CoachBrainCandidate.model_validate(r) for r in result.scalars().all()]
+
+    async def count_pending(self) -> int:
+        stmt = select(func.count(CoachBrainCandidateRow.id)).where(
+            CoachBrainCandidateRow.review_status == "pending"
+        )
+        result = await self._db.execute(stmt)
+        return int(result.scalar_one())
+
+    async def get_by_id_for_update(
+        self, candidate_id: uuid.UUID
+    ) -> CoachBrainCandidateRow | None:
+        """Fetch the ORM row with SELECT ... FOR UPDATE for approve/reject.
+
+        Returns the ORM object (not the Pydantic schema) so the caller can
+        mutate ``review_status``, ``rejected_reason``, ``promoted_entry_id``
+        in-session and flush alongside the entry INSERT.
+        """
+        stmt = (
+            select(CoachBrainCandidateRow)
+            .where(CoachBrainCandidateRow.id == candidate_id)
+            .with_for_update()
+        )
+        result = await self._db.execute(stmt)
+        return result.scalars().one_or_none()
