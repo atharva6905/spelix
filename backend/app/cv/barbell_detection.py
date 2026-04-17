@@ -38,7 +38,10 @@ _MAX_RADIUS_480P = 40
 def detect_barbell_in_frame(frame: np.ndarray) -> tuple[float, float] | None:
     """Detect the circular end of a barbell plate in *frame*.
 
-    Strategy: grayscale → GaussianBlur → HoughCircles (HOUGH_GRADIENT).
+    Strategy: downscale to 480 px (longest dim) → grayscale → GaussianBlur →
+    HoughCircles. The downscale step (D-035) keeps per-frame cost under
+    ~60 ms on 1080p input; centroid is scaled back to source coordinates
+    before return so callers see the same coordinate space as today.
 
     Parameters
     ----------
@@ -47,22 +50,23 @@ def detect_barbell_in_frame(frame: np.ndarray) -> tuple[float, float] | None:
 
     Returns
     -------
-    (centroid_x, centroid_y) in pixel coordinates, or None if no circle is
-    detected.  When multiple circles are found the one with the highest
-    accumulator response (first HoughCircles result) is returned.
+    (centroid_x, centroid_y) in *source-frame* pixel coordinates, or None
+    if no circle is detected. When multiple circles are found the one with
+    the highest accumulator response (first HoughCircles result) is returned.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    scaled, scale_factor = _downscale_for_detection(frame)
+    gray = cv2.cvtColor(scaled, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (9, 9), 2)
 
     circles = cv2.HoughCircles(
         blurred,
         cv2.HOUGH_GRADIENT,
         dp=_DP,
-        minDist=_MIN_DIST,
+        minDist=_MIN_DIST_480P,
         param1=_PARAM1,
         param2=_PARAM2,
-        minRadius=_MIN_RADIUS,
-        maxRadius=_MAX_RADIUS,
+        minRadius=_MIN_RADIUS_480P,
+        maxRadius=_MAX_RADIUS_480P,
     )
 
     if circles is None:
@@ -70,9 +74,8 @@ def detect_barbell_in_frame(frame: np.ndarray) -> tuple[float, float] | None:
 
     # circles shape: (1, N, 3) — x, y, radius
     circles = np.round(circles[0]).astype(int)
-    # Return the first detected circle (highest accumulator score)
     x, y, _r = circles[0]
-    return (float(x), float(y))
+    return (float(x) * scale_factor, float(y) * scale_factor)
 
 
 def track_barbell(

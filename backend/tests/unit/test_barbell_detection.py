@@ -330,7 +330,13 @@ class TestComputeBarPathFromLandmarks:
 
 class TestTrackBarbellFromVideo:
     def test_streams_centroids_matching_track_barbell(self, tmp_path):
-        """Streaming version must return identical centroids to list version."""
+        """Streaming version must return centroids within codec-roundtrip tolerance.
+
+        After the D-035 downscale (480p → scale-back), a lossy mp4v encode/decode
+        cycle changes pixel values enough to shift the HoughCircles result by up to
+        ~3 px in source coordinates. Tolerance is 5 px — tight enough to detect a
+        completely wrong detection, loose enough to survive the codec round-trip.
+        """
         import cv2
         import numpy as np
 
@@ -356,8 +362,8 @@ class TestTrackBarbellFromVideo:
                 assert ref is None
             else:
                 assert ref is not None
-                assert abs(s[0] - ref[0]) < 1.0
-                assert abs(s[1] - ref[1]) < 1.0
+                assert abs(s[0] - ref[0]) < 5.0
+                assert abs(s[1] - ref[1]) < 5.0
 
     def test_returns_empty_list_for_missing_video(self, tmp_path):
         """Missing video returns empty list, not exception."""
