@@ -5,9 +5,11 @@
 import { describe, it, expect } from "vitest";
 import {
   labelForNode,
+  labelForOutputKey,
   labelForRetrievalSource,
   formatDuration,
 } from "@/lib/agentTraceLabels";
+import type { AgentRetrievalSource } from "@/api/analyses";
 
 describe("labelForNode", () => {
   it("maps every deterministic-graph node to a plain-English label", () => {
@@ -60,6 +62,49 @@ describe("labelForRetrievalSource", () => {
 
   it("returns 'Not retrieved' for null", () => {
     expect(labelForRetrievalSource(null)).toBe("Not retrieved");
+  });
+
+  it("humanizes unknown retrieval sources instead of leaking raw snake_case", () => {
+    // AgentRetrievalSource is a closed union today, but if the backend adds a
+    // new source (e.g. a future dual-collection-fallback variant), the fallback
+    // must not surface raw "dual_collection_fallback" to users (NFR-USAB-05).
+    const unknownSrc = "dual_collection_fallback" as unknown as AgentRetrievalSource;
+    expect(labelForRetrievalSource(unknownSrc)).toBe("Dual collection fallback");
+  });
+});
+
+describe("labelForOutputKey", () => {
+  it("maps known AgentState keys to plain English", () => {
+    expect(labelForOutputKey("rep_metrics")).toBe("Rep measurements");
+    expect(labelForOutputKey("papers_contexts")).toBe("Research paper excerpts");
+    expect(labelForOutputKey("brain_contexts")).toBe("Expert coaching entries");
+    expect(labelForOutputKey("coaching_output")).toBe("Coaching feedback");
+    expect(labelForOutputKey("cove_verified")).toBe("Verification result");
+    expect(labelForOutputKey("eval_scores")).toBe("Quality scores");
+  });
+
+  it("humanizes unknown output keys instead of leaking raw snake_case", () => {
+    expect(labelForOutputKey("some_future_key")).toBe("Some future key");
+  });
+
+  it("never returns a label containing underscores (NFR-USAB-05)", () => {
+    const knownKeys = [
+      "rep_metrics",
+      "papers_contexts",
+      "brain_contexts",
+      "retrieval_source",
+      "flagged_deviations",
+      "user_history_summary",
+      "coaching_output",
+      "cove_verified",
+      "eval_scores",
+      "degraded_mode",
+      "messages",
+      "trace",
+    ];
+    for (const key of knownKeys) {
+      expect(labelForOutputKey(key)).not.toContain("_");
+    }
   });
 });
 

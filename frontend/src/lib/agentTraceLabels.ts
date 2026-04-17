@@ -41,9 +41,38 @@ const RETRIEVAL_SOURCE_LABELS: Record<string, string> = {
   papers_only_fallback: "Research papers only",
 };
 
+function humanizeSnakeCase(raw: string): string {
+  const humanized = raw.replace(/_/g, " ");
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1);
+}
+
 export function labelForRetrievalSource(src: AgentRetrievalSource): string {
   if (src === null || src === undefined) return "Not retrieved";
-  return RETRIEVAL_SOURCE_LABELS[src] ?? src;
+  return RETRIEVAL_SOURCE_LABELS[src] ?? humanizeSnakeCase(src);
+}
+
+// Plain-English labels for AgentState output_keys surfaced in the detail pane
+// (NFR-USAB-05). Keys come from backend LangGraph tools mutating state. Missing
+// keys fall through to the same humanizer used for node names.
+const OUTPUT_KEY_LABELS: Record<string, string> = {
+  rep_metrics: "Rep measurements",
+  papers_contexts: "Research paper excerpts",
+  brain_contexts: "Expert coaching entries",
+  retrieval_source: "Source type",
+  flagged_deviations: "Form flags",
+  user_history_summary: "Your past-session summary",
+  coaching_output: "Coaching feedback",
+  cove_verified: "Verification result",
+  eval_scores: "Quality scores",
+  degraded_mode: "Degraded-mode flag",
+  messages: "Reasoning history",
+  trace: "Trace record",
+};
+
+export function labelForOutputKey(rawKey: string): string {
+  const known = OUTPUT_KEY_LABELS[rawKey];
+  if (known) return known;
+  return humanizeSnakeCase(rawKey);
 }
 
 export function formatDuration(durationMs: number): string {

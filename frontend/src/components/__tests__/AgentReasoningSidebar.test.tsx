@@ -215,7 +215,9 @@ describe("AgentReasoningSidebar", () => {
     const detail = screen.getByTestId("agent-trace-node-detail");
     expect(detail).toHaveTextContent("Searched research papers");
     expect(detail).toHaveTextContent(/456ms/);
-    expect(detail).toHaveTextContent(/papers_contexts/);
+    // NFR-USAB-05: output keys shown with plain-English labels, never raw snake_case
+    expect(detail).toHaveTextContent("Research paper excerpts");
+    expect(detail).not.toHaveTextContent(/papers_contexts/);
     expect(detail).not.toHaveTextContent(/error/i);
   });
 

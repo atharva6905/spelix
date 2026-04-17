@@ -30,6 +30,7 @@ import "@xyflow/react/dist/style.css";
 
 import {
   formatDuration,
+  labelForOutputKey,
   labelForRetrievalSource,
 } from "@/lib/agentTraceLabels";
 import {
@@ -265,7 +266,7 @@ export function AgentReasoningSidebar({
                       key={k}
                       className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-700 ring-1 ring-inset ring-gray-200"
                     >
-                      {k}
+                      {labelForOutputKey(k)}
                     </span>
                   ))}
                 </div>
