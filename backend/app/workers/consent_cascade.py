@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.db import DATABASE_URL
 from app.models.analysis import Analysis
+from app.models.coach_brain_candidate import CoachBrainCandidate
 from app.repositories.coach_brain import CoachBrainRepository
 
 logger = logging.getLogger(__name__)
@@ -52,14 +53,33 @@ async def cascade_consent_withdrawal(ctx: dict, user_id: str) -> dict:
             # Step 3: soft-delete entries left empty with low confirmation
             deleted = await repo.soft_delete_empty_unconfirmed()
 
+            # Step 4 (FR-BRAIN-16): cascade to coach_brain_candidates
+            cand_result = await db.execute(
+                select(CoachBrainCandidate).where(
+                    CoachBrainCandidate.source_analysis_ids.op("&&")(analysis_ids)
+                )
+            )
+            cand_rows = cand_result.scalars().all()
+            for row in cand_rows:
+                remaining = [aid for aid in row.source_analysis_ids if aid not in analysis_ids]
+                if not remaining:
+                    row.review_status = "rejected"
+                    row.rejected_reason = "source_consent_withdrawn"
+                    row.source_analysis_ids = []
+                else:
+                    row.source_analysis_ids = remaining
+            if cand_rows:
+                await db.flush()
+
             await db.commit()
 
             logger.info(
                 "Consent withdrawal cascade complete for user %s: "
-                "%d entries modified, %d soft-deleted",
+                "%d entries modified, %d soft-deleted, %d candidates updated",
                 uid,
                 modified,
                 deleted,
+                len(cand_rows),
             )
             return {"removed": modified, "soft_deleted": deleted}
     finally:
