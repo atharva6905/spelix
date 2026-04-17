@@ -224,8 +224,9 @@ class CoachBrainPayload(BaseModel):
     entry_type:
         Coaching category.
     status:
-        Lifecycle state — indexed in Qdrant.  Only ``active`` entries are
-        retrieved during coaching; the retrieval layer filters on this field.
+        Lifecycle state — indexed in Qdrant. The retrieval layer filters
+        on this field for ``status ∈ {'active', 'seed'}`` per ADR-BRAIN-08
+        (FR-BRAIN-05 cold-start); ``deprecated`` entries are excluded.
     confirmation_count:
         Confirmation count at index time (used for score boosting in Phase 3).
     trigger_tags:

@@ -288,14 +288,21 @@ async def test_retrieve_calls_rerank_once_on_merged_texts() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Gate 7 — status="active" filter on coach_brain queries (FR-BRAIN-04)
+# Gate 7 — status ∈ {"active","seed"} filter on coach_brain queries
+#          (FR-BRAIN-04 + FR-BRAIN-05 cold-start, ADR-BRAIN-08)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_retrieve_adds_status_active_filter_on_coach_brain() -> None:
+async def test_retrieve_adds_status_filter_includes_active_and_seed() -> None:
     """Coach brain hybrid_search call must include additional_filters with
-    status='active' FieldCondition (FR-BRAIN-04)."""
+    MatchAny(['active','seed']) FieldCondition — per ADR-BRAIN-08 seeds are
+    retrieval-eligible until distillation + expert review produces `active`
+    entries. Mirrors the agent-path assertion in
+    test_agents_tools.py::test_retrieve_coach_brain_includes_seed_in_status_filter.
+    """
+    from qdrant_client.http import models as qdrant_models
+
     from app.services.dual_collection import DualCollectionOrchestrator
 
     svc = _make_retrieval_service()
@@ -319,8 +326,12 @@ async def test_retrieve_adds_status_active_filter_on_coach_brain() -> None:
 
     status_filter = additional[0]
     assert status_filter.key == "status", f"Filter key must be 'status', got {status_filter.key}"
-    assert status_filter.match.value == "active", (
-        f"Filter value must be 'active', got {status_filter.match.value}"
+    match = status_filter.match
+    assert isinstance(match, qdrant_models.MatchAny), (
+        f"expected MatchAny for seed cold-start, got {type(match).__name__}: {match}"
+    )
+    assert set(match.any) == {"active", "seed"}, (
+        f"expected status filter to include both active and seed, got {match.any}"
     )
 
 

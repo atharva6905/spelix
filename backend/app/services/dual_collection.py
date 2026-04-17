@@ -14,7 +14,10 @@ Architecture notes:
 - Sits above RetrievalService — pure orchestration, no Qdrant/Cohere calls
   of its own except the single cross-collection rerank.
 - Per-collection reranking is skipped (rerank=False) to avoid triple rerank cost.
-- Coach brain queries always filter by status="active" (FR-BRAIN-04).
+- Coach brain queries filter by status ∈ {"active","seed"} — seeds are the
+  initial retrievable population until distillation + expert review produces
+  `active` entries (FR-BRAIN-04, FR-BRAIN-05, ADR-BRAIN-08). Deprecated
+  entries remain excluded.
 - Empty coach_brain → top score 0.0 → papers_only_fallback (P2-027 cold-start).
 """
 
@@ -89,13 +92,16 @@ class DualCollectionOrchestrator:
             Contains primary contexts, supplementary contexts, and the
             retrieval_source classification.
         """
-        # Step 1: build coach_brain status filter (FR-BRAIN-04).
+        # Step 1: build coach_brain status filter (FR-BRAIN-04 + FR-BRAIN-05
+        # cold-start per ADR-BRAIN-08: seeds are retrieval-eligible until
+        # distillation + expert review produces `active` entries). Deprecated
+        # entries remain excluded.
         # Deferred import follows ADR-032 source-patch pattern.
         from qdrant_client import models as qdrant_models
 
         status_filter = qdrant_models.FieldCondition(
             key="status",
-            match=qdrant_models.MatchValue(value="active"),
+            match=qdrant_models.MatchAny(any=["active", "seed"]),
         )
 
         # Step 2: concurrent collection queries (FR-AICP-09).
