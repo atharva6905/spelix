@@ -29,6 +29,23 @@ vi.mock("@/components/ChatPanel", () => ({
   ),
 }));
 
+vi.mock("@xyflow/react", () => ({
+  ReactFlow: ({
+    nodes,
+  }: {
+    nodes: Array<{ id: string; data: { label: string } }>;
+  }) => (
+    <div data-testid="reactflow-canvas">
+      {nodes.map((n) => (
+        <div key={n.id}>{n.data.label}</div>
+      ))}
+    </div>
+  ),
+  Background: () => null,
+  Controls: () => null,
+}));
+vi.mock("@xyflow/react/dist/style.css", () => ({}));
+
 // ---------------------------------------------------------------------------
 // Fixture factories
 // ---------------------------------------------------------------------------
@@ -77,6 +94,7 @@ function makeAnalysis(overrides: Partial<AnalysisDetail> = {}): AnalysisDetail {
         disclaimer:
           "This feedback is for educational purposes only and is not a substitute for in-person coaching or medical advice.",
       },
+      agent_trace_json: null,
       created_at: "2026-04-08T10:05:00Z",
     },
     rep_metrics: [
@@ -786,6 +804,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
               },
             ],
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -821,6 +840,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
               },
             ],
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -848,6 +868,7 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
             disclaimer: "Educational purposes only.",
             degraded_mode: true,
           },
+          agent_trace_json: null,
           created_at: "2026-04-08T10:05:00Z",
         },
       }),
@@ -899,5 +920,159 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
 
     renderResultsPage();
     expect(screen.queryByTestId("chat-panel")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 3: agent_trace_json type round-trip (P3-007, FR-RESL-07)
+  // -------------------------------------------------------------------------
+
+  it("exposes agent_trace_json on the analysis detail shape (types round-trip)", () => {
+    const analysis = makeAnalysis({
+      coaching_result: {
+        structured_output_json: {
+          summary: "ok",
+          strengths: [],
+          issues: [],
+          correction_plan: [],
+          disclaimer: "",
+        },
+        created_at: "2026-04-17T10:00:00Z",
+        agent_trace_json: {
+          mode: "deterministic",
+          nodes_executed: [
+            {
+              node: "get_rep_metrics",
+              started_at: "2026-04-17T10:00:00Z",
+              duration_ms: 12.3,
+              output_keys: ["rep_metrics"],
+              error: null,
+            },
+          ],
+          eval_scores: { faithfulness: 0.92 },
+          cove_iterations: [],
+          converged: true,
+          retrieval_source: "coach_brain_primary",
+          degraded_mode: false,
+        },
+      },
+    });
+    expect(analysis.coaching_result?.agent_trace_json?.mode).toBe("deterministic");
+    expect(analysis.coaching_result?.agent_trace_json?.nodes_executed?.[0]?.node).toBe(
+      "get_rep_metrics",
+    );
+  });
+
+  describe("How AI Reasoned sidebar integration (P3-007)", () => {
+    it("does not render the button when agent_trace_json is null", () => {
+      mockUseAnalysisDetail.mockReturnValue({
+        analysis: makeAnalysis(),
+        isLoading: false,
+        error: null,
+      });
+      renderResultsPage();
+      expect(
+        screen.queryByRole("button", { name: /how ai reasoned/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render the button when agent_trace_json has empty nodes_executed", () => {
+      const analysis = makeAnalysis();
+      analysis.coaching_result = {
+        ...analysis.coaching_result!,
+        agent_trace_json: {
+          mode: "deterministic",
+          nodes_executed: [],
+          eval_scores: {},
+          cove_iterations: [],
+          converged: false,
+          retrieval_source: null,
+          degraded_mode: false,
+        },
+      };
+      mockUseAnalysisDetail.mockReturnValue({
+        analysis,
+        isLoading: false,
+        error: null,
+      });
+      renderResultsPage();
+      expect(
+        screen.queryByRole("button", { name: /how ai reasoned/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders the button when agent_trace_json has at least one executed node", () => {
+      const analysis = makeAnalysis();
+      analysis.coaching_result = {
+        ...analysis.coaching_result!,
+        agent_trace_json: {
+          mode: "deterministic",
+          nodes_executed: [
+            {
+              node: "get_rep_metrics",
+              started_at: "2026-04-17T10:00:00Z",
+              duration_ms: 10,
+              output_keys: ["rep_metrics"],
+              error: null,
+            },
+          ],
+          eval_scores: {},
+          cove_iterations: [],
+          converged: true,
+          retrieval_source: "coach_brain_primary",
+          degraded_mode: false,
+        },
+      };
+      mockUseAnalysisDetail.mockReturnValue({
+        analysis,
+        isLoading: false,
+        error: null,
+      });
+      renderResultsPage();
+      expect(
+        screen.getByRole("button", { name: /how ai reasoned/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("clicking the button opens the sidebar; clicking close hides it", () => {
+      const analysis = makeAnalysis();
+      analysis.coaching_result = {
+        ...analysis.coaching_result!,
+        agent_trace_json: {
+          mode: "deterministic",
+          nodes_executed: [
+            {
+              node: "get_rep_metrics",
+              started_at: "2026-04-17T10:00:00Z",
+              duration_ms: 10,
+              output_keys: ["rep_metrics"],
+              error: null,
+            },
+          ],
+          eval_scores: {},
+          cove_iterations: [],
+          converged: true,
+          retrieval_source: "coach_brain_primary",
+          degraded_mode: false,
+        },
+      };
+      mockUseAnalysisDetail.mockReturnValue({
+        analysis,
+        isLoading: false,
+        error: null,
+      });
+      renderResultsPage();
+
+      expect(
+        screen.queryByTestId("agent-reasoning-sidebar"),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /how ai reasoned/i }));
+      expect(screen.getByTestId("agent-reasoning-sidebar")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
+      expect(
+        screen.queryByTestId("agent-reasoning-sidebar"),
+      ).not.toBeInTheDocument();
+    });
   });
 });

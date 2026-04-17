@@ -448,6 +448,7 @@ class TestGetAnalysisDetail:
         coaching_mock = MagicMock()
         coaching_mock.structured_output_json = {"summary": "Good form overall."}
         coaching_mock.created_at = datetime.now(timezone.utc)
+        coaching_mock.agent_trace_json = None  # default null for legacy analyses
         analysis.coaching_result = coaching_mock
 
         mock_service = AsyncMock()
@@ -460,6 +461,52 @@ class TestGetAnalysisDetail:
         body = resp.json()
         assert body["coaching_result"] is not None
         assert body["coaching_result"]["structured_output_json"]["summary"] == "Good form overall."
+        assert body["coaching_result"]["agent_trace_json"] is None
+
+    def test_get_detail_exposes_agent_trace_json(self):
+        """coaching_result.agent_trace_json round-trips through the response schema.
+
+        Phase 3 Batch 3 — FR-RESL-07. Sidebar reads this field; must be in the API response.
+        """
+        analysis = self._make_detail_analysis()
+        coaching_mock = MagicMock()
+        coaching_mock.structured_output_json = {"summary": "Fine."}
+        coaching_mock.created_at = datetime.now(timezone.utc)
+        coaching_mock.agent_trace_json = {
+            "mode": "deterministic",
+            "nodes_executed": [
+                {
+                    "node": "get_rep_metrics",
+                    "started_at": "2026-04-17T10:00:00+00:00",
+                    "duration_ms": 12.3,
+                    "output_keys": ["rep_metrics"],
+                    "error": None,
+                }
+            ],
+            "eval_scores": {"faithfulness": 0.92},
+            "cove_iterations": [],
+            "converged": True,
+            "retrieval_source": "coach_brain_primary",
+            "degraded_mode": False,
+        }
+        analysis.coaching_result = coaching_mock
+
+        mock_service = AsyncMock()
+        mock_service.get_analysis_detail.return_value = analysis
+
+        client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+        resp = client.get(f"/api/v1/analyses/{analysis.id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["coaching_result"] is not None
+        trace = body["coaching_result"]["agent_trace_json"]
+        assert trace is not None
+        assert trace["mode"] == "deterministic"
+        assert len(trace["nodes_executed"]) == 1
+        assert trace["nodes_executed"][0]["node"] == "get_rep_metrics"
+        assert trace["retrieval_source"] == "coach_brain_primary"
+        assert trace["degraded_mode"] is False
 
     def test_get_detail_rep_metrics_list(self):
         """Rep metrics nested list is serialised correctly (may be empty)."""
