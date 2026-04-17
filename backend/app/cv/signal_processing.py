@@ -39,7 +39,12 @@ _SQUAT_HIP_L = 24
 _SQUAT_KNEE_L = 26
 _SQUAT_ANKLE_L = 28
 
-# Bench — left side (as per task spec: even indices)
+# Bench — subject's RIGHT side (task spec "even indices" convention).
+# MediaPipe BlazePose indices 12/14/16/24 correspond to the subject's
+# right shoulder/elbow/wrist/hip. The `_L` suffix is a spec-convention
+# artefact, NOT a body-side indicator. Session 44 ADR-REPDET-01
+# investigation hit this confusion — leaving the names for minimal
+# diff risk; DO NOT assume "_L" means the subject's left.
 _BENCH_SHOULDER_L = 12
 _BENCH_ELBOW_L = 14
 _BENCH_WRIST_L = 16
