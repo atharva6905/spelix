@@ -42,6 +42,7 @@ dependencies = [
 asyncio_mode = "auto"
 markers = [
     "integration: marks tests that require a live database (deselect with '-m not integration')",
+    "slow: marks tests that run on real video fixtures (deselect with '-m not slow')",
 ]
 
 [dependency-groups]

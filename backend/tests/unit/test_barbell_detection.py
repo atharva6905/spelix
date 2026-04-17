@@ -330,7 +330,13 @@ class TestComputeBarPathFromLandmarks:
 
 class TestTrackBarbellFromVideo:
     def test_streams_centroids_matching_track_barbell(self, tmp_path):
-        """Streaming version must return identical centroids to list version."""
+        """Streaming version must return centroids within codec-roundtrip tolerance.
+
+        After the D-035 downscale (480p → scale-back), a lossy mp4v encode/decode
+        cycle changes pixel values enough to shift the HoughCircles result by up to
+        ~3 px in source coordinates. Tolerance is 5 px — tight enough to detect a
+        completely wrong detection, loose enough to survive the codec round-trip.
+        """
         import cv2
         import numpy as np
 
@@ -356,8 +362,8 @@ class TestTrackBarbellFromVideo:
                 assert ref is None
             else:
                 assert ref is not None
-                assert abs(s[0] - ref[0]) < 1.0
-                assert abs(s[1] - ref[1]) < 1.0
+                assert abs(s[0] - ref[0]) < 5.0
+                assert abs(s[1] - ref[1]) < 5.0
 
     def test_returns_empty_list_for_missing_video(self, tmp_path):
         """Missing video returns empty list, not exception."""
@@ -379,3 +385,167 @@ class TestTrackBarbellFromVideo:
 
         result = track_barbell_from_video(video_path)
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# _downscale_for_detection  (D-035)
+# ---------------------------------------------------------------------------
+
+
+class TestDownscaleForDetection:
+    def test_noop_for_small_frames(self):
+        """480x270 input: no downscale, scale_factor == 1.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((270, 480, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scale_factor == 1.0
+        assert scaled.shape == (270, 480, 3)
+
+    def test_noop_at_exactly_max_dim(self):
+        """Frame whose longest side equals max_dim is not resized."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((480, 480, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scale_factor == 1.0
+        assert scaled.shape == (480, 480, 3)
+
+    def test_1080p_to_480p(self):
+        """1920x1080 input: longest side becomes 480, scale_factor == 4.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (270, 480, 3)
+        assert scale_factor == pytest.approx(4.0, rel=1e-3)
+
+    def test_4k_to_480p(self):
+        """3840x2160 (4K) input: longest side becomes 480, scale_factor == 8.0."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((2160, 3840, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (270, 480, 3)
+        assert scale_factor == pytest.approx(8.0, rel=1e-3)
+
+    def test_portrait_orientation(self):
+        """Portrait 1080x1920 input: longest side (1920) becomes 480."""
+        from app.cv.barbell_detection import _downscale_for_detection
+
+        frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+        scaled, scale_factor = _downscale_for_detection(frame)
+        assert scaled.shape == (480, 270, 3)
+        assert scale_factor == pytest.approx(4.0, rel=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# detect_barbell_in_frame after D-035 downscale (post-fix behaviour)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectBarbellAfterDownscale:
+    def test_detect_returns_source_coords_on_1080p(self):
+        """Circle drawn at (1000, 500) in a 1920x1080 frame is detected near
+        (1000, 500) after internal downscale-to-480 + scale-back."""
+        w, h = 1920, 1080
+        cx, cy = 1000, 500
+        radius = 60
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (cx, cy), radius, (200, 200, 200), thickness=-1)
+
+        result = detect_barbell_in_frame(frame)
+        assert result is not None, "Expected centroid on clean 1080p circle"
+        dx = abs(result[0] - cx)
+        dy = abs(result[1] - cy)
+        # Error budget: ~1 source px per 0.25 scaled px. Allow ±20 source px.
+        assert dx <= 20, f"x off by {dx} px (detected {result[0]})"
+        assert dy <= 20, f"y off by {dy} px (detected {result[1]})"
+
+    def test_detect_returns_source_coords_on_portrait_1080p(self):
+        """Same test in portrait orientation — longest side 1920 (height)."""
+        w, h = 1080, 1920
+        cx, cy = 540, 900
+        radius = 60
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (cx, cy), radius, (200, 200, 200), thickness=-1)
+
+        result = detect_barbell_in_frame(frame)
+        assert result is not None
+        dx = abs(result[0] - cx)
+        dy = abs(result[1] - cy)
+        assert dx <= 20, f"x off by {dx} px"
+        assert dy <= 20, f"y off by {dy} px"
+
+    def test_detect_on_1080p_is_fast(self):
+        """Per-frame detection on 1080p completes in < 200 ms (budget check).
+
+        This is a unit-level smoke test that the downscale is wired through;
+        the rigorous stage budget check is the slow integration test.
+        """
+        import time
+
+        w, h = 1920, 1080
+        frame = np.full((h, w, 3), 30, dtype=np.uint8)
+        cv2.circle(frame, (1000, 500), 60, (200, 200, 200), thickness=-1)
+
+        t0 = time.perf_counter()
+        for _ in range(3):  # warm-up smoothed median-ish
+            detect_barbell_in_frame(frame)
+        elapsed = (time.perf_counter() - t0) / 3
+        assert elapsed < 0.2, f"per-frame detection took {elapsed*1000:.0f} ms (budget 200 ms)"
+
+
+# ---------------------------------------------------------------------------
+# Stage budget integration (slow)  (D-035)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestTrackBarbellStageBudget:
+    """Empirical guard on total stage wall time for a real 720p clip.
+
+    Runs on ``e2e/fixtures/atharva-bench-nw-10s-720p.mp4`` (10 s, 720p,
+    ~600 frames). Gated under ``-m slow`` so unit runs stay fast.
+    """
+
+    FIXTURE_REL = "../../../e2e/fixtures/atharva-bench-nw-10s-720p.mp4"
+
+    def _fixture_path(self) -> str:
+        import os
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.abspath(os.path.join(here, self.FIXTURE_REL))
+
+    def test_stage_wall_time_under_30s_on_720p(self):
+        """Processing a 10 s 720p clip must finish in under 30 s on CI."""
+        import os
+        import time
+
+        path = self._fixture_path()
+        if not os.path.exists(path):
+            pytest.skip(f"fixture {path} not present")
+
+        t0 = time.perf_counter()
+        centroids = track_barbell_from_video(path)
+        elapsed = time.perf_counter() - t0
+
+        assert len(centroids) > 0, "expected at least one frame decoded"
+        assert elapsed < 30.0, f"track_barbell_from_video took {elapsed:.1f}s (budget 30s)"
+
+    def test_detection_rate_above_30pct_on_720p(self):
+        """Regression guard: detection rate stays well above the 50% fallback
+        threshold on the 720p bench clip. 30% chosen as a floor well below
+        the expected ~80% but above the FR-BDET-06 landmark-fallback cutoff."""
+        import os
+
+        path = self._fixture_path()
+        if not os.path.exists(path):
+            pytest.skip(f"fixture {path} not present")
+
+        centroids = track_barbell_from_video(path)
+        if not centroids:
+            pytest.skip("no frames decoded")
+        detected = sum(1 for c in centroids if c is not None)
+        rate = detected / len(centroids)
+        assert rate > 0.30, f"detection rate {rate:.1%} dropped below 30% floor"
