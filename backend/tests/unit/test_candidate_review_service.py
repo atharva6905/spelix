@@ -213,6 +213,43 @@ async def test_approve_rolls_back_when_qdrant_upsert_fails():
 
 
 @pytest.mark.asyncio
+async def test_reject_flips_status_and_stores_reason():
+    candidate = _candidate_row()
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    db = AsyncMock()
+    svc = CandidateReviewService(db, cand_repo, MagicMock(), MagicMock())
+
+    resp = await svc.reject(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        reason="off-topic for bench press",
+    )
+
+    assert candidate.review_status == "rejected"
+    assert candidate.rejected_reason == "off-topic for bench press"
+    assert resp.rejected_reason == "off-topic for bench press"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reject_raises_already_reviewed_when_not_pending():
+    candidate = _candidate_row(review_status="rejected")
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    db = AsyncMock()
+    svc = CandidateReviewService(db, cand_repo, MagicMock(), MagicMock())
+
+    with pytest.raises(CandidateAlreadyReviewed):
+        await svc.reject(
+            candidate_id=candidate.id,
+            admin_user_id=uuid.uuid4(),
+            reason="irrelevant",
+        )
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_approve_second_caller_hits_already_reviewed():
     """Two admins clicking Approve within the same millisecond."""
     candidate = _candidate_row()
