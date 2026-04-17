@@ -862,15 +862,21 @@ async def _maybe_enqueue_distillation(
 ) -> None:
     """Phase 3 Batch 2: enqueue the distillation pipeline when gated.
 
-    Gate: SPELIX_DISTILLATION_ENABLED env=1 AND eval_scores.overall >= 0.6.
-    Failure is swallowed as a warning — distillation MUST NEVER fail the
-    user-facing analysis.
+    Gate: SPELIX_DISTILLATION_ENABLED env=1 AND quality score >= 0.6.
+    Quality score is `eval_scores.overall` if present (Phase 4 RAGAS
+    multi-component aggregate), else falls back to `eval_scores.faithfulness`
+    (Phase 2 LLM-as-judge per ADR-RAG-04 — Phase 4 will add the full RAGAS
+    suite). Failure is swallowed as a warning — distillation MUST NEVER fail
+    the user-facing analysis.
     """
     flag = os.environ.get("SPELIX_DISTILLATION_ENABLED", "0").lower()
     if flag not in ("1", "true", "yes"):
         return
-    overall = (eval_scores or {}).get("overall")
-    if overall is None or overall < 0.6:
+    scores = eval_scores or {}
+    quality = scores.get("overall")
+    if quality is None:
+        quality = scores.get("faithfulness")
+    if quality is None or quality < 0.6:
         return
     try:
         # Wrapper lives alongside other task wrappers in streaq_worker.py;
