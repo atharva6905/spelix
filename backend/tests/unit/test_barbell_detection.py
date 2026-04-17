@@ -494,3 +494,58 @@ class TestDetectBarbellAfterDownscale:
             detect_barbell_in_frame(frame)
         elapsed = (time.perf_counter() - t0) / 3
         assert elapsed < 0.2, f"per-frame detection took {elapsed*1000:.0f} ms (budget 200 ms)"
+
+
+# ---------------------------------------------------------------------------
+# Stage budget integration (slow)  (D-035)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestTrackBarbellStageBudget:
+    """Empirical guard on total stage wall time for a real 720p clip.
+
+    Runs on ``e2e/fixtures/atharva-bench-nw-10s-720p.mp4`` (10 s, 720p,
+    ~600 frames). Gated under ``-m slow`` so unit runs stay fast.
+    """
+
+    FIXTURE_REL = "../../../e2e/fixtures/atharva-bench-nw-10s-720p.mp4"
+
+    def _fixture_path(self) -> str:
+        import os
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.abspath(os.path.join(here, self.FIXTURE_REL))
+
+    def test_stage_wall_time_under_30s_on_720p(self):
+        """Processing a 10 s 720p clip must finish in under 30 s on CI."""
+        import os
+        import time
+
+        path = self._fixture_path()
+        if not os.path.exists(path):
+            pytest.skip(f"fixture {path} not present")
+
+        t0 = time.perf_counter()
+        centroids = track_barbell_from_video(path)
+        elapsed = time.perf_counter() - t0
+
+        assert len(centroids) > 0, "expected at least one frame decoded"
+        assert elapsed < 30.0, f"track_barbell_from_video took {elapsed:.1f}s (budget 30s)"
+
+    def test_detection_rate_above_30pct_on_720p(self):
+        """Regression guard: detection rate stays well above the 50% fallback
+        threshold on the 720p bench clip. 30% chosen as a floor well below
+        the expected ~80% but above the FR-BDET-06 landmark-fallback cutoff."""
+        import os
+
+        path = self._fixture_path()
+        if not os.path.exists(path):
+            pytest.skip(f"fixture {path} not present")
+
+        centroids = track_barbell_from_video(path)
+        if not centroids:
+            pytest.skip("no frames decoded")
+        detected = sum(1 for c in centroids if c is not None)
+        rate = detected / len(centroids)
+        assert rate > 0.30, f"detection rate {rate:.1%} dropped below 30% floor"
