@@ -62,6 +62,10 @@ export function useAnalysisStatus(
   // Refs to keep stable references without triggering re-renders
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  // Set to true right before we call channel.unsubscribe() on a terminal
+  // status, so the subsequent CLOSED callback doesn't flip on the
+  // "reconnecting" banner when there's nothing to reconnect to (D-028).
+  const intentionalUnsubscribeRef = useRef(false);
 
   function applyUpdate(row: {
     status: AnalysisStatus;
@@ -103,6 +107,7 @@ export function useAnalysisStatus(
   useEffect(() => {
     if (!analysisId) return;
 
+    intentionalUnsubscribeRef.current = false;
     const channelName = `analysis:${analysisId}`;
 
     const channel = supabase
@@ -121,6 +126,7 @@ export function useAnalysisStatus(
           stopPolling();
           applyUpdate(payload.new);
           if (TERMINAL_STATUSES.includes(payload.new.status)) {
+            intentionalUnsubscribeRef.current = true;
             channel.unsubscribe();
           }
         },
@@ -134,6 +140,7 @@ export function useAnalysisStatus(
           subscribeStatus === "TIMED_OUT" ||
           subscribeStatus === "CLOSED"
         ) {
+          if (intentionalUnsubscribeRef.current) return;
           setIsReconnecting(true);
           startPolling();
         }
@@ -148,6 +155,7 @@ export function useAnalysisStatus(
       .then((data) => {
         applyUpdate(data as Parameters<typeof applyUpdate>[0]);
         if (TERMINAL_STATUSES.includes(data.status)) {
+          intentionalUnsubscribeRef.current = true;
           channel.unsubscribe();
         }
       })
