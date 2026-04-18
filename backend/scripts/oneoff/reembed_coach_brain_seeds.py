@@ -111,61 +111,68 @@ async def main() -> int:
             )
         ).scalars().all()
 
-        print(f"[reembed] Loaded {len(rows)} seed rows from coach_brain_entries")
+    print(f"[reembed] Loaded {len(rows)} seed rows from coach_brain_entries")
 
-        if not rows:
-            print(
-                "[reembed] ERROR: no seed rows found. "
-                "Run `scripts/seed_coach_brain.py` first if this is a fresh env.",
-                file=sys.stderr,
-            )
-            await engine.dispose()
-            return 1
+    if not rows:
+        print(
+            "[reembed] ERROR: no seed rows found. "
+            "Run `scripts/seed_coach_brain.py` first if this is a fresh env.",
+            file=sys.stderr,
+        )
+        await engine.dispose()
+        return 1
 
-        schema_entries: list[CoachBrainEntrySchema] = []
-        for r in rows:
-            schema_entries.append(
-                CoachBrainEntrySchema(
-                    id=r.id,
-                    content=r.content,
-                    exercise=r.exercise,  # type: ignore[arg-type]
-                    phase=r.phase,  # type: ignore[arg-type]
-                    entry_type=r.entry_type,  # type: ignore[arg-type]
-                    status=r.status,  # type: ignore[arg-type]
-                    confirmation_count=r.confirmation_count,
-                    source_analysis_ids=r.source_analysis_ids,
-                    trigger_tags=r.trigger_tags,
-                    confidence_score=(
-                        float(r.confidence_score)
-                        if r.confidence_score is not None
-                        else None
-                    ),
-                    metadata=r.extra_metadata,
-                    created_at=r.created_at,
-                    updated_at=r.updated_at,
-                )
+    schema_entries: list[CoachBrainEntrySchema] = []
+    for r in rows:
+        schema_entries.append(
+            CoachBrainEntrySchema(
+                id=r.id,
+                content=r.content,
+                exercise=r.exercise,  # type: ignore[arg-type]
+                phase=r.phase,  # type: ignore[arg-type]
+                entry_type=r.entry_type,  # type: ignore[arg-type]
+                status=r.status,  # type: ignore[arg-type]
+                confirmation_count=r.confirmation_count,
+                source_analysis_ids=r.source_analysis_ids,
+                trigger_tags=r.trigger_tags,
+                confidence_score=(
+                    float(r.confidence_score)
+                    if r.confidence_score is not None
+                    else None
+                ),
+                metadata=r.extra_metadata,
+                created_at=r.created_at,
+                updated_at=r.updated_at,
             )
+        )
 
     # ------------------------------------------------------------------
     # Re-embed + upsert
     # ------------------------------------------------------------------
-    print(
-        f"[reembed] Re-embedding {len(schema_entries)} entries via "
-        "Cohere embed-v4.0 (SEARCH_DOCUMENT) with FR-BRAIN-03 prefix..."
-    )
-    point_ids = await embedding_svc.embed_and_upsert_batch(schema_entries)
-
-    print(f"[reembed] Upserted {len(point_ids)} points to coach_brain collection")
-
-    # Report per-exercise breakdown.
     from collections import Counter
 
-    by_ex: Counter[str] = Counter(e.exercise for e in schema_entries)
-    for ex, n in sorted(by_ex.items()):
-        print(f"  {ex}: {n} entries")
+    try:
+        print(
+            f"[reembed] Re-embedding {len(schema_entries)} entries via "
+            "Cohere embed-v4.0 (SEARCH_DOCUMENT) with FR-BRAIN-03 prefix..."
+        )
+        point_ids = await embedding_svc.embed_and_upsert_batch(schema_entries)
 
-    await engine.dispose()
-    return 0
+        print(f"[reembed] Upserted {len(point_ids)} points to coach_brain collection")
+
+        by_ex: Counter[str] = Counter(e.exercise for e in schema_entries)
+        for ex, n in sorted(by_ex.items()):
+            print(f"  {ex}: {n} entries")
+
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[reembed] ERROR: {exc.__class__.__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":
