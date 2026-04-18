@@ -46,14 +46,24 @@ def _mock_cohere(vector):
 
 
 def _mock_qdrant(nearest_id, score):
+    """Mock the QdrantClientWrapper.query_points surface used by
+    lifecycle_decision (D-053). The wrapper's query_points returns a
+    QueryResponse envelope with a .points attribute; each point has
+    .id, .score, .payload. Mocking .search would silently mask the
+    pre-D-053 regression where lifecycle_decision called a method that
+    no longer exists on AsyncQdrantClient in qdrant-client 1.x.
+    """
     q = MagicMock()
     if nearest_id is None:
-        q.search = AsyncMock(return_value=[])
+        response = MagicMock()
+        response.points = []
     else:
         hit = MagicMock()
         hit.id = str(nearest_id)
         hit.score = score
-        q.search = AsyncMock(return_value=[hit])
+        response = MagicMock()
+        response.points = [hit]
+    q.query_points = AsyncMock(return_value=response)
     return q
 
 
@@ -125,6 +135,56 @@ async def test_lifecycle_add_when_empty_qdrant() -> None:
     )
     assert update["decisions"][0].decision == "ADD"
     assert update["decisions"][0].nearest_entry_id is None
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_decision_never_calls_legacy_search() -> None:
+    """D-053: lifecycle_decision must NOT call the deprecated
+    AsyncQdrantClient.search API. qdrant-client 1.x removed `.search`
+    on AsyncQdrantClient; the prod warning 'AsyncQdrantClient object
+    has no attribute search — treating as ADD' meant every candidate
+    was silently routed to ADD, over-admitting duplicates to the review
+    queue. Regression guard: inject a mock that exposes ONLY
+    `query_points`, and make any attempt to touch `.search` a loud
+    AttributeError.
+    """
+    nearest = uuid.uuid4()
+    state = _state_with_candidates([_stub_candidate()])
+
+    # Build a Qdrant client mock whose .search attribute, if accessed,
+    # raises AttributeError. MagicMock's default auto-child-creation
+    # would silently make .search addressable — override that with a
+    # property-like sentinel.
+    q = MagicMock()
+    response = MagicMock()
+    hit = MagicMock()
+    hit.id = str(nearest)
+    hit.score = 0.95
+    response.points = [hit]
+    q.query_points = AsyncMock(return_value=response)
+
+    def _raise_if_search_accessed(name: str):
+        if name == "search":
+            raise AttributeError(
+                "D-053 regression: lifecycle_decision must not call "
+                "AsyncQdrantClient.search; use query_points via the "
+                "QdrantClientWrapper instead."
+            )
+        return MagicMock()
+
+    q.__getattr__ = MagicMock(side_effect=_raise_if_search_accessed)
+
+    update = await lifecycle_decision(
+        state,
+        cohere_client=_mock_cohere([0.0] * 1024),
+        qdrant_client=q,
+        brain_embedding_svc=_mock_brain_embedding([0.0] * 1024),
+    )
+
+    # If we got here, lifecycle_decision went through query_points, not search.
+    assert len(update["decisions"]) == 1
+    assert update["decisions"][0].decision == "NOOP"
+    q.query_points.assert_awaited_once()
 
 
 def _stub_coaching_output():
