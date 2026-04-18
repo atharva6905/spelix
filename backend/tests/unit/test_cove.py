@@ -634,8 +634,10 @@ def test_claim_extraction_prompt_includes_worked_examples() -> None:
 
     # "Extract:" and a skip/empty counterpart should appear at least once
     # each to anchor both the positive and negative pattern.
-    assert "extract" in lowered, (
-        "Refined prompt must contain an 'Extract:' example line (D-050)."
+    assert lowered.count("extract:") >= 2, (
+        f"Refined prompt must contain at least 2 'Extract:' example labels; "
+        f"found {lowered.count('extract:')}. Without these labels the prompt "
+        "loses its positive-example anchors (D-050)."
     )
 
 
