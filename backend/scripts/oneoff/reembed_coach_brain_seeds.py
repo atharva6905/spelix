@@ -92,7 +92,10 @@ async def main() -> int:
     try:
         cohere = get_cohere_client()
     except RuntimeError as exc:
-        print(f"[reembed] ERROR: Cohere client unavailable — {exc}", file=sys.stderr)
+        print(
+            f"[reembed] ERROR: Cohere client unavailable — {type(exc).__name__}",
+            file=sys.stderr,
+        )
         return 1
 
     embedding_svc = BrainEmbeddingService(
@@ -113,50 +116,50 @@ async def main() -> int:
 
     print(f"[reembed] Loaded {len(rows)} seed rows from coach_brain_entries")
 
-    if not rows:
-        print(
-            "[reembed] ERROR: no seed rows found. "
-            "Run `scripts/seed_coach_brain.py` first if this is a fresh env.",
-            file=sys.stderr,
-        )
-        await engine.dispose()
-        return 1
-
-    schema_entries: list[CoachBrainEntrySchema] = []
-    for r in rows:
-        schema_entries.append(
-            CoachBrainEntrySchema(
-                id=r.id,
-                content=r.content,
-                exercise=r.exercise,  # type: ignore[arg-type]
-                phase=r.phase,  # type: ignore[arg-type]
-                entry_type=r.entry_type,  # type: ignore[arg-type]
-                status=r.status,  # type: ignore[arg-type]
-                confirmation_count=r.confirmation_count,
-                source_analysis_ids=r.source_analysis_ids,
-                trigger_tags=r.trigger_tags,
-                confidence_score=(
-                    float(r.confidence_score)
-                    if r.confidence_score is not None
-                    else None
-                ),
-                metadata=r.extra_metadata,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
-            )
-        )
-
-    # ------------------------------------------------------------------
-    # Re-embed + upsert
-    # ------------------------------------------------------------------
     from collections import Counter
 
     try:
+        if not rows:
+            print(
+                "[reembed] ERROR: no seed rows found. "
+                "Run `scripts/seed_coach_brain.py` first if this is a fresh env.",
+                file=sys.stderr,
+            )
+            return 1
+
+        schema_entries: list[CoachBrainEntrySchema] = []
+        for r in rows:
+            schema_entries.append(
+                CoachBrainEntrySchema(
+                    id=r.id,
+                    content=r.content,
+                    exercise=r.exercise,  # type: ignore[arg-type]
+                    phase=r.phase,  # type: ignore[arg-type]
+                    entry_type=r.entry_type,  # type: ignore[arg-type]
+                    status=r.status,  # type: ignore[arg-type]
+                    confirmation_count=r.confirmation_count,
+                    source_analysis_ids=r.source_analysis_ids,
+                    trigger_tags=r.trigger_tags,
+                    confidence_score=(
+                        float(r.confidence_score)
+                        if r.confidence_score is not None
+                        else None
+                    ),
+                    metadata=r.extra_metadata,
+                    created_at=r.created_at,
+                    updated_at=r.updated_at,
+                )
+            )
+
         print(
             f"[reembed] Re-embedding {len(schema_entries)} entries via "
             "Cohere embed-v4.0 (SEARCH_DOCUMENT) with FR-BRAIN-03 prefix..."
         )
         point_ids = await embedding_svc.embed_and_upsert_batch(schema_entries)
+
+        assert len(point_ids) == len(schema_entries), (
+            f"partial upsert: expected {len(schema_entries)} points, got {len(point_ids)}"
+        )
 
         print(f"[reembed] Upserted {len(point_ids)} points to coach_brain collection")
 
@@ -167,7 +170,7 @@ async def main() -> int:
         return 0
     except Exception as exc:  # noqa: BLE001
         print(
-            f"[reembed] ERROR: {exc.__class__.__name__}: {exc}",
+            f"[reembed] ERROR: {exc.__class__.__name__} — see worker logs for details",
             file=sys.stderr,
         )
         return 1

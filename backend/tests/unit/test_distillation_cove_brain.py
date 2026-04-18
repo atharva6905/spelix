@@ -173,7 +173,11 @@ async def test_verify_claim_uses_adequate_max_tokens() -> None:
     on 11/11 candidates. 2048 tokens on the answer call leaves comfortable
     headroom for reasoning strings with source citations.
     """
-    from app.distillation.cove_brain import _VerificationQuestion, _VerificationAnswerOut
+    from app.distillation.cove_brain import (
+        _HAIKU_MODEL,
+        _VerificationAnswerOut,
+        _VerificationQuestion,
+    )
 
     anthropic_client = MagicMock()
     instructor_client = MagicMock()
@@ -201,6 +205,7 @@ async def test_verify_claim_uses_adequate_max_tokens() -> None:
         f"question max_tokens {question_kwargs['max_tokens']} < 512 "
         "— instructor retries on truncation (M-05)."
     )
+    assert question_kwargs["model"] == _HAIKU_MODEL
 
     # Answer call: response_model=_VerificationAnswerOut, max_tokens >= 2048
     answer_kwargs = calls[1].kwargs
@@ -210,3 +215,4 @@ async def test_verify_claim_uses_adequate_max_tokens() -> None:
         "— session-42 observed all 11 candidates blew instructor retries "
         "when max_tokens=512 (M-05)."
     )
+    assert answer_kwargs["model"] == _HAIKU_MODEL
