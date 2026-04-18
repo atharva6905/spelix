@@ -478,8 +478,52 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 | D-049 | Patch `Citation` Pydantic serializer warnings observed during coaching runs on prod. Worker log shows `PydanticSerializationUnexpectedValue(Expected 'Citation' — serialized value may not be as expected ...)` on every coaching call with citations. Root cause likely a dict-vs-model mismatch in how `CoachingOutput.citations` is populated somewhere upstream (instructor deserialization?). Non-functional — coaching still completes — but the log spam makes production-log triage harder. | S | — | FR-AICP-01 | open |
 | D-050 | Refine `CoveVerificationService` claim-extraction prompt to focus on PRINCIPLE-level claims rather than lifter-specific MEASUREMENT claims. | S | D-048 | FR-AICP-08, ADR-COVE-02 | done — `6c41953` (PR #90, session 49). Core goal achieved: session 49 prod E2E on analysis `c46023c9` produced 17/17 principle-shaped claims (zero measurements). Faithfulness 0.92→0.82 (above 0.8 gate). `cove_verified` still false for a NEW reason (extractor hallucinates inversions + invents out-of-coaching principles) — filed as D-052. |
 | D-051 | Auditor M-02 follow-up from PR #88: add a regression test for the `else` branch of Step 4 revision in `_run_cove_loop` (`iteration == max_iterations`). The new D-048 `test_cove_max_tokens_meets_headroom_revision_path` exercises only the `if iteration < max_iterations` branch; the `else` "final iteration exhausted" revision at `backend/app/services/cove.py:389` is structurally identical but untested by max_tokens assertion. Add a test with `max_iterations=1` and a "No" answer to exercise the else path. | S | D-048 | FR-AICP-08 | open |
-| D-052 | Tighten the D-050 claim-extraction prompt with an explicit inversion-guard + add a negative worked example for inverted-principle hallucination. Session 49 E2E on analysis `c46023c9` showed iteration 2 reached 7/8 Yes but the one No blocked convergence: the extractor emitted "excessively slow eccentric makes bar path control harder" — the source actually says a rushed/fast descent is the problem. Iteration 1 additionally invented "minimum of 60°" (coaching never stated a minimum), "60–100° reference range", and "stretch-shortening cycle disruption" claims that weren't in the coaching output at all. The current prompt's "do not invent a principle that was not written" rule is too soft — needs an explicit "do not invert, re-direction, or extrapolate beyond what the coaching says" clause + a before/after worked example showing an inverted-principle rejection. | S | D-050 | FR-AICP-08, ADR-COVE-02 | open |
+| D-052 | Tighten the D-050 claim-extraction prompt with an explicit inversion-guard + add a negative worked example for inverted-principle hallucination. Session 49 E2E on analysis `c46023c9` showed iteration 2 reached 7/8 Yes but the one No blocked convergence: the extractor emitted "excessively slow eccentric makes bar path control harder" — the source actually says a rushed/fast descent is the problem. Iteration 1 additionally invented "minimum of 60°" (coaching never stated a minimum), "60–100° reference range", and "stretch-shortening cycle disruption" claims that weren't in the coaching output at all. The current prompt's "do not invent a principle that was not written" rule is too soft — needs an explicit "do not invert, re-direction, or extrapolate beyond what the coaching says" clause + a before/after worked example showing an inverted-principle rejection. | S | D-050 | FR-AICP-08, ADR-COVE-02, ADR-COVE-03 | done — `8740388` (PR #92, session 50). Core goal achieved: session 50 prod E2E on analysis `43f25db8` produced `cove_verified=true` (was false) with iter 2 converging 7/7 Yes on principle-shaped claims. Faithfulness improved 0.82→0.88. Iter 1 still surfaced one extrapolation ("60–100°"), but CoVe's verification + Step 4 revision correctly narrowed it to the sourced "45–75°" range; convergence reached in iter 2. |
 | D-053 | Investigate + fix `lifecycle_decision: qdrant search failed ('AsyncQdrantClient' object has no attribute 'search') — treating as ADD` warnings observed in session 49 worker logs during distillation runs. Known gotcha per `backend/CLAUDE.md` "qdrant_client passed to lifecycle_decision must support .search(...) directly. QdrantClientWrapper only exposes .query_points, so deps.py passes the raw _client (AsyncQdrantClient). Watch for breakage if the wrapper API changes." The wrapper API has apparently changed — `AsyncQdrantClient.search` is deprecated/removed in newer qdrant-client. Currently silent-fallback to `ADD` which over-admits duplicate candidates to the review queue. Migrate `lifecycle_decision` to `query_points` or the new API. | M | — | FR-BRAIN-06, FR-BRAIN-17, ADR-DISTILL-01 | open |
+
+---
+
+## Completed — L2 Sprint Day 12 — D-052 CoVe inversion + extrapolation guards (2026-04-18, session 50)
+
+PR #92 merged to `main` as `8740388` via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 4 commits preserved: `8ce576a` failing tests → `2d28fa5` prompt tightening → `6b27045` adversarial smoke script → `323fe9b` code-review fix-up (drop trailing-space negative-example marker that false-positive-matched the D-050 "DO NOT extract MEASUREMENT-LEVEL" paragraph). CI 6/6 green on pre-merge HEAD `323fe9b`; Deploy to Production green on merge commit `8740388`; droplet HEAD matches + all containers healthy. Backend: 1701 → 1704 tests (+3 D-052 structural-assertion tests). Frontend unchanged. Ruff + pyright clean.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-D052-01 | TDD failing tests: `test_claim_extraction_prompt_prohibits_inversion`, `test_claim_extraction_prompt_prohibits_extrapolation`, `test_claim_extraction_prompt_has_negative_worked_examples` | done | S | — | FR-AICP-08 | `8ce576a` | `backend/tests/unit/test_cove.py` (+121 lines) |
+| L2-D052-02 | Impl: extend `_build_claim_extraction_prompt` with inversion-guard paragraph (invert / reverse / negate / direction) + extrapolation-guard paragraph (minimum / maximum / reference range) + 2 new `Do NOT extract:` worked-example blocks. All D-050 content preserved verbatim. | done | S | L2-D052-01 | FR-AICP-08, ADR-COVE-03 | `2d28fa5` | `backend/app/services/cove.py` |
+| L2-D052-03 | Adversarial live-API smoke script: `smoke_cove_claim_extraction_d052.py` — fast-descent issue (inversion trigger) + bare optimal-range 45–75° issue (extrapolation trigger). Sibling of D-050 smoke. Not CI. | done | S | L2-D052-02 | — | `6b27045` | `backend/scripts/oneoff/smoke_cove_claim_extraction_d052.py` (new) |
+| L2-D052-04 | Code-review fix-up: tighten `negative_example_markers` tuple from `("do not extract:", "do not extract ")` to `("do not extract:",)` — the trailing-space form false-positive-matched the D-050 paragraph `"DO NOT extract MEASUREMENT-LEVEL"`, creating a regression-survival hole. | done | S | L2-D052-01 | — | `323fe9b` | `backend/tests/unit/test_cove.py` |
+| L2-D052-05 | PR #92 → CI 6/6 green → `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 2 MEDIUM pre-existing hygiene: missing pytest `testpaths`, minor smoke-script style inconsistency vs D-050 precedent) → `spelix-security-reviewer` PASS (0 findings) → merge (`merge_method="merge"`) → Deploy to Production auto-run → droplet HEAD `8740388` + containers healthy → Playwright E2E on prod bench fixture. | done | M | L2-D052-02, L2-D052-03, L2-D052-04 | — | `8740388` | PR #92 |
+
+**Prod E2E verification** (session 50, analysis `43f25db8-c922-4211-bb98-5266c8ff6f74`, bench fixture `atharva-bench-nw-10s-720p.mp4`, fresh upload under admin test account):
+
+| Metric | Session 49 (`c46023c9`, post-D-050) | Session 50 (`43f25db8`, post-D-052) |
+|---|---|---|
+| analysis status | completed | completed |
+| `retrieval_source` | `coach_brain_primary` ✅ | `coach_brain_primary` ✅ |
+| `degraded_mode` | false | false |
+| `eval_scores.faithfulness` | 0.82 | **`0.88`** ✅ (above 0.80 gate; `faithfulness_passed=true`) |
+| `eval_scores.cove_verified` | `false` (hallucinated-inversion No) | **`true`** ✅ (iter 2 converged 7/7 Yes) |
+| `cove_iterations` count | 2 | 2 |
+| iter1 / iter2 claim count | 9 / 8 | 7 / 7 |
+| iter 2 Yes / No / Uncertain | 7 / 1 / 0 | **7 / 0 / 0** ✅ |
+| converged (iter 2) | false | **true** ✅ |
+| console errors / 4xx-5xx | 0 | 0 |
+
+**Gate verdicts** (per D-052 plan Task 7):
+- **Gate A (`cove_verified=true`)**: ✅ **PASS** — flipped from false → **true**. Iteration 2 reached full convergence (7/7 Yes, all principle-shaped, all source-cited).
+- **Gate B (`faithfulness ≥ 0.70`)**: ✅ **PASS** — 0.88 (not the predicted regression to 0.70–0.82 band; D-052 was net-positive on faithfulness).
+- **Gate C (no iter-2 inversions / extrapolations)**: ✅ **PASS** — all 7 iter-2 claims correctly principle-shaped, zero inversions, zero invented min/max/alternate-range.
+
+**Residual observation** (non-blocker): iteration 1 still surfaced ONE extrapolation — claim 1: "Optimal elbow angle at the bottom of the bench press is 60–100° from the torso" (coaching-output 45–75° range extrapolated to 60–100°). Verification correctly answered No (sources 1+4 specify 45–75°), Step 4 revision narrowed the iter-1 claim set to the correct "45–75°" for iter 2, and iter 2 converged cleanly. CoVe's revision loop is working as designed — the guard is not a total barrier against extrapolation in iter 1, but the revision step closes the gap and iter 2 is pristine. No follow-up D-### filed; if future prod E2Es show iter-2 convergence failing for inversion/extrapolation reasons, we file a new D-### then. Screenshot: `e2e/screenshots/d052-post-fix-results-43f25db8.png`.
+
+**Audits (pre-merge):**
+- `spelix-auditor` → PASS_WITH_FINDINGS. 0 CRITICAL / 0 HIGH. 2 MEDIUM non-blocking: M-01 missing `testpaths = ["tests"]` under `[tool.pytest.ini_options]` (pre-existing hygiene gap not introduced by this PR); M-02 minor smoke-script client-instantiation style drift vs D-050 precedent (cosmetic, not a security issue).
+- `spelix-security-reviewer` → PASS. 0 CRITICAL / 0 HIGH. All checks clean.
+
+**Reviews (per subagent-driven-development):**
+- Spec compliance reviewer → PASS (4/4 checks: tests verbatim per plan, prompt body verbatim per plan Task 3 Step 2, smoke script verbatim per plan Task 4 Step 1, no unrelated drift).
+- Code quality reviewer → APPROVED WITH MINOR ISSUES (1 Important fix applied as L2-D052-04; 2 Minor noted non-blocking).
 
 ---
 
