@@ -813,3 +813,26 @@ This **falsified** all four backlog hypotheses (a Cohere SEARCH_QUERY/SEARCH_DOC
 
 **Related:** FR-BRAIN-04 (status filter), FR-BRAIN-05 (retrieval_source thresholds 0.82 / 0.65), FR-BRAIN-09 (seed corpus + trigger_tags as vocabulary source), FR-AICP-18 (composable agent tools), ADR-BRAIN-02 (contextual padding before embedding — still in force; this ADR is an additive query-side mitigation), ADR-BRAIN-08 (seed cold-start eligibility — still in force). `backend/app/agents/tools.py:33-58,175-189` (constant + use site), `backend/scripts/oneoff/diagnose_coach_brain_retrieval.py` (read-only diagnostic — keep for future RAG investigations). PR #87 (`811a6c3`), session 47.
 
+## ADR-COVE-01: CoveVerificationService Haiku 4.5 / Sonnet 4.6 max_tokens budgets (Session 48)
+
+**Context**: Sessions 46 and 47 prod E2E on bench-fixture analyses (`6aa7b42b`, `de316a7a`) both observed `eval_scores.cove_verified=false` and `faithfulness=0.0` on completed analyses despite valid coaching output. Root cause: `CoveVerificationService._run_cove_loop` Step 3 `VerificationAnswers` call was capped at `max_tokens=1024` — too tight for Haiku 4.5's aggregated N-claim response (one `{question, answer, reasoning}` entry per claim, with reasoning citing source numbers). Instructor's structured-output retry loop failed three times; the service's top-level `try/except` swallowed the `ValidationError` and persisted `CoveResult(cove_verified=false, iterations_run=0, trace=[{"error": ...}])`. The faithfulness gate downstream read the swallowed result and stored `faithfulness=0.0`. Session 47 confirmed the failure survives the D-045 retrieval fix (Coach Brain retrieval now routes correctly; coaching-path CoVe still blew up) — proving independence from retrieval routing. D-048 bumps every `max_tokens=` in the CoVe loop.
+
+**Decision**: Adopt the following per-step budgets in `app/services/cove.py::CoveVerificationService._run_cove_loop`:
+
+| Step | Model | Response model | Budget | Rationale |
+|------|-------|----------------|--------|-----------|
+| 1: Claim extraction (pre-loop + iter > 1) | Haiku 4.5 | `ClaimList` | **1024** | Short-list output; cheap headroom against instructor retries. |
+| 2: Question generation | Haiku 4.5 | `VerificationQuestions` | **1024** | Short-list output; cheap headroom against instructor retries. |
+| 3: Independent verification | Haiku 4.5 | `VerificationAnswers` | **4096** | Documented blow-out path. N aggregated answers × ~60-token reasoning. Sessions 46 + 47 observed truncation at 1024, 2048, 3072. 4096 sits below Haiku 4.5's 8192 hard cap. |
+| 4: Revision (both branches) | Sonnet 4.6 | `CoachingOutput` | **3072** | Regenerates full coaching output (summary + issues + correction_plan + cues + citations + disclaimer). 2048 was tight for multi-issue outputs. |
+
+**Consequences**:
+- `cove_verified` and `faithfulness` now reflect the actual coaching-vs-evidence verdict, not silent instructor failure. Session 48 post-fix prod E2E on bench fixture confirmed `faithfulness` flipped from `0.0` → **`0.92`** on analysis `bfbed270-1117-4a8a-8246-6d2dc9391781`. CoVe ran 2 iterations with 11 + 15 claims, producing real answers with source citations.
+- **Surfaced a separate issue (tracked as D-050):** with CoVe now actually running, `cove_verified=false` still persists on this run because the claim-extraction prompt picks up lifter-specific numerical measurements ("elbow angle 38°", "eccentric 5.16s", "ascent 1.28s") as "falsifiable claims" — which research sources correctly report as Uncertain (papers describe the optimal 45–75° range and 2s eccentric target, but cannot confirm THIS lifter's values). The principles verify as Yes; the measurements verify as Uncertain. This is honest behavior, not a regression — but it means `cove_verified=true` (all-Yes convergence) is effectively unreachable under the current claim-extraction prompt whenever the coaching cites measured values. The follow-up (D-050) will refine claim-extraction to focus on principle-level claims, not measured-value claims.
+- Cost impact at L2-beta volume (<10 analyses/day × ≤2 iterations × worst-case 4096 output × $1.25/MTok Haiku output): ~$0.10/day delta. Negligible.
+- If Haiku 4.5 ever legitimately emits >4096 tokens of verification reasoning, the existing top-level `try/except` in `verify()` catches the `ValidationError` and falls back to `cove_verified=false, trace=[{"error": ...}]` — same loud signal the prior budget would have produced, just at a higher ceiling. If this becomes common, iterate (8192 is the Haiku hard cap) rather than dropping the budget back.
+- Precedent: session-46 M-05 bump on the brain-path `BrainCoveService` (ADR-DISTILL-06). Coaching path and distillation path are intentionally separate services per ADR-DISTILL-03 — the budgets differ because they verify different input shapes (full `CoachingOutput` vs single atomic cue), but the design principle ("pay cheap Haiku 4.5 output tokens to avoid instructor retry pathology") is the same.
+- Do NOT drop any budget below its prior value — that's the known-broken state.
+
+**Related:** FR-AICP-08 Stage 2 (CoVe loop for coaching output), ADR-DISTILL-06 (precedent — brain-path max_tokens), ADR-DISTILL-03 (slim single-claim brain service — scope separation). `backend/app/services/cove.py:262,286,315,328,371,389`. PR #88 (`4ef4091`), session 48.
+
