@@ -476,8 +476,51 @@ Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 | D-047 | Additive coverage test for the pre-fix M-05 failure mode in `test_distillation_cove_brain.py`: stub `instructor_client.chat.completions.create` with `side_effect=ValidationError(...)` and assert `BrainCoveResult.explanation == "evaluation_failed: ValidationError"`. Prevents silent regression if a future refactor drops max_tokens below the 2048 ceiling. Follow-up from code-reviewer suggestion on PR #85. | S | — | FR-BRAIN-14 | open |
 | D-048 | Apply the M-05-style max_tokens bump to the coaching-path `app/services/cove.py::CoveVerificationService`. Prod E2E on session 46 observed output_tokens=1024→2048→3072 exponential retry, all truncated, on bench analysis `6aa7b42b`. Coaching succeeds because CoVe failure falls back gracefully, but `eval_scores.cove_verified=false` is persisted spuriously. Needs the same 2048+ headroom and the same TDD gate as M-05. | S | M-05 | FR-AICP-08 | done — `4ef4091` |
 | D-049 | Patch `Citation` Pydantic serializer warnings observed during coaching runs on prod. Worker log shows `PydanticSerializationUnexpectedValue(Expected 'Citation' — serialized value may not be as expected ...)` on every coaching call with citations. Root cause likely a dict-vs-model mismatch in how `CoachingOutput.citations` is populated somewhere upstream (instructor deserialization?). Non-functional — coaching still completes — but the log spam makes production-log triage harder. | S | — | FR-AICP-01 | open |
-| D-050 | Refine `CoveVerificationService` claim-extraction prompt to focus on PRINCIPLE-level claims rather than lifter-specific MEASUREMENT claims. Post-D-048 session 48 prod E2E on analysis `bfbed270` shows claims like "elbow angle 38°", "eccentric 5.16s", "ascent 1.28s" are extracted and then necessarily answered Uncertain by the verifier (research sources describe optimal ranges, not specific lifter values). This makes `cove_verified=true` (all-Yes convergence) effectively unreachable whenever the coaching cites measured values. Proposed fix: update `_build_claim_extraction_prompt` to instruct the extractor to skip numerical lifter-specific measurements and extract only principle claims (e.g. "45–75° is optimal elbow range", "2s eccentric tempo is standard") — keeping the verifier's job tractable. | S | D-048 | FR-AICP-08 | open |
+| D-050 | Refine `CoveVerificationService` claim-extraction prompt to focus on PRINCIPLE-level claims rather than lifter-specific MEASUREMENT claims. | S | D-048 | FR-AICP-08, ADR-COVE-02 | done — `6c41953` (PR #90, session 49). Core goal achieved: session 49 prod E2E on analysis `c46023c9` produced 17/17 principle-shaped claims (zero measurements). Faithfulness 0.92→0.82 (above 0.8 gate). `cove_verified` still false for a NEW reason (extractor hallucinates inversions + invents out-of-coaching principles) — filed as D-052. |
 | D-051 | Auditor M-02 follow-up from PR #88: add a regression test for the `else` branch of Step 4 revision in `_run_cove_loop` (`iteration == max_iterations`). The new D-048 `test_cove_max_tokens_meets_headroom_revision_path` exercises only the `if iteration < max_iterations` branch; the `else` "final iteration exhausted" revision at `backend/app/services/cove.py:389` is structurally identical but untested by max_tokens assertion. Add a test with `max_iterations=1` and a "No" answer to exercise the else path. | S | D-048 | FR-AICP-08 | open |
+| D-052 | Tighten the D-050 claim-extraction prompt with an explicit inversion-guard + add a negative worked example for inverted-principle hallucination. Session 49 E2E on analysis `c46023c9` showed iteration 2 reached 7/8 Yes but the one No blocked convergence: the extractor emitted "excessively slow eccentric makes bar path control harder" — the source actually says a rushed/fast descent is the problem. Iteration 1 additionally invented "minimum of 60°" (coaching never stated a minimum), "60–100° reference range", and "stretch-shortening cycle disruption" claims that weren't in the coaching output at all. The current prompt's "do not invent a principle that was not written" rule is too soft — needs an explicit "do not invert, re-direction, or extrapolate beyond what the coaching says" clause + a before/after worked example showing an inverted-principle rejection. | S | D-050 | FR-AICP-08, ADR-COVE-02 | open |
+| D-053 | Investigate + fix `lifecycle_decision: qdrant search failed ('AsyncQdrantClient' object has no attribute 'search') — treating as ADD` warnings observed in session 49 worker logs during distillation runs. Known gotcha per `backend/CLAUDE.md` "qdrant_client passed to lifecycle_decision must support .search(...) directly. QdrantClientWrapper only exposes .query_points, so deps.py passes the raw _client (AsyncQdrantClient). Watch for breakage if the wrapper API changes." The wrapper API has apparently changed — `AsyncQdrantClient.search` is deprecated/removed in newer qdrant-client. Currently silent-fallback to `ADD` which over-admits duplicate candidates to the review queue. Migrate `lifecycle_decision` to `query_points` or the new API. | M | — | FR-BRAIN-06, FR-BRAIN-17, ADR-DISTILL-01 | open |
+
+---
+
+## Completed — L2 Sprint Day 11 — D-050 CoVe claim extraction principle-level (2026-04-18, session 49)
+
+PR #90 merged to `main` as `6c41953` via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 4 commits preserved: `e2d74e6` failing tests → `647450a` prompt rewrite → `7cab235` smoke script → `9d6a447` code-review fix-up (tighten `Extract:` label assertion from substring check to count-based check). CI 6/6 green on pre-merge HEAD `9d6a447`; Deploy to Production green 37s on merge commit `6c41953`; droplet + containers confirmed healthy. Backend: 1698 → 1701 tests (+3 D-050 structural-assertion tests). Frontend unchanged. Ruff + pyright clean.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-D050-01 | TDD failing tests: `test_claim_extraction_prompt_emphasises_principle_level`, `test_claim_extraction_prompt_includes_worked_examples`, `test_claim_extraction_prompt_still_references_falsifiability` | done | S | — | FR-AICP-08 | `e2d74e6` | `backend/tests/unit/test_cove.py` (+105 lines) |
+| L2-D050-02 | Impl: rewrite `_build_claim_extraction_prompt` body — explicit principle vs measurement distinction, SKIP directive, translate-not-invent rule, 2+2 worked examples | done | S | L2-D050-01 | FR-AICP-08, ADR-COVE-02 | `647450a` | `backend/app/services/cove.py` (+50/-7) |
+| L2-D050-03 | Live-API smoke script for operator qualitative review (not CI) | done | S | L2-D050-02 | — | `7cab235` | `backend/scripts/oneoff/smoke_cove_claim_extraction_d050.py` (new, +153) |
+| L2-D050-04 | Code-review fix-up: tighten `Extract:` label assertion from `"extract" in lowered` (too weak — satisfied by opening-sentence `extracting` token) to `lowered.count("extract:") >= 2` (requires worked-example labels) | done | S | L2-D050-01 | — | `9d6a447` | `backend/tests/unit/test_cove.py` |
+| L2-D050-05 | PR #90 → CI 6/6 green (Backend Tests 2m14s, Backend Lint 35s, Frontend Lint 24s, Frontend Tests 1m23s, Secret Scanning 10s, Vercel pass) → `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 3 MEDIUM all non-blocking: M-01 ADR deferred, M-02 backlog deferred, M-03 SaMD-exclusion test suggestion) → `spelix-security-reviewer` PASS (0 findings, 8/8 checks) → merge (`merge_method="merge"`) → Deploy to Production auto-run 37s → droplet HEAD `6c41953` + containers healthy → Playwright E2E on prod bench fixture | done | M | L2-D050-02, L2-D050-03, L2-D050-04 | — | `6c41953` | PR #90 |
+
+**Prod E2E verification** (session 49, analysis `c46023c9-b098-4083-9c19-dad174b14a04`, bench fixture `atharva-bench-nw-10s-720p.mp4`, fresh upload under admin test account):
+
+| Metric | Session 48 (`bfbed270`, post-D-048) | Session 49 (`c46023c9`, post-D-050) |
+|---|---|---|
+| analysis status | completed | completed |
+| `retrieval_source` | `coach_brain_primary` ✅ | `coach_brain_primary` ✅ |
+| `degraded_mode` | false | false |
+| `eval_scores.faithfulness` | **`0.92`** | **`0.82`** (above 0.8 gate; `faithfulness_passed=true`) |
+| `eval_scores.cove_verified` | `false` (measurement Uncertains) | `false` (hallucinated-inversion No) |
+| `cove_iterations` count | 2 | **2** |
+| iter1 claims / iter2 claims | 11 / 15 | **9 / 8** (tighter extraction) |
+| Claim-shape (iter 2) | 9/15 measurement-Uncertain | **0/8 measurements, 7/8 principle-Yes** ✅ |
+| converged | false | false |
+| console errors / 4xx-5xx | 0 | 0 |
+
+**Key finding:** D-050 core goal ACHIEVED. All 17 claims across 2 iterations are principle-level ("Optimal elbow angle at the bottom of the bench press is 45–75° from the torso", "The recommended eccentric phase duration for bench press is approximately 2 seconds", "At lockout, the bar should be directly over the shoulder joint..."). Zero lifter-specific measurement claims. Compare to session 48 `bfbed270` which had claims like "Did the eccentric phase duration measure 5.16 seconds?" — these are gone.
+
+`cove_verified` remained false for a DIFFERENT reason (not a D-050 regression — a newly-surfaced hallucination pattern). Iteration 2 reached 7/8 Yes but the one No blocked convergence: extractor emitted "excessively slow eccentric makes bar path control harder" (source 2 says fast descent is the problem — extractor inverted the direction). Iteration 1 additionally invented "minimum of 60°", "60–100° reference range", "stretch-shortening cycle disruption from extreme eccentric" — principles not in the coaching output. The "translate-not-invent" rule in the refined prompt needs strengthening against inversions and extrapolations. Filed as D-052. Screenshot: `e2e/screenshots/d050-post-fix-results-c46023c9.png`.
+
+**Audits (pre-merge):**
+- `spelix-auditor` → PASS_WITH_FINDINGS. 0 CRITICAL / 0 HIGH. 3 MEDIUM: M-01 ADR-COVE-02 not yet in `decisions.md` (per-plan, landed in this docs close-out commit); M-02 D-050 backlog row still open (per-plan, landed in this docs close-out commit); M-03 optional SaMD-vocabulary test hardening suggestion (non-blocking, deferred).
+- `spelix-security-reviewer` → PASS. 0 CRITICAL / 0 HIGH. All 8 checks clean.
+
+**Reviews (per subagent-driven-development):**
+- Spec compliance reviewer → PASS (6/6 checks, no scope creep).
+- Code quality reviewer → APPROVED after 1 Important fix-up (the L2-D050-04 assertion tightening).
 
 ---
 
