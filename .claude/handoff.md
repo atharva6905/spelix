@@ -1,84 +1,98 @@
-# Session 44 Handoff → Session 45: P3-007 "How AI Reasoned" sidebar shipped + rep-detection root cause found; session 45 priority 1 is D-040 peak/valley rep detection + D-041 degenerate scoring fix
+# Session 45 Handoff → Session 46: D-040 hybrid rep detection + D-041 degenerate scoring guard shipped to prod (PR #84)
 
-**Context refresh:** Session 44 (2026-04-17, L2 Sprint Day 8) executed the full Phase 3 Batch 3 P3-007 task from a cold start — read session 43 handoff → wrote plan → critical plan-eng-review → applied review fixes → subagent-driven execution (10 tasks) → audit + security review pre-merge → fixed audit HIGHs → shipped PR #83 (merged non-squash as `70d736c`) → Deploy to Production CI step green in 37s via SSH → admin-account E2E upload of the 10s bench fixture → sidebar verified end-to-end on prod against a real Phase 3 `agent_trace_json`. The E2E ALSO surfaced a rep-detection bug on real user video (0 reps counted despite ~3 clean rep cycles) which was traced via `systematic-debugging` skill to the STANDING threshold of 160° never being crossed (peak 152.97°). Root cause, fix strategy, and D-040/D-041 follow-ups captured in ADR-REPDET-01.
+**Context refresh:** Session 45 (2026-04-18, L2 Sprint Day 9) closed out session 44's Priority 1. The original ADR-REPDET-01 plan was pure `scipy.signal.find_peaks`; mid-session fixture calibration with user hand-counts disproved that approach (over-counted by 3–4× on noisy real-video signals) and we pivoted to a **hybrid** detector: state machine primary + peak/valley fallback. D-041 degenerate-scoring guard shipped alongside. Both shipped in PR #84 (`bc17250`), auto-deployed via CI, verified on prod with a fresh admin-account upload of the session-44 regression fixture — went from **0 reps → 1 rep**, form scores cleanly populated, no "Very Low + 10.0" contradiction.
 
 ## 1. Completed
 
-### PR #83 (`70d736c`) — Phase 3 Batch 3 / P3-007 "How AI Reasoned" Sidebar
+### PR #84 (`bc17250`) — D-040 hybrid rep detection + D-041 degenerate scoring guard
 
-Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 9 commits on `feat/p3-007-reasoning-sidebar` + merge commit. Plan at `docs/superpowers/plans/2026-04-17-p3-007-reasoning-sidebar.md`.
+Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 7 commits preserved to show the learning path (pure peak/valley → empirical calibration → hybrid pivot). Plan at `docs/superpowers/plans/2026-04-17-d040-d041-rep-detection-and-degenerate-scoring.md`.
 
 | Ref | What | Commit |
 |---|---|---|
-| L2-PHASE3-B3-P3007-01 | Backend: expose `agent_trace_json` on `CoachingResultSchema` + MagicMock factory drift fix in `test_analysis_crud.py::_make_mock_coaching_result` per CLAUDE.md "factories updated with schema extensions" rule | `c3b7a12` |
-| L2-PHASE3-B3-P3007-02 | Frontend types: `AgentNodeEvent` / `AgentEvalScores` / `AgentRetrievalSource` / `AgentTracePayload` in `api/analyses.ts`; all fields optional to accommodate the Phase 2 imperative-path partial `{cove_iterations, converged}` write | `71759e1` |
-| L2-PHASE3-B3-P3007-03 | Install `@xyflow/react@12.10.2` (React 19 compatible, MIT) | `c44356b` |
-| L2-PHASE3-B3-P3007-04 | `lib/agentTraceLabels.ts` — plain-English map for 10 deterministic nodes + reasoner + humanizer fallback + retrieval-source map + `formatDuration`; 8 tests | `bfe81a3` |
-| L2-PHASE3-B3-P3007-05 | `lib/agentTraceGraph.ts` — `buildTraceGraph()` (sequential chain, index-based IDs, vertical layout); 9 tests | `89883da` |
-| L2-PHASE3-B3-P3007-06 | `components/AgentReasoningSidebar.tsx` — drawer with summary + xyflow graph + detail pane; a11y (`div role=dialog aria-modal aria-labelledby` + `closeButtonRef` autofocus); 17 tests incl. 2 a11y | `dd083fb` |
-| L2-PHASE3-B3-P3007-07 | ResultsPage button + sidebar wire-up (gated on `nodes_executed.length > 0`) + xyflow `vi.mock` at top of tests; 4 integration tests | `9aa749b` |
-| L2-PHASE3-B3-P3007-08 | Audit fix (spelix-auditor H-1 + H-2): `labelForRetrievalSource` humanizer fallback + `labelForOutputKey` map (12 AgentState keys + fallback) + sidebar chip wire-up; 4 new tests | `4987307` |
-| L2-PHASE3-B3-P3007-09 | PR #83 → CI 5/5 + Vercel green → merge-not-squash → Deploy to Production (37s) → droplet HEAD match + containers healthy → E2E verified | `70d736c` (merge) |
+| L2-D040-01 | Initial pure peak/valley rewrite (superseded) | `f237ccf` |
+| L2-D040-02 | Test-file update for peak/valley semantics (delete 8, update 3, add 4) | `109abfc` |
+| L2-D040-03 | `_BENCH_*_L` clarifying comment | `b15f770` |
+| L2-D041-01 | D-041 `_is_degenerate_scoring_input` guard + Step 9b short-circuit + 6 tests | `a7477f0` |
+| L2-D040-05 | D-040 smoke script | `41100b8` |
+| L2-D040-06 | **Hybrid pivot** — state machine primary + peak/valley fallback + `TestHybridStateMachineWins` | `dffa59e` |
+| L2-D040-07 | Auditor-finding fixes (H-2 asymmetric hysteresis comment, M-3 smoke docstring, M-4 probe_duration_seconds patch, M-5 signal_processing.py landmark comment) | `e35b86d` |
+| L2-D040-08 | PR #84 → CI 6/6 green → merge (merge, NOT squash) → Deploy to Production auto-run → droplet HEAD match + containers healthy → Playwright E2E verified on prod | `bc17250` (merge) |
 
-### Post-merge docs commits on `main` (session 44)
+### Fixture hand-count ground truth (established this session)
+
+User provided hand counts for all 6 in-repo fixtures:
+
+| fixture | duration | hand | pre-PR prod (state-machine) | pure peak/valley | hybrid |
+|---|---|---|---|---|---|
+| `atharva-bench-nw-10s-720p.mp4` | 10 s | 1 | 0 ❌ | 1 ✓ | **1 ✓** |
+| `atharva-bench-nw-10s.mp4` | 10 s | 1 | 0 ❌ | 1 ✓ | **1 ✓** |
+| `atharva-bench-no-weight.mov` | 22.5 s | 5 | 0 ❌ | 7 🟡 | **7** (over-by-2, was unusable) |
+| `atharva-bench.mov` (loaded) | 23 s | 5 | 13 🟡 | 21 ⚠ | **13** (SM wins = current prod, no regression) |
+| `atharva-squat.mov` | 20.2 s | 5 | 5 ✓ | 14 ⚠ | **5 ✓** |
+| `atharva-deadlift.mov` | 25.8 s | 5 | 5 ✓ | 4 🟡 | **5 ✓** |
+
+Hybrid = strict Pareto improvement over prod: 3 partial-lockout fixtures unlocked, 0 regressions.
+
+### Post-merge docs commits on `main` (session 45)
 
 | What | Commit |
 |---|---|
-| `docs(backlog,adr,handoff)` — close P3-007 with merge SHA + L2 Sprint Day 8 Completed section + ADR-REASONING-SIDEBAR-01 (8 design decisions + 5 deferred D-###) + session 45 handoff v1 + prod E2E screenshot | `518c486` |
-| `docs(decisions,backlog)` — ADR-REPDET-01 + D-040/D-041 rep detection rework scoped for session 45 | `02a6207` |
+| `docs(backlog,handoff)` — close D-040/D-041 with `bc17250` SHA + register D-042 (ThresholdConfig wiring), D-043 (<20° prominence test), D-044 (bench.mov signal-quality investigation) + session 45 handoff → 46 | **pending — commit this after session close** |
 
-### Audit verdicts (pre-merge, post-fix)
+### Audit verdicts (pre-merge)
 
-- **spelix-auditor** (session 44) — PASS_WITH_FINDINGS → PASS after inline fixes. 0 CRITICAL, 2 HIGH fixed (H-1 `labelForRetrievalSource` unknown-fallback humanizer; H-2 `output_keys` plain-English chip labels). 3 MEDIUM — M-1/M-2 fixed same commit as corollaries of H-1/H-2; M-3 (schema docstring reference to producer shape) deferred as a pure doc improvement.
-- **spelix-security-reviewer** (session 44) — PASS. Ownership guard on `GET /api/v1/analyses/{id}` intact; schema field addition adds no bypass. No banned SaMD language in any new user-facing string. No `dangerouslySetInnerHTML`. MEDIUM: `NodeEvent.error` Python exception strings could leak `/tmp/...` paths — deferred to a D-### follow-up (owner-only visibility on rare error path; low exploitability).
+- **spelix-auditor** — PASS_WITH_FINDINGS. 0 CRITICAL, 2 HIGH (H-2 fixed in `e35b86d`, H-1 deferred → D-042), 5 MEDIUM (M-3/M-4/M-5 fixed in `e35b86d`, M-1 declined, M-2 deferred → D-043). All actionable findings addressed pre-merge.
+- **spelix-security-reviewer** — PASS. 0 findings across 7 checks (SaMD language FR-SCOR-09, JWT/auth scope, RLS, secrets, error leakage, injection, FR-SCOR-10 confidence label).
 
-### Rep-detection root-cause investigation (captured in ADR-REPDET-01)
+### Prod E2E (2026-04-18 02:47 UTC)
 
-The P3-007 E2E upload (`cea2312b-…`, 10s bench fixture, bodyweight bar, camera on lifter's right side) returned **0 reps** despite ~3 clean rep cycles in the video. Investigation via `superpowers:systematic-debugging` skill (Phase 1 evidence gathering, no fixes attempted):
+Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. Analysis `f36f8367-ee53-4ae6-b91a-614fcb2d394e`. Screenshot: `e2e/screenshots/d040-d041-post-merge-prod-verified.png`.
 
-- MediaPipe pose extraction succeeded on **593/593 frames** (100%).
-- `_BENCH_ELBOW_L = 14` in `signal_processing.py` is mis-named — index 14 is MediaPipe's `right_elbow` = subject's right = **visible side** in this video. Visibility on that landmark: mean 0.935, 593/593 frames > 0.5. Signal was clean.
-- Right-side elbow angle min/max/mean: **37.7° / 152.97° / 106.8°**. Signal clearly shows ~3 rep cycles (peaks at ~t=2.0s and ~t=7.5s; troughs at ~t=5.8s and ~t=9.8s).
-- Rep-detection STANDING threshold = **160°** with 5° hysteresis (effectively 155°). Frames above 160°: **0 / 593**. State machine never entered STANDING state → never transitioned → 0 reps emitted.
-- Confirmed not a rotation issue, not a two-people issue, not a face-occlusion issue, not an occluded-side-hardcoding issue. Pure threshold mismatch for partial-lockout lifts.
-
-Downstream secondary defect: empty `rep_metrics[]` flows into `ScoreComponent` implementations which default to max (Technique 10.0 / Control 10.0) alongside UI-rendered "Very Low confidence / Unable to score reliably". Contradiction is trust-violating.
-
-Decision: **session 45 ships D-040 (peak/valley rep detection via `scipy.signal.find_peaks`) + D-041 (degenerate-input scoring fix) bundled in one PR.** See ADR-REPDET-01 in `decisions.md`.
+| Check | Result |
+|---|---|
+| Rep count | **1 rep** (was 0 session 44) — D-040 fallback working |
+| Confidence label | "Low" — NOT "Very Low" (real Tier 5 from 1 detected rep, not 0.0 fallback) |
+| Form scores | Overall 7.8 / MovQ 8.0 / Tech 8.5 / P&B 5.2 / Ctrl 10.0 — all populated |
+| No "Very Low + 10.0" contradiction | ✓ (D-041 guard path not needed because D-040 upstream fix removed 0-rep input) |
+| Coaching feedback rendered | ✓ summary + 3 strengths + 3 issues + 5 correction items + 5 cues + 4 citations |
+| Console errors (Playwright) | 0 |
+| Network 4xx/5xx | 0 |
 
 ## 2. Remaining
 
-### Session 45 Priority 1 — rep detection + scoring degenerate fix (bundle in one PR)
-
-| ID | Title | SRS | Size | Deps |
-|---|---|---|---|---|
-| D-040 | Replace fixed-threshold rep detection state machine with `scipy.signal.find_peaks` peak/valley extraction. Tuning knobs signal-relative (`prominence_deg`, `min_distance_s`). Audit + update `test_rep_detection.py` fixtures. | FR-CVPL-15, FR-REPM-01, FR-REPM-05 | M | — |
-| D-041 | Fix degenerate-input path in `backend/app/cv/scoring.py` — empty `rep_metrics` OR "Very Low" confidence should return `None`/"Not available" per dimension, not default to 10.0. Frontend FormScoreCards already handles `null` case. | FR-SCOR-02, FR-SCOR-04, FR-SCOR-07 | S | — |
-
-### Session 45 Priority 2 — non-code blockers (carry-over)
+### Session 46 Priority 1 — non-code blockers (carry-over from sessions 30+)
 
 | ID | Title | Status |
 |---|---|---|
 | — | Kin expert onboarding call (still pending since session 30) — target 10+ papers by 2026-05-03 | open, blocks expert corpus push |
-| — | Landing page V1 status verification on prod | unclear, needs re-check |
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
+| — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 45 Priority 3 — maintenance bundle (~1–2h if time permits)
+### Session 46 Priority 2 — M-04 / M-05 maintenance bundle (~1–2h)
 
-| ID | Title | Deps |
+| ID | Title | Why |
 |---|---|---|
-| M-04 | Re-embed Coach Brain seeds with FR-BRAIN-03 contextualized prefix (fixes `papers_only_fallback` overuse — observed live on the P3-007 E2E analysis: retrieval_source returned `papers_only_fallback` despite 24 seed entries being available) | — |
-| M-05 | Bump `BrainCoveService.max_tokens` to ≥2048 OR shorten verification prompt (unblocks D-039) | — |
+| M-04 | Re-embed Coach Brain seeds with FR-BRAIN-03 contextualized prefix | Fixes `papers_only_fallback` overuse observed live on session 44 P3-007 E2E |
+| M-05 | Bump `BrainCoveService.max_tokens` to ≥2048 OR shorten verification prompt | Unblocks D-039 (re-run CoVe after admin content edit) |
 
-### Deferred P3-007 follow-ups (new D-### from session 44)
+### Session 46 Priority 3 — D-### follow-ups from PR #84
 
 | ID | Title | Size | Source |
 |---|---|---|---|
-| D-### | Full focus trap inside AgentReasoningSidebar | S | A11y completeness |
-| D-### | Adaptive-mode reasoner-loop UI polish | M | — |
-| D-### | CoVe iteration drill-down pane | M | — |
-| D-### | LangSmith run link-out from summary header | S | — |
-| D-### | Sanitize `NodeEvent.error` in `serialize_trace_for_storage` (strip `/tmp/...` paths) | S | spelix-security-reviewer MED |
+| D-042 | Wire `_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` through `ThresholdConfig` (FR-SCOR-11) | S | auditor H-1 |
+| D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` | S | auditor M-2 |
+| D-044 | Investigate `atharva-bench.mov` 13-rep over-count (pre-existing; likely MediaPipe flicker or Savgol over-smoothing) | M | session 45 calibration |
+
+### Session 46 Priority 4 — P3-007 D-### follow-ups (from session 44)
+
+| ID | Title | Size |
+|---|---|---|
+| D-### | Full focus trap inside AgentReasoningSidebar | S |
+| D-### | Adaptive-mode reasoner-loop UI polish | M |
+| D-### | CoVe iteration drill-down pane | M |
+| D-### | LangSmith run link-out from summary header | S |
+| D-### | Sanitize `NodeEvent.error` in `serialize_trace_for_storage` (strip `/tmp/...` paths) | S |
 
 ### Deferred follow-ups from earlier sessions (unchanged)
 
@@ -96,158 +110,83 @@ Decision: **session 45 ships D-040 (peak/valley rep detection via `scipy.signal.
 
 ## 3. Test counts
 
-**Backend** (final local run, pre-merge):
-- `uv run pytest -x -q --ignore=tests/e2e` → **1690 passed, 25 skipped, 0 failed** (baseline 1687 / 27 skipped; delta +3 tests, −2 skips — the `_make_mock_coaching_result` factory fix un-skipped 2 previously-masked tests in addition to adding 1 new schema-exposure test).
+**Backend** (final local run, post-audit-fix pre-merge):
+- `uv run pytest -x -q --ignore=tests/e2e` → **1693 passed, 25 skipped, 0 failed** (baseline 1690; +1 D-040 hybrid distinguishing test + 6 D-041 − churn = +3 net).
 - `uv run ruff check .` — clean.
-- `uv run pyright app/` — **0 errors, 0 warnings, 0 informations**. The 2 pre-existing `test_consent_cascade.py` errors flagged in session 43 appear resolved this session (pyright fully clean).
-- New test files: `test_get_detail_exposes_agent_trace_json` in `test_analysis_api.py`.
+- `uv run pyright app/` — **0 errors, 0 warnings, 0 informations**.
+- New/updated test files: `test_rep_detection.py` (40→41 tests; +5 new, −8 deleted, 3 updated); `test_pipeline.py` (+6 new D-041 tests).
 - **Known failures:** none.
 
-**Frontend** (final local run, post-audit-fix pre-merge):
-- `npx vitest run` → **333 passed, 0 failed** across 42 test files (baseline 290; delta +43 — 12 labels + 9 graph + 17 sidebar + 4 ResultsPage integration + 1 types round-trip).
+**Frontend** (local run, pre-merge):
+- `npx vitest run` — 332/333 passed (1 `AdminPage.test.tsx` timeout flake under heavy-suite load; passes 24/24 in isolation). Unrelated to this PR.
 - `npx tsc --noEmit` — 0 errors.
-- **Known failures:** none.
-- New test files: `src/lib/__tests__/agentTraceLabels.test.ts` (12 tests), `src/lib/__tests__/agentTraceGraph.test.ts` (9 tests), `src/components/__tests__/AgentReasoningSidebar.test.tsx` (17 tests).
 
-**CI on PR #83** (`24582960822`): all 5 gate checks green (Backend Lint 35s, Backend Tests 2m0s, Frontend Lint 28s, Frontend Tests 1m25s, Secret Scanning 17s), Vercel preview green. Post-merge "Deploy to Production" on merge commit (`24583050696`) green in 37s.
+**CI on PR #84** (merge-commit run `24594795597`): all 6 gate checks green on main — Backend Lint 34s, Backend Tests 2m3s, Frontend Lint 27s, Frontend Tests 1m29s (AdminPage flake did NOT recur on CI), Secret Scanning 15s, Vercel green. **Deploy to Production: success.**
 
-**Coverage:** not re-measured this session. Phase 1 gate baseline 91% (backend); Phase 2 gate 90.31%. P3-007 did not touch CV pipeline so coverage should be ≥ baseline.
+**Coverage:** not re-measured this session. Phase 2 gate baseline 90.31%. This PR touches only `rep_detection.py`, `signal_processing.py` (comment), `pipeline.py` — all well-covered by the 1693-test suite.
 
-## 4. E2E verification
+## 4. Key learnings captured in this session
 
-**Result: PASS for P3-007; incidental BUG surfaced for rep detection (captured as D-040).**
-
-Full verification completed on prod against analysis `cea2312b-0713-47e4-a43b-3426261e854a` — fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` (13.6 MB, bench-flat, 10 s), completed Phase 3 pipeline in ~3 minutes including CV + coaching + distillation enqueue.
-
-Screenshot: `e2e/screenshots/p3-007-sidebar-verified.png` (viewport) — drawer open with all 10 plain-English nodes + summary + detail pane for node-2 ("Consulted the expert coaching library").
-
-### Flows walked
-
-| Flow | Prod behavior | Status |
-|---|---|---|
-| Admin login with existing session | Sign-out works cleanly; re-login accepted | ✓ |
-| Admin → another-user-owned analysis URL (`/results/73f9a137…`) | HTTP 403 → error alert on ResultsPage (ownership guard intact — schema extension did NOT bypass) | ✓ |
-| Admin upload of `atharva-bench-nw-10s-720p.mp4` | Upload accepted; pipeline completed; heuristic detection 79 % confidence bench-flat; `agent_trace_json` populated | ✓ |
-| ResultsPage renders "How AI Reasoned" button | Button visible next to "Coaching Feedback" heading with sparkle-icon | ✓ |
-| Click button → sidebar opens | Right-side drawer renders; header + close button + scrim | ✓ |
-| Summary panel | Sources: "Research papers only" (plain English — `papers_only_fallback` mapped). Verification: "Claims not verified — review manually" (amber, `cove_verified=false`). Faithfulness: 90 %. Steps executed: 10. | ✓ |
-| xyflow graph | 10 nodes rendered in vertical chain with 9 sequential edges. All labels plain-English | ✓ |
-| No raw snake_case anywhere in visible DOM | Confirmed via `queryByText(/get_rep_metrics/)` → not in DOM | ✓ |
-| Click node-2 (retrieve_coach_brain) | Detail pane: "Consulted the expert coaching library / Took 275ms / Produced: Expert coaching entries, Source type" — `formatDuration` produces "275ms"; `labelForOutputKey` translates `brain_contexts` → "Expert coaching entries" and `retrieval_source` → "Source type" (H-2 audit fix verified live) | ✓ |
-| Focus on drawer open | Close button has focus (a11y dialog pattern) — confirmed via Playwright `active` ref marker | ✓ |
-| Escape key closes | `Escape` press → drawer removed from DOM | ✓ |
-
-### Console errors / network failures
-
-- Console: 0 errors, 0 warnings on the full flow.
-- Network: no 4xx/5xx on any API call during the sidebar interaction.
-
-### Incidental bug surfaced (now D-040 + D-041)
-
-- Rep count: **0** despite the video containing ~3 clean rep cycles → root cause traced to STANDING threshold of 160° never crossed by the bench press elbow angle (peak 152.97°). See §1 "Rep-detection root-cause investigation" + `decisions.md` ADR-REPDET-01.
-- Form scores: Technique 10.0 and Control 10.0 rendered **alongside** a "Very Low confidence / Unable to score reliably" banner — contradiction caused by degenerate-input defaults in `ScoreComponent` when `rep_metrics=[]`. Captured as D-041.
+1. **Pure `find_peaks` is insufficient for real-video rep detection.** State-machine's absolute thresholds absorb MediaPipe landmark flicker and Savgol over-smoothing artefacts that create phantom mid-range valleys. Peak/valley alone over-counts 3–4× on loaded-bench / squat videos at any tested prominence 20°–80°, and at any clamping / percentile-sanity filter combination tested.
+2. **Hybrid (state-machine first, peak/valley fallback) is the right shape.** Preserves known-good prod behaviour on lockout lifts while catching partial-lockout cases the state machine can't see. Test: `TestHybridStateMachineWins::test_hybrid_prefers_state_machine_over_peak_valley` distinguishes hybrid from pure peak/valley using a synthetic signal where both paths produce different answers.
+3. **D-041 mostly fires as backup, not primary.** Once D-040 correctly detects 1 rep on partial-lockout clips, session confidence lands in "Low" (not "Very Low") so D-041's `< 0.50` guard never triggers. D-041 remains important for the truly-poseless / Very-Low-quality case and the `rep_metrics=[]` short-circuit.
+4. **Signal-quality issue on `atharva-bench.mov` pre-exists and is unchanged.** 13-rep over-count is on main since before this PR. D-044 captures the investigation follow-up — suspected MediaPipe landmark flicker or Savgol `window=7, polyorder=3` over-smoothing.
 
 ## 5. Blockers
 
-**Code-side:** none — P3-007 fully shipped and deployed. D-040 + D-041 are planned work, not blockers.
+**Code-side:** none — D-040 + D-041 shipped and verified on prod. D-042/D-043/D-044 captured as follow-ups.
 
-### Non-code blockers (carry-over from earlier sessions)
+### Non-code blockers (carry-over from earlier sessions, unchanged)
 
-- **Kin expert onboarding call** still pending since session 30. Expert portal PDF upload is live but zero PDFs have been uploaded. Target: 10+ papers by 2026-05-03. Each day of slip compounds against landing readiness.
-- **`papers_only_fallback` over-use on prod retrieval**: observed live on the P3-007 E2E analysis — retrieval_source returned `papers_only_fallback` even though 24 seed entries + 2 session-43 approved entries are available. Root cause is the FR-BRAIN-03 contextualized-prefix mismatch (M-04). Not a P3-007 bug; the sidebar correctly surfaces whatever retrieval happened. But it means Coach Brain content is effectively dark in prod until M-04 ships.
-
-### One surprise worth noting (not a blocker)
-
-- **Admin role does NOT bypass analysis ownership check.** `get_analysis_detail` in `backend/app/services/analysis.py:316–351` performs an explicit `analysis.user_id != user_id` match and raises 403. Confirmed during E2E by navigating to a main-user-owned analysis URL as admin — got 403 as expected. If a future admin-only "view any analysis" feature is needed (e.g. Phase 4 eval dashboard), add a new admin-scoped route + RLS policy; do NOT add a role bypass to the detail route.
+- **Kin expert onboarding call** still pending since session 30. 15 days to 2026-05-03 L2 deadline. Each day of slip compounds against landing readiness.
+- **`papers_only_fallback` over-use on prod retrieval** (M-04 — FR-BRAIN-03 contextualized-prefix mismatch). Coach Brain content effectively dark in prod until M-04 ships.
 
 ### Worktree / branch state
 
-- Feature branch `feat/p3-007-reasoning-sidebar` merged on origin. Remote branch retained; can be deleted via `git push origin --delete feat/p3-007-reasoning-sidebar` when cleanup is desired.
-- Local `main` at `02a6207` (session-45 docs commit). Origin `main` at `518c486` (session-44 E2E screenshot commit); the `02a6207` commit needs push at session 45 start or immediately (see §6).
+- Feature branch `fix/d040-d041-rep-detection-and-degenerate-scoring` merged on origin; can be deleted via `git push origin --delete fix/d040-d041-rep-detection-and-degenerate-scoring` when cleanup is desired.
+- Local `main` at `bc17250` (PR #84 merge commit). Origin `main` matches.
 
 ## 6. Next session start
 
-**First command:** push the already-committed session-45 ADR/backlog docs so origin is caught up, then run `/status` to load live state.
-
 ```bash
-git push               # push 02a6207 (ADR-REPDET-01 + D-040/D-041) to origin/main
 /status
 
-# PRIORITY 1 — D-040 peak/valley rep detection + D-041 degenerate scoring fix (bundle in ONE PR)
-#
-# Scope locked in ADR-REPDET-01 (decisions.md). D-040 replaces the fixed-
-# threshold state machine in backend/app/cv/rep_detection.py::detect_reps
-# with scipy.signal.find_peaks extraction; D-041 makes ScoreComponent
-# implementations return None/'Not available' on empty rep_metrics instead
-# of defaulting to 10.0.
-#
-# Read order:
-#   1. decisions.md ADR-REPDET-01 (the full scope + consequences)
-#   2. backend/app/cv/rep_detection.py (detect_reps + _STANDING/DEPTH dicts)
-#   3. backend/app/cv/signal_processing.py (_BENCH_* landmark defs — rename
-#      _BENCH_*_L suffix to something accurate OR add clarifying comment)
-#   4. backend/app/cv/scoring.py (ScoreComponent degenerate-input paths)
-#   5. backend/tests/unit/test_rep_detection.py (audit which tests encode
-#      the old state-machine behavior and will need updates)
-#   6. Re-read the root-cause trace in §1 of this handoff
-#
-# /plan "Rep detection rework + degenerate scoring fix"
-#
-# Validation:
-#   - Hand-count reps on in-repo fixtures: atharva-bench-*.mov/mp4,
-#     atharva-squat.mov, atharva-deadlift.mov. These are ground-truth for
-#     tuning prominence_deg.
-#   - Re-run the CV pipeline locally against cea2312b fixture
-#     (atharva-bench-nw-10s-720p.mp4). Expected: rep count ≥ 2 after D-040
-#     (today returns 0). Expected: ScoreComponent returns null per-dimension
-#     after D-041 for any analysis where confidence_label=='Very Low'.
-#   - Full local sweep: uv run pytest, ruff, pyright; npx vitest, tsc.
-#   - If rep count increases for existing fixtures, the old tests asserted
-#     the BUG — update the fixture expected counts, not the code.
-#   - Post-merge: re-upload atharva-bench-nw-10s-720p.mp4 on prod via the
-#     admin account and verify ResultsPage shows rep count > 0 + actual
-#     per-dimension scores instead of the 10.0-on-empty-input default.
-#
-# TDD gates:
-#   - backend/tests/unit/test_rep_detection.py — new peak/valley tests
-#     before touching detect_reps; audit old tests for state-machine
-#     dependencies.
-#   - backend/tests/unit/test_scoring.py (or wherever ScoreComponent is
-#     tested) — add cases for empty rep_metrics + Very-Low confidence.
-#   - E2E regression: re-run the cea2312b upload flow on prod.
-#
-# spelix-cv-engineer agent owns both rep_detection.py and scoring.py
-# changes per root CLAUDE.md delegation rules ("For tasks in
-# backend/app/cv/: always use spelix-cv-engineer").
-
-# PRIORITY 2 — Non-code blockers
-#   - Kin expert onboarding call (carry-over from session 30+)
-#   - Landing page V1 prod verification
+# PRIORITY 1 — Non-code blockers
+#   - Kin expert onboarding call (target: 10+ papers by 2026-05-03)
 #   - Expert corpus push: first 10 papers via expert portal
+#   - Landing page V1 prod verification
 
-# PRIORITY 3 — M-04 / M-05 maintenance bundle (small, unblocks D-039 + fixes
-# papers_only_fallback over-use observed on P3-007 E2E)
+# PRIORITY 2 — M-04 / M-05 maintenance bundle (~1-2h)
+#   - M-04 re-embed Coach Brain seeds with FR-BRAIN-03 contextualized prefix
+#   - M-05 bump BrainCoveService.max_tokens to 2048 OR shorten verification prompt
 
-# PRIORITY 4 — P3-007 D-### follow-ups (bundle-candidate)
+# PRIORITY 3 — PR #84 D-### follow-ups (smallest first, bundle-candidate)
+#   - D-042 wire rep-detection knobs through ThresholdConfig (S)
+#   - D-043 partial-descent <20° prominence test (S)
+#   - D-044 atharva-bench.mov signal-quality investigation (M)
+
+# PRIORITY 4 — P3-007 D-### bundle
 #   - Focus trap for AgentReasoningSidebar (~15 LOC, a11y)
 #   - Sanitize NodeEvent.error in serialize_trace_for_storage (security MED)
+#   - LangSmith run link-out from summary header (S)
+#   - CoVe iteration drill-down pane (M)
+#   - Adaptive-mode reasoner-loop UI polish (M)
 
 # ENVIRONMENT NOTES:
-#   - Local main = 02a6207 (session-45 ADR+backlog, unpushed at session end)
-#   - Origin main = 518c486 (session-44 E2E screenshot)
+#   - Local main = bc17250 (PR #84 merge). Origin main same.
 #   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42
 #   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32
 #   - Test admin account: atharva6905+admin-p3006@gmail.com /
 #     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Now owns 1 analysis from session 44 (cea2312b-…, bench-flat, 10s).
-#     Re-use for D-040/D-041 prod verification — upload another bench clip
-#     and verify rep count + per-dimension scores.
-#   - @xyflow/react@12.10.2 in frontend deps (added session 44).
-#   - Fixtures for rep-count ground truth:
-#       e2e/fixtures/atharva-bench-no-weight.mov  (full-length bodyweight)
-#       e2e/fixtures/atharva-bench-nw-10s.mp4     (10s bodyweight, source)
-#       e2e/fixtures/atharva-bench-nw-10s-720p.mp4 (10s bodyweight, 720p)
-#       e2e/fixtures/atharva-bench.mov            (loaded bench)
-#       e2e/fixtures/atharva-squat.mov            (squat ground truth)
-#       e2e/fixtures/atharva-deadlift.mov         (deadlift ground truth)
+#     Now owns 2 analyses — cea2312b (session 44, 0 reps pre-fix) and
+#     f36f8367 (session 45, 1 rep post-fix). Re-use for future verification.
+#   - @xyflow/react@12.10.2 in frontend deps (session 44).
+#   - scipy>=1.17.1 in backend deps (new rep-detection dependency).
+#   - Hand-counted fixture ground truth:
+#       atharva-bench-nw-10s-720p.mp4 = 1 rep (session 45, truncated)
+#       atharva-bench-nw-10s.mp4      = 1 rep (same source)
+#       atharva-bench-no-weight.mov   = 5 reps (full length)
+#       atharva-bench.mov             = 5 reps (loaded; algorithm gives 13)
+#       atharva-squat.mov             = 5 reps (algorithm gives 5)
+#       atharva-deadlift.mov          = 5 reps (algorithm gives 5)
 ```
