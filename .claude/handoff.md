@@ -1,3 +1,7 @@
+# Session 50 addendum: D-052 CoVe inversion + extrapolation guards shipped (PR #92)
+
+**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12):** D-052 closed — the prompt-level inversion-guard + extrapolation-guard follow-up surfaced by D-050's residual hallucination pattern on `c46023c9`. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 2 MEDIUM pre-existing hygiene); `spelix-security-reviewer` PASS. Prod E2E on the same bench fixture sessions 46–49 used — **`cove_verified` flipped false → true**, **`faithfulness` improved 0.82 → 0.88** (not the predicted regression). See E2E Findings — D-052 verification at bottom of this file. Backend: 1701 → 1704 tests (+3 D-052 structural-assertion tests). See `backlog.md` "## Completed — L2 Sprint Day 12 — D-052" for full commit detail and gate verdicts. D-053 remains the next Priority 2 bundle candidate.
+
 # Session 49 Handoff → Session 50: D-050 CoVe claim-extraction refinement shipped to prod (PR #90)
 
 **Context refresh:** Session 49 (2026-04-18, L2 Sprint Day 11, same calendar day as sessions 46 + 47 + 48) closed D-050 — the claim-extraction prompt refinement follow-up surfaced by session 48's D-048 fix working correctly. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). Auditor PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH), security-reviewer PASS, E2E on prod with the same bench fixture sessions 46–48 used. **Core D-050 goal achieved — all extracted claims are now principle-shaped**, zero lifter-specific measurements. `faithfulness` dropped 0.92 → 0.82 (still above 0.8 gate). `cove_verified=false` persists for a NEW reason — filed as D-052.
@@ -84,7 +88,6 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 
 | ID | Title | Size | Source |
 |---|---|---|---|
-| D-052 | **Tighten D-050 prompt with inversion-guard**. Session 49 E2E showed iteration 2 reached 7/8 Yes but the one No was an inverted-direction hallucination ("slow eccentric is bad" — source actually says fast-descent is bad). Iter 1 also invented "minimum 60°" / "60–100° range" / "stretch-shortening cycle" claims not in the coaching. Add explicit inversion/extrapolation guard + negative worked example. | S | session 49 prod E2E on `c46023c9` |
 | D-053 | **Distillation lifecycle_decision `AsyncQdrantClient.search` API drift**. Silent fallback to `ADD` over-admits duplicates. Migrate to `query_points`. Visible every distillation run in worker logs. | M | session 49 worker log |
 | D-046 | Hoist `_HAIKU_MODEL` to shared `app/constants.py`. | S | auditor M-03 on PR #85 |
 | D-047 | Additive test in `test_distillation_cove_brain.py` for pre-fix M-05 failure mode via stubbed `ValidationError`. | S | code-reviewer on PR #85 |
@@ -214,3 +217,20 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 #   - Qdrant coach_brain: 26 points (24 seeds + 2 from earlier distillation runs).
 #   - Droplet deploy dir is /home/deploy/spelix (NOT /srv/spelix).
 ```
+
+## E2E Findings — D-052 verification (session 50)
+
+- **Analysis UUID:** `43f25db8-c922-4211-bb98-5266c8ff6f74` (bench fixture, admin test account, fresh upload post-D-052).
+- **Screenshot:** `e2e/screenshots/d052-post-fix-results-43f25db8.png`.
+- **Pre-fix (`c46023c9`, session 49 post-D-050):** `faithfulness=0.82`, `cove_verified=false`, iter 2 reached 7/8 Yes with one No blocked by inverted eccentric-direction claim.
+- **Post-fix (`43f25db8`, session 50 post-D-052):** `faithfulness=0.88`, `cove_verified=true`, iter 2 converged at 7/7 Yes — all claims principle-shaped, all source-cited.
+- **Gate A (`cove_verified=true`): PASS** ✅ — the headline D-052 metric flipped false → true.
+- **Gate B (`faithfulness ≥ 0.70`): PASS** ✅ — 0.88 (improved vs 0.82 pre-fix; net-positive denominator behavior, not the regression the plan anticipated).
+- **Gate C (no iter-2 inversions or extrapolations): PASS** ✅ — all 7 iter-2 claims principle-shaped, zero inversions, zero invented min/max/alternate-range.
+- **Residual observation** (non-blocker): iteration 1 still surfaced ONE extrapolation — claim 1: "Optimal elbow angle at the bottom of the bench press is 60–100° from the torso" (coaching 45–75° over-read). The Step 3 verification correctly answered No (sources 1+4 specify 45–75°), the Step 4 revision narrowed it, and iter 2 converged cleanly on the correct 45–75° principle. CoVe's self-correction worked as designed — the guard is not a total barrier in iter 1, but the revision loop closes the gap and iter 2 is pristine. No follow-up D-### filed yet; if future prod E2Es show iter-2 convergence failing for inversion/extrapolation reasons, file a new D-### then.
+- **Console / network cleanliness:** zero console errors, zero 4xx/5xx on the analysis flow.
+
+### Session 50 post-D-052 environment notes
+- Local `main` = `8740388` (PR #92 merge) — will advance after this docs close-out PR merges.
+- Test admin account now owns **8 analyses** — newest is `43f25db8` (bench, post-D-052 verification with `cove_verified=true` + `faithfulness=0.88`).
+- Backend test baseline: **1704 passed, 27 skipped, 0 failed**.
