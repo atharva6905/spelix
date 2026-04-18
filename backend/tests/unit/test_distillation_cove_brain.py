@@ -160,3 +160,59 @@ async def test_cove_verify_skips_noop_candidates() -> None:
     assert len(update["cove_results"]) == 2
     assert update["cove_results"][1].explanation == "noop_skip"
     assert svc.verify_claim.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_verify_claim_uses_adequate_max_tokens() -> None:
+    """M-05: question max_tokens ≥ 512, answer max_tokens ≥ 2048.
+
+    Instructor retries on schema-validation failures. If max_tokens truncates
+    Haiku 4.5's reasoning mid-JSON, the Pydantic model fails, instructor
+    retries, and after three attempts BrainCoveResult carries
+    explanation='evaluation_failed: ValidationError'. Session 42 showed this
+    on 11/11 candidates. 2048 tokens on the answer call leaves comfortable
+    headroom for reasoning strings with source citations.
+    """
+    from app.distillation.cove_brain import (
+        _HAIKU_MODEL,
+        _VerificationAnswerOut,
+        _VerificationQuestion,
+    )
+
+    anthropic_client = MagicMock()
+    instructor_client = MagicMock()
+    instructor_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _VerificationQuestion(question="Q?"),
+            _VerificationAnswerOut(answer="Yes", reasoning="r"),
+        ]
+    )
+    svc = BrainCoveService(
+        anthropic_client=anthropic_client, instructor_client=instructor_client
+    )
+    await svc.verify_claim(
+        claim="any claim",
+        contexts=[_stub_context("evidence text")],
+    )
+
+    calls = instructor_client.chat.completions.create.await_args_list
+    assert len(calls) == 2, "expected one question call + one answer call"
+
+    # Question-generation call: response_model=_VerificationQuestion, max_tokens >= 512
+    question_kwargs = calls[0].kwargs
+    assert question_kwargs["response_model"] is _VerificationQuestion
+    assert question_kwargs["max_tokens"] >= 512, (
+        f"question max_tokens {question_kwargs['max_tokens']} < 512 "
+        "— instructor retries on truncation (M-05)."
+    )
+    assert question_kwargs["model"] == _HAIKU_MODEL
+
+    # Answer call: response_model=_VerificationAnswerOut, max_tokens >= 2048
+    answer_kwargs = calls[1].kwargs
+    assert answer_kwargs["response_model"] is _VerificationAnswerOut
+    assert answer_kwargs["max_tokens"] >= 2048, (
+        f"answer max_tokens {answer_kwargs['max_tokens']} < 2048 "
+        "— session-42 observed all 11 candidates blew instructor retries "
+        "when max_tokens=512 (M-05)."
+    )
+    assert answer_kwargs["model"] == _HAIKU_MODEL
