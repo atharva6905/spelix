@@ -2,12 +2,9 @@
 
 Centralises construction of the heavyweight clients (Anthropic,
 instructor, Cohere, Qdrant, BrainEmbeddingService) so task bodies can
-stay thin.
-
-Note on Qdrant: lifecycle_decision calls qdrant_client.search(...) which is
-the raw AsyncQdrantClient API. QdrantClientWrapper only exposes query_points,
-so we pass wrapper._client (the underlying AsyncQdrantClient) as qdrant_client.
-CohereEmbedClient exposes embed_batch directly, so we pass the wrapper itself.
+stay thin. lifecycle_decision goes through QdrantClientWrapper.query_points
+(ADR-DISTILL-07 / D-053), so the wrapper is passed directly — no raw-
+client escape hatch.
 """
 
 from __future__ import annotations
@@ -36,15 +33,11 @@ async def build_distillation_ctx() -> dict[str, Any]:
         qdrant_client=qdrant_wrapper,  # type: ignore[arg-type]
     )
 
-    # lifecycle_decision calls .search() — only available on the raw
-    # AsyncQdrantClient, not on QdrantClientWrapper (which exposes query_points).
-    qdrant_raw = qdrant_wrapper._client if qdrant_wrapper is not None else None
-
     return {
         "anthropic_client": anthropic_client,
         "instructor_client": instructor_client,
         "cohere_client": cohere_client,
-        "qdrant_client": qdrant_raw,
+        "qdrant_client": qdrant_wrapper,
         "brain_embedding_svc": brain_embedding,
         "db_session_maker": async_session,
     }
