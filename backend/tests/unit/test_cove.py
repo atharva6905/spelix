@@ -541,6 +541,14 @@ async def test_cove_max_tokens_meets_headroom_revision_path() -> None:
         f"got {len(calls)}"
     )
 
+    # Step 3 answer call (defensive — happy-path test covers this too).
+    answer_kwargs = calls[2].kwargs
+    assert answer_kwargs["response_model"] is VerificationAnswers
+    assert answer_kwargs["max_tokens"] >= 4096, (
+        f"verification-answer max_tokens {answer_kwargs['max_tokens']} < 4096 "
+        "— defensive regression guard against Step 3 budget drift (D-048)."
+    )
+
     # Step 4 revision is the 4th call
     revision_kwargs = calls[3].kwargs
     assert revision_kwargs["model"] == SONNET_MODEL, (

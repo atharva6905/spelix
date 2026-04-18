@@ -257,7 +257,8 @@ class CoveVerificationService:
         trace: list[dict[str, Any]] = []
 
         # --- Step 1: claim extraction (happens once before the loop) ----------
-        # D-048: 1024 gives instructor structured-output retry headroom.
+        # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+        # trivial cost delta for this short-list output (cf. Step 3 at 4096).
         claim_list = await self._instructor_client.chat.completions.create(
             model=HAIKU_MODEL,
             max_tokens=1024,
@@ -282,7 +283,8 @@ class CoveVerificationService:
         for iteration in range(1, max_iterations + 1):
             # Step 1 on iterations > 1 uses the revised output's claims
             if iteration > 1:
-                # D-048: 1024 gives instructor structured-output retry headroom.
+                # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+                # trivial cost delta for this short-list output (cf. Step 3 at 4096).
                 claim_list = await self._instructor_client.chat.completions.create(
                     model=HAIKU_MODEL,
                     max_tokens=1024,
@@ -312,7 +314,8 @@ class CoveVerificationService:
                     )
 
             # --- Step 2: verification question generation --------------------
-            # D-048: 1024 gives instructor structured-output retry headroom.
+            # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+            # trivial cost delta for this short-list output (cf. Step 3 at 4096).
             verification_questions = await self._instructor_client.chat.completions.create(
                 model=HAIKU_MODEL,
                 max_tokens=1024,
