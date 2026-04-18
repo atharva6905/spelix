@@ -445,12 +445,19 @@ class TestZeroRepAndPartialRep:
 
     def test_partial_rep_does_not_corrupt_subsequent_full_rep(self):
         """
-        Partial attempt (170°→130°→175°, 45° prominence) followed by a
-        full rep. Under peak/valley the first valley IS detected (≥20°
-        prominence) — both reps count. Behavior change from the old
-        state machine, which treated the partial as "aborted" and
-        returned 1. Per ADR-REPDET-01, rep detection is scope-limited
-        to signal prominence; form scoring judges depth.
+        Partial attempt (170°→130°→175°) followed by a full rep.
+
+        Under hybrid detection, the state machine runs first. The partial
+        descent reaches 130° then returns to 175° — it never crosses the
+        DEPTH threshold (110° - 5° hysteresis = 105°), and the signal
+        returns above the STANDING threshold (150° + 5° = 155°) before
+        any depth is reached, so the SM aborts the partial attempt cleanly.
+        The subsequent full rep (175°→75°→175°) is correctly counted as 1.
+
+        Under the previous pure peak/valley path this test asserted 2 —
+        the partial valley at 130° had >20° prominence and was counted.
+        Hybrid semantics: SM returns >=1 rep → SM result wins → 1 rep.
+        Documented in the session 45 hybrid refinement of ADR-REPDET-01.
         """
         stand = np.full(10, 170.0)
         partial_down = np.linspace(170.0, 130.0, 8)
@@ -460,7 +467,9 @@ class TestZeroRepAndPartialRep:
         angles = np.concatenate([stand, partial_down, abort_up, stand2, full_rep])
         landmarks = _make_landmarks(len(angles))
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        assert len(reps) == 2
+        # Hybrid: state machine counts only the full rep (partial is aborted),
+        # and SM >= 1 wins over peak/valley. Expected: 1.
+        assert len(reps) == 1
 
     def test_partial_rep_too_short_duration_not_counted(self):
         """
@@ -633,3 +642,41 @@ class TestPeakValleyDetection:
             assert angles[rep.start_frame] > rep.min_angle
             assert angles[rep.end_frame] > rep.min_angle
 
+
+# ---------------------------------------------------------------------------
+# 12. Hybrid: state-machine wins when both paths would return reps
+# ---------------------------------------------------------------------------
+
+
+class TestHybridStateMachineWins:
+    """Verifies hybrid prefers state machine when SM returns >=1 rep."""
+
+    def test_hybrid_prefers_state_machine_over_peak_valley(self):
+        """
+        Signal with 2 clean reps (state machine counts these) followed by
+        a mid-range jitter dip that peak/valley ALONE would count as a 3rd
+        rep. Hybrid must return exactly 2 — state-machine result wins
+        because SM returned >= 1 rep.
+        """
+        # 2 clean squat reps: 170 -> 75 -> 170 cycle x2 via helper
+        clean = _squat_rep_angles(n_reps=2)
+        # Mid-range dip (130 -> 100 -> 130). Signal never crosses squat
+        # STANDING threshold of 150° on the way out, so state machine
+        # does NOT count it as a rep. But peak/valley ALONE would detect
+        # the valley at 100° (prominence ~30° > 20° knob).
+        mid_dip = np.concatenate([
+            np.full(20, 130.0),
+            np.full(10, 100.0),
+            np.full(20, 130.0),
+        ])
+        angles = np.concatenate([clean, mid_dip])
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+
+        # Hybrid prefers state machine when it produces >=1 rep.
+        # State machine: 2 clean reps. Peak/valley would see 3.
+        assert len(reps) == 2, (
+            f"Hybrid must return state-machine result (2) when SM >= 1, "
+            f"not peak/valley result. Got {len(reps)}."
+        )
