@@ -773,11 +773,13 @@ def test_claim_extraction_prompt_has_negative_worked_examples() -> None:
 
     lowered = prompt.lower()
 
-    # At least one 'Do NOT extract' label in a worked-example block.
-    # Accept synonyms so the phrasing isn't over-pinned.
+    # At least one 'Do NOT extract:' label in a worked-example block.
+    # Colon-suffix only — the trailing-space form also matches the D-050
+    # paragraph 'DO NOT extract MEASUREMENT-LEVEL claims', which would
+    # produce a false-positive if the D-052 worked-example blocks were
+    # accidentally deleted (review fix-up, D-052).
     negative_example_markers = (
-        "do not extract:",
-        "do not extract ",  # trailing space — 'do not extract "..."' form
+        "do not extract:",  # colon-suffix: only in D-052 worked-example blocks
     )
     assert any(marker in lowered for marker in negative_example_markers), (
         "Refined prompt must include at least one 'Do NOT extract:' "
