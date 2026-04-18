@@ -142,6 +142,12 @@ def _detect_reps_state_machine(
 
         elif state == _RepState.ASCENDING:
             min_angle_in_rep = min(min_angle_in_rep, angle_f)
+            # Intentional asymmetry: ASCENDING re-enters STANDING at
+            # `standing - hysteresis` (lenient re-entry), while DESCENDING
+            # aborts back to STANDING at `standing + hysteresis` (strict
+            # abort). The lenient ASCENDING side tolerates athletes who
+            # don't fully lock out between reps (squat 150° standing →
+            # 145° effective re-entry). Per ADR-REPDET-01.
             if angle_f > standing_thresh - _HYSTERESIS_DEG:
                 rep_end_frame = i
                 rep_duration_frames = rep_end_frame - rep_start_frame

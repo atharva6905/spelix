@@ -1,8 +1,10 @@
 """D-040 smoke test: verify rep count on partial-lockout bench fixture.
 
-Deletable after the D-040/D-041 PR merges. Runs pose extraction and
-rep detection against the session 44 regression fixture and prints
-the rep count - must be > 0 after D-040 (was 0 before).
+Runs pose extraction and rep detection against the session 44 regression
+fixture (atharva-bench-nw-10s-720p.mp4) and prints the rep count. Under
+the hybrid detector this must be > 0 (state-machine returns 0, peak/valley
+fallback catches the partial-lockout rep). Kept as a reproducibility aid
+for future prominence / smoothing calibration.
 """
 
 from __future__ import annotations

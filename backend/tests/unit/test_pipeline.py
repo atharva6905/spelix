@@ -1228,6 +1228,7 @@ async def test_form_scores_set_to_none_when_rep_metrics_empty():
         patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
         patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
         patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
         patch("os.path.isfile", return_value=False),
     ):
         await run_cv_pipeline(
@@ -1276,6 +1277,7 @@ async def test_form_scores_set_to_none_when_session_confidence_below_050():
         patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
         patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
         patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
         patch("os.path.isfile", return_value=False),
     ):
         await run_cv_pipeline(
