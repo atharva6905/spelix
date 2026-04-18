@@ -400,10 +400,13 @@ to `coach_brain_candidates`: strips withdrawing-user analysis IDs from
   and an `async_sessionmaker` per-task invocation. Reuse would require
   wiring them through the streaq `WorkerContext` — not worth it at
   current volume (<10 analyses/day post-L2).
-- `qdrant_client` passed to `lifecycle_decision` must support `.search(...)`
-  directly. `QdrantClientWrapper` only exposes `.query_points`, so
-  `deps.py` passes the raw `_client` (AsyncQdrantClient). Watch for
-  breakage if the wrapper API changes.
+- `lifecycle_decision` goes through `QdrantClientWrapper.query_points`
+  (D-053, ADR-DISTILL-07). `AsyncQdrantClient.search` was removed in
+  qdrant-client 1.x; `deps.py` passes the wrapper directly. A try/except
+  around the call routes legitimate Qdrant outages to `ADD` rather than
+  stalling the graph — do NOT remove the safety net. The
+  `test_lifecycle_decision_never_calls_legacy_search` regression test
+  guards against accidental re-introduction of the `.search` call.
 
 ## Backend Gotchas
 
