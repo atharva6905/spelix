@@ -779,3 +779,15 @@ A second degenerate case compounded: with `rep_metrics=[]`, downstream scoring p
 
 **Related:** FR-SCOR-02, FR-SCOR-04, FR-SCOR-07, FR-SCOR-10 (confidence label). `backend/app/services/pipeline.py::_is_degenerate_scoring_input`, `backend/app/cv/confidence.py::confidence_label`, `frontend/src/pages/ResultsPage.tsx:123-203` (FormScoreCards null-handling). PR #84 (`bc17250`), session 45.
 
+## ADR-DISTILL-06: BrainCoveService Haiku 4.5 max_tokens — 512 question / 2048 answer (Session 46)
+
+**Context:** Session-42 distillation observed 11/11 `coach_brain_candidates` rows persisted with `cove_verified=false, cove_explanation="evaluation_failed: ValidationError"`. Root cause: `BrainCoveService.verify_claim` (`backend/app/distillation/cove_brain.py`) called `instructor.chat.completions.create` with `max_tokens=512` on the answer step, and Haiku 4.5's `_VerificationAnswerOut.reasoning` field routinely exceeded the budget when citing source numbers. Instructor's structured-output retry loop then re-sent the identical prompt three times, each time truncating the JSON mid-`reasoning` field, each time failing Pydantic validation, and finally returning `BrainCoveResult(verified=False, explanation="evaluation_failed: ValidationError", ...)`. M-05 (session 46) bumps both call sites.
+
+**Decision:** Question-generation `max_tokens=512`; answer `max_tokens=2048`. Keep the full `_VerificationAnswerOut` schema (answer + reasoning) — do NOT shorten the prompt to compensate. Rationale: Haiku 4.5 pricing ($0.25/MTok input / $1.25/MTok output) puts the worst-case-per-verification cost at ~$0.0025, a rounding error at L2-beta volume (<10 analyses/day). Prompt-shortening trades cheap tokens for harder-to-reason-about prompt engineering — not worth it.
+
+**Consequences:** `BrainCoveService` no longer hits the instructor retry loop on normal inputs. If Haiku 4.5 ever emits >2048 tokens of reasoning, the failure mode reverts to `evaluation_failed: ValidationError` — but that would now be a genuine model-pathology signal, not a budget-truncation signal, and it stays loud in `cove_explanation` for the Batch 3 review UI. If Haiku TPM throttling becomes a concern at higher volume, lower the answer budget back to 1536 and reassess. Do NOT drop below 1024 — that's the prior broken state.
+
+**Scope note — coaching-path CoVe is a different service:** `app/services/cove.py::CoveVerificationService` has its own token budget and also exhibits max_tokens truncation in coaching-path runs (session 46 prod E2E observed output_tokens=1024→2048→3072 exponential retry, all truncated). That service is out of scope for M-05 / ADR-DISTILL-06; follow-up tracked as D-048.
+
+**Related:** FR-BRAIN-14 (CoVe pre-promotion), ADR-DISTILL-03 (slim single-claim service), ADR-DISTILL-05 (never persist raw `str(exc)` to admin-visible columns). `backend/app/distillation/cove_brain.py:87,95`. PR #85 (`a0a86fc`), session 46.
+
