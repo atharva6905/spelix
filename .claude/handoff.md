@@ -1,6 +1,14 @@
+# Session 50 addendum #2: D-053 lifecycle_decision Qdrant API migration shipped (PR #94)
+
+**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12, second PR of the day):** D-053 closed — the Qdrant API drift surfaced in session 49 worker logs (`'AsyncQdrantClient' object has no attribute 'search'`) is gone. 5-commit PR via subagent-driven-development (spelix-tdd + spec-reviewer + one review fix-up). `spelix-auditor` PASS (0 CRITICAL / 0 HIGH / 0 MEDIUM, 10/10 checks verified); `spelix-security-reviewer` PASS (0 findings, 10 checks clean; non-blocking monitoring gap noted for future 4xx-specific logging). Prod verification via fresh bench upload `0e5d755b`: **zero `.search` warnings in worker logs**, new `coach_brain_candidates` rows carry **real non-zero `nearest_cosine_sim`** (0.72 / 0.74 / 0.72 / 0.84 UPDATE / 0.88 UPDATE — was uniformly `0.0 ADD` pre-fix). FR-BRAIN-17 cosine routing + FR-BRAIN-18 UPDATE semantics working on prod. Backend: 1702 → 1703 tests (+1 regression guard; 5 lifecycle tests migrated in place). Class-of-bug lesson captured in ADR-DISTILL-07: use `MagicMock(spec=...)` when mocking external clients so SDK API drift fails in CI, not only in prod. See `backlog.md` "## Completed — L2 Sprint Day 12 — D-053" for full detail.
+
+See "Worker Log Findings — D-053 verification" at the bottom of this file.
+
+---
+
 # Session 50 addendum: D-052 CoVe inversion + extrapolation guards shipped (PR #92)
 
-**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12):** D-052 closed — the prompt-level inversion-guard + extrapolation-guard follow-up surfaced by D-050's residual hallucination pattern on `c46023c9`. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 2 MEDIUM pre-existing hygiene); `spelix-security-reviewer` PASS. Prod E2E on the same bench fixture sessions 46–49 used — **`cove_verified` flipped false → true**, **`faithfulness` improved 0.82 → 0.88** (not the predicted regression). See E2E Findings — D-052 verification at bottom of this file. Backend: 1701 → 1704 tests (+3 D-052 structural-assertion tests). See `backlog.md` "## Completed — L2 Sprint Day 12 — D-052" for full commit detail and gate verdicts. D-053 remains the next Priority 2 bundle candidate.
+**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12):** D-052 closed — the prompt-level inversion-guard + extrapolation-guard follow-up surfaced by D-050's residual hallucination pattern on `c46023c9`. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 2 MEDIUM pre-existing hygiene); `spelix-security-reviewer` PASS. Prod E2E on the same bench fixture sessions 46–49 used — **`cove_verified` flipped false → true**, **`faithfulness` improved 0.82 → 0.88** (not the predicted regression). See E2E Findings — D-052 verification at bottom of this file. Backend: 1701 → 1704 tests (+3 D-052 structural-assertion tests). See `backlog.md` "## Completed — L2 Sprint Day 12 — D-052" for full commit detail and gate verdicts.
 
 # Session 49 Handoff → Session 50: D-050 CoVe claim-extraction refinement shipped to prod (PR #90)
 
@@ -234,3 +242,34 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 - Local `main` = `8740388` (PR #92 merge) — will advance after this docs close-out PR merges.
 - Test admin account now owns **8 analyses** — newest is `43f25db8` (bench, post-D-052 verification with `cove_verified=true` + `faithfulness=0.88`).
 - Backend test baseline: **1704 passed, 27 skipped, 0 failed**.
+
+## Worker Log Findings — D-053 verification (session 50)
+
+- **Analysis UUID (fresh post-D-053 upload):** `0e5d755b-6506-4f2b-80ca-638eca1f7ccc` (bench fixture, admin test account).
+- **Distillation task log:** `task distill_analysis ■ 0d480aaec3… ← {'status': 'ok', ...}` — graph converged without any `except Exception` branch firing.
+- **Pre-fix warning (sessions 42–49):** `lifecycle_decision: qdrant search failed ('AsyncQdrantClient' object has no attribute 'search') — treating as ADD` on every distillation run.
+- **Post-fix warning check** (`ssh spelix-droplet "docker logs spelix-worker-1 --since 10m | grep -iE 'search|query_points failed'"`): **zero matches**. Both the legacy `.search` warning AND the new `query_points failed` warning are absent (the latter would only fire on a legitimate Qdrant Cloud outage, which did not occur during this verification).
+- **Candidate-routing sanity** (Supabase SQL on `coach_brain_candidates ORDER BY created_at DESC LIMIT 5`):
+
+| Row | Decision | nearest_cosine_sim | review_status |
+|---|---|---|---|
+| 1 | ADD | 0.7258 | pending |
+| 2 | ADD | 0.7420 | pending |
+| 3 | **UPDATE** | **0.8387** | superseded (FR-BRAIN-18 confirmation row) |
+| 4 | **UPDATE** | **0.8757** | superseded (FR-BRAIN-18 confirmation row) |
+| 5 | ADD | 0.7205 | pending |
+
+Pre-D-053 every row had `nearest_cosine_sim=0.0, lifecycle_decision=ADD`. Post-D-053 the FR-BRAIN-17 routing works: UPDATE band (0.75–0.92) correctly matches, triggers FR-BRAIN-18's `confirmation_count` bump, writes an audit-only `superseded` row; ADD band (<0.75) routes novel candidates to the review queue.
+
+- **Gate verdicts:**
+  - **Gate A (zero `.search` warnings in worker logs):** PASS ✅
+  - **Gate B (non-zero `nearest_cosine_sim` on post-D-053 rows):** PASS ✅
+  - **Gate C (routing distribution includes UPDATE + ADD, not uniform ADD):** PASS ✅
+- **Historical residue** (accepted, not backfilled per ADR-DISTILL-07): pre-D-053 `coach_brain_candidates` rows retain `nearest_cosine_sim=0.0, lifecycle_decision=ADD`. Admin reviewers may see some historical `ADD` entries that should have been `UPDATE`. Not revisited.
+
+### Session 50 post-D-053 environment notes
+- Local `main` = `88fb0ae` (PR #94 merge) — will advance after this docs close-out PR merges.
+- Test admin account now owns **9 analyses** — newest is `0e5d755b` (bench, post-D-053 verification with live FR-BRAIN-17 routing).
+- Backend test baseline: **1703 passed, 27 skipped, 0 failed**.
+- Qdrant coach_brain point count: still 26 (24 seeds + 2 from pre-D-053 distillation runs that were silent-fallback `ADD` to `coach_brain_candidates`; the new D-053 candidates from `0e5d755b` also land in `coach_brain_candidates`, not `coach_brain_entries`, and only promote to entries after admin review via the P3-006 queue).
+- Next priority candidates: D-046, D-047, D-049, D-051 (all open). D-053 was the last high-impact Priority 2 item; remaining ones are minor hygiene / LOW severity.
