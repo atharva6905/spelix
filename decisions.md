@@ -791,3 +791,25 @@ A second degenerate case compounded: with `rep_metrics=[]`, downstream scoring p
 
 **Related:** FR-BRAIN-14 (CoVe pre-promotion), ADR-DISTILL-03 (slim single-claim service), ADR-DISTILL-05 (never persist raw `str(exc)` to admin-visible columns). `backend/app/distillation/cove_brain.py:87,95`. PR #85 (`a0a86fc`), session 46.
 
+## ADR-BRAIN-09: Agent retrieval queries need per-exercise vocabulary enrichment for Cohere Rerank to clear FR-BRAIN-05 thresholds (Session 47)
+
+**Context:** D-045 investigation. Bench analyses on prod were stranded at `retrieval_source='papers_only_fallback'` even after M-04 re-embedded all 24 seeds with the FR-BRAIN-03 contextualized prefix. The diagnostic at `backend/scripts/oneoff/diagnose_coach_brain_retrieval.py` ran the live agent retrieval path (`hybrid_search(coach_brain, rerank=True)`) on prod and measured Cohere Rerank 4.0 scores per query construction. Findings:
+
+- Bench Q1 (current agent query `"bench flat coaching cue correction"`): top reranked score = **0.32** → `papers_only_fallback`.
+- Squat Q1 (`"squat high_bar coaching cue correction"`): top = **0.84** → `coach_brain_primary`.
+- Deadlift Q1 (`"deadlift conventional coaching cue correction"`): top = **0.92** → `coach_brain_primary`.
+- Q4 self-query ceiling (a seed's own content as the query): **0.99** for all three exercises — corpus is fine.
+- Q2 vocab-rich queries (e.g. for bench: `"bench press eccentric tempo control elbow flare scapular retraction lat engagement bar path j curve"`): bench top = **0.92**, squat = 0.88, deadlift = 0.88 — bench lifts dramatically.
+
+This **falsified** all four backlog hypotheses (a Cohere SEARCH_QUERY/SEARCH_DOCUMENT asymmetry, b ADR-BRAIN-02 prefix vocabulary mismatch with queries, c seed content too generic, d richer template helps short docs). Squat and deadlift coincidentally crossed FR-BRAIN-05's 0.82 threshold pre-fix because their exercise word (`"squat"` / `"deadlift"`) appears verbatim in seed content. Bench seeds use `"bench press"`, `"elbows"`, `"scapula"` instead of `"bench"` alone, so a 5-token agent query lacked lexical overlap with seed text and the cross-encoder scored ~0.32. The reranker (a cross-encoder) takes raw `(query, document_text)` pairs — and for `coach_brain` the `text` field falls back to raw `content` (no FR-BRAIN-03 prefix), so the indexing-side prefix never reaches the reranker and cannot rescue a thin query.
+
+**Decision:** The Phase 3 agent retrieval tools (`app/agents/tools.py::retrieve_coach_brain`, and by extension future `retrieve_*` tools that hit small-corpus collections) MUST construct queries with enough lexical surface area to clear the Cohere Rerank cross-encoder's specificity bar. The minimum-viable mechanism is a per-exercise static vocabulary tail constant (`_COACH_BRAIN_QUERY_VOCAB: dict[str, str]` at module level) drawn from seed `trigger_tags` + content nouns (FR-BRAIN-09), appended to the existing exercise-type/variant query. The tail values are pure static English (no PII, no user data), maintained alongside the seed corpus.
+
+**Consequences:**
+- Bench rerank scores lift from ~0.32 to ~0.92 — confirmed end-to-end on prod via fresh upload `de316a7a-b4fd-4fb4-afc4-a1d6be596fa2` flipping to `retrieval_source='coach_brain_primary'`.
+- A drift risk exists: if seed `trigger_tags` get curated upward (via expert review or re-ingestion), the static vocab tail in `tools.py` will go stale. Accepted risk — caller MUST sync the dict if seed vocabulary materially shifts. A future hardening would derive the dict at startup from a one-shot DB query against `coach_brain_entries.trigger_tags`, but the current approach is YAGNI-friendly given <10 analyses/day at L2-beta volume.
+- Unknown `exercise_type` (e.g. future `overhead_press`) gracefully degrades: `dict.get(..., "")` returns empty, query stays well-formed without trailing whitespace, `retrieve_coach_brain` emits `logger.warning` so the gap is observable in worker logs.
+- This ADR does NOT supersede ADR-BRAIN-02 (FR-BRAIN-03 contextualized prefix on indexing remains correct — it shapes the dense-retrieval candidate pool even when it can't rescue rerank). It supersedes the implicit assumption that exercise-type-only queries are sufficient at the agent-tool layer.
+
+**Related:** FR-BRAIN-04 (status filter), FR-BRAIN-05 (retrieval_source thresholds 0.82 / 0.65), FR-BRAIN-09 (seed corpus + trigger_tags as vocabulary source), FR-AICP-18 (composable agent tools), ADR-BRAIN-02 (contextual padding before embedding — still in force; this ADR is an additive query-side mitigation), ADR-BRAIN-08 (seed cold-start eligibility — still in force). `backend/app/agents/tools.py:33-58,175-189` (constant + use site), `backend/scripts/oneoff/diagnose_coach_brain_retrieval.py` (read-only diagnostic — keep for future RAG investigations). PR #87 (`811a6c3`), session 47.
+

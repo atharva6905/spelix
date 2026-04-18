@@ -1,67 +1,62 @@
-# Session 46 Handoff → Session 47: M-04 + M-05 Coach Brain maintenance bundle shipped to prod (PR #85)
+# Session 47 Handoff → Session 48: D-045 Coach Brain query enrichment shipped to prod (PR #87)
 
-**Context refresh:** Session 46 (2026-04-18, L2 Sprint Day 10) closed session 45's Priority 2 — the M-04/M-05 maintenance bundle from backlog `## Discovered backlog items (post-L2 follow-ups)`. Both fixes shipped in one PR, auto-deployed, prod re-embed script executed cleanly on the droplet, and a Playwright MCP E2E upload through the admin account verified the coaching pipeline still completes. Two finding-class discoveries surfaced during E2E — both filed as new D-### backlog rows rather than re-opened against M-04/M-05, because the fixes each did exactly what the backlog asked; the observed symptoms turned out to have different root causes.
+**Context refresh:** Session 47 (2026-04-18, L2 Sprint Day 10, same calendar day as session 46) closed session 46's Priority 2 D-045. Investigation falsified all four backlog hypotheses, isolated the actual root cause (bench-specific query/seed-corpus vocabulary mismatch), shipped a 30-LOC fix, verified end-to-end on prod via fresh Playwright upload of the same fixture session 46 used. `retrieval_source` flipped from `papers_only_fallback` → `coach_brain_primary`. ADR-BRAIN-09 added to capture the design choice.
 
 ## 1. Completed
 
-### PR #85 (`a0a86fc`) — M-04 re-embed Coach Brain seeds + M-05 bump BrainCoveService max_tokens
+### PR #87 (`811a6c3`) — D-045 enrich coach_brain retrieval query with seed-corpus vocabulary
 
-Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 5 commits preserved (feat + quality-review fixup for M-04, test + impl for M-05, audit-finding fixup). Plan at `docs/superpowers/plans/2026-04-18-priority2-m04-m05-maintenance-bundle.md`.
+Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 2 commits preserved (impl + audit-finding fixup).
 
 | Ref | What | Commit |
 |---|---|---|
-| L2-M04-01 | New oneoff script `backend/scripts/oneoff/reembed_coach_brain_seeds.py` — loads seed rows + calls `BrainEmbeddingService.embed_and_upsert_batch` | `28404a7` |
-| L2-M04-02a | Code-review fixup #1: move `engine.dispose()` out of session context + add `try/finally` around embed call | `b8b88b5` |
-| L2-M05-01 | TDD failing test `test_verify_claim_uses_adequate_max_tokens` | `7d2b3c1` |
-| L2-M05-02 | Impl: `cove_brain.py` question `max_tokens=256→512` + answer `max_tokens=512→2048` with rationale comments | `66e255d` |
-| L2-M04-M05-audit-fix | Audit-finding fixup #2: single outer `try/finally` (auditor H-01); `assert len(point_ids) == len(schema_entries)` invariant (M-04); strip `str(exc)` from stderr prints (security LOW-1 + LOW-2); assert `model == _HAIKU_MODEL` in test (M-01) | `a1f0f78` |
-| L2-M04-M05-PR | PR #85 → CI 6/6 green → audits PASS_WITH_FINDINGS (all actionable items fixed inline; H-02 + M-03 deferred as D-045 + D-046) → merge (`merge`, NOT squash) → Deploy to Production 39s → droplet HEAD match + containers healthy → prod re-embed executed → Playwright E2E verified | `a0a86fc` (merge) |
+| L2-D045-01 | New read-only diagnostic `backend/scripts/oneoff/diagnose_coach_brain_retrieval.py` — measures Cohere Rerank 4.0 scores along live agent retrieval path for 4 query variants per exercise (current Q1, vocab-rich Q2, rep-context Q3, self-query ceiling Q4) with FR-BRAIN-05 threshold classification. | `607b193` |
+| L2-D045-02 | TDD failing test `test_retrieve_coach_brain_query_includes_seed_corpus_vocabulary` — asserts per-exercise queries contain seed-corpus-overlapping high-signal tokens. | `607b193` |
+| L2-D045-03 | Impl: `_COACH_BRAIN_QUERY_VOCAB: dict[str, str]` constant in `tools.py` + `.strip()`-appended to query via `.get(exercise_type, "")`. | `607b193` |
+| L2-D045-04 | Audit-finding fixup: H-02 additive test for unknown-exercise graceful degradation; M-01 `logger.warning` when vocab tail is empty. | `a084e06` |
+| L2-D045-PR | PR #87 → CI 6/6 green on `607b193` and after fixup `a084e06` → spelix-auditor PASS_WITH_FINDINGS (H-01 falsified against runtime + prod DB; H-02/M-01 fixed inline; H-03 documented in ADR-BRAIN-09) → spelix-security-reviewer PASS clean → merge → Deploy to Production green → droplet HEAD `811a6c3` + containers fresh + healthy → Playwright E2E on prod (bench fixture) flipped retrieval_source → screenshot saved | `811a6c3` (merge) |
+
+### Diagnostic findings (rerank scores per FR-BRAIN-05 thresholds 0.65 hybrid / 0.82 primary)
+
+| Exercise | Q1 current agent | Q2 vocab-rich | Q3 rep-context | Q4 self-query (ceiling) |
+|---|---|---|---|---|
+| **bench** | **0.319 ❌ fallback** | 0.917 ✅ primary | 0.862 ✅ primary | 0.992 |
+| squat | 0.836 ✅ primary | 0.878 ✅ primary | 0.786 ✅ hybrid | 0.992 |
+| deadlift | 0.917 ✅ primary | 0.878 ✅ primary | 0.962 ✅ primary | 0.990 |
+
+Bench is uniquely broken (squat/deadlift Q1 already cross 0.82 because their exercise word appears verbatim in seed content). Seed corpus is fine (Q4 ceiling = 0.99 across all three). FR-BRAIN-03 prefix is not the problem (rerank input is raw `content`, no prefix). Falsifies hypotheses (a/b/c/d) from the original D-045 row. Root cause: bench seeds use "bench press"/"elbows"/"scapula" not "bench" alone, so a 5-token agent query lacks lexical overlap.
 
 ### Audit verdicts (pre-merge)
 
-- **spelix-auditor** — PASS_WITH_FINDINGS. 0 CRITICAL, 2 HIGH (H-01 fixed in `a1f0f78`, H-02 deferred → D-045 — pre-existing FR-BRAIN-03 `embedding_text` Qdrant payload gap, not introduced by this PR), 4 MEDIUM (M-01/M-04 fixed in `a1f0f78`; M-02 no-action by auditor; M-03 deferred → D-046 shared HAIKU_MODEL constant). All actionable findings addressed pre-merge.
-- **spelix-security-reviewer** — PASS_WITH_FINDINGS. 0 CRITICAL, 0 HIGH, 2 LOW (both ADR-DISTILL-05-style `str(exc)` leakage hygiene findings, both fixed in `a1f0f78`). 7/7 core security checks PASS (secret exposure, SQL injection, ADR-DISTILL-05 compliance in `cove_brain.py`, JWT/auth scope, RLS, SaMD language, Qdrant payload injection).
+- **spelix-auditor** — PASS_WITH_FINDINGS. 1 CRITICAL (C-01 pre-existing SRS FR-BRAIN-04 doc inconsistency vs ADR-BRAIN-08, **not introduced by this PR** — flagged for separate SRS-level resolution). 3 HIGH: H-01 (`"bench"` vs `"bench_press"` key mismatch concern) **falsified** — `app/schemas/analysis.py:16` declares `ExerciseType = Literal["squat","bench","deadlift"]` and prod DB query `SELECT DISTINCT exercise_type FROM analyses` confirmed exactly those three values; H-02 (unknown-exercise fallback test) fixed inline in `a084e06`; H-03 (vocab drift risk) documented as accepted in ADR-BRAIN-09. 5 MEDIUM: M-01 fixed inline; M-02/M-04/M-05 no-action (commentary); M-03 (sys.path mutation in oneoff) low-risk for `scripts/oneoff/` and not addressed.
+- **spelix-security-reviewer** — PASS clean. 0 CRITICAL, 0 HIGH. Confirmed: no secret exposure (no API key/DSN printed); ADR-DISTILL-05 compliance on the new diagnostic script (`type(exc).__name__` only, no `str(exc)`); pure ORM with no SQL injection surface; no Qdrant payload injection from static vocab tail strings; vocab tokens are query-time embedding inputs only (NOT user-facing, no SaMD/FTC violations); no JWT/RLS/auth touch; `logger.warning` logs enum value only, no PII.
 
-### Prod re-embed (2026-04-18 05:02 UTC)
+### Prod E2E (2026-04-18 06:08–06:14 UTC)
 
-Ran `docker cp` to install the script into `spelix-backend-1:/app/scripts/oneoff/`, then `docker exec` to run it.
+Fresh upload of `atharva-bench-nw-10s-720p.mp4` (same fixture session 46 used) on `spelix.app`. Analysis `de316a7a-b4fd-4fb4-afc4-a1d6be596fa2`. Screenshot: `e2e/screenshots/d045-post-fix-bench-coach-brain-primary-de316a7a.png`.
 
-```
-[reembed] Loaded 24 seed rows from coach_brain_entries
-[reembed] Re-embedding 24 entries via Cohere embed-v4.0 (SEARCH_DOCUMENT) with FR-BRAIN-03 prefix...
-[reembed] Upserted 24 points to coach_brain collection
-  bench: 8 entries
-  deadlift: 8 entries
-  squat: 8 entries
-```
+| Check | Session 46 (pre-fix `6aa7b42b`) | Session 47 (post-fix `de316a7a`) |
+|---|---|---|
+| Analysis status | `completed` | `completed` |
+| `retrieval_source` | `papers_only_fallback` ❌ | **`coach_brain_primary`** ✅ |
+| `degraded_mode` | false | false |
+| Console errors | 0 | 0 |
+| Network 4xx/5xx | 0 | 0 |
 
-Qdrant coach_brain point count: **26 before / 26 after** — confirmed UUID-match upsert replaces in place (no duplicate points). Exit 0.
+### Carry-over (D-045 NOT a panacea — these are still open)
 
-### Prod E2E (2026-04-18 05:02–05:08 UTC)
+| Symptom on `de316a7a` | Same on `6aa7b42b` (session 46)? | Tracking ID |
+|---|---|---|
+| `eval_scores.faithfulness=0.0` | yes | D-048 (coaching-path CoVe truncation) |
+| `eval_scores.cove_verified=false` | yes | D-048 |
+| `eval_scores.overall=null` | yes | M-06 (Phase 4 `overall` population) |
+| `agent_trace_json.converged=false` | yes | possibly D-048-related |
 
-Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. Analysis `6aa7b42b-1039-4e1e-a429-5d3f599ae79f`. Screenshot: `e2e/screenshots/m04-m05-post-reembed-prod-verified-6aa7b42b.png`.
-
-| Check | Result |
-|---|---|
-| Analysis status | `completed` |
-| Detected exercise | Bench — flat, 79% confidence |
-| Rep count | 1 rep (10s single-rep fixture) |
-| Form scores | Overall 7.8 / MovQ 8.0 / Tech 8.5 / P&B 6.2 / Ctrl 10.0 — all populated |
-| Console errors (Playwright) | 0 |
-| Network 4xx/5xx | 0 |
-| `retrieval_source` | `papers_only_fallback` — **unchanged** vs pre-re-embed |
-| `degraded_mode` | false |
-| `agent_trace_json.nodes_executed` count | 10 |
-| Distillation fired | **No** — coaching `faithfulness_passed=false` (faithfulness=0.42) blocked the gate |
-| `coach_brain_candidates` rows for this analysis | 0 |
-
-### Additional squat fixture upload (failed pre-pipeline, not an M-04/M-05 defect)
-
-First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality gate rejected with `qg_passed=false` (`quality_gate_rejected`). This fixture is side-view but has body partially out of frame — same `quality_gate_result` shape as other rejected uploads. Not an M-04/M-05 regression. The bench fixture retry (above) is the authoritative verification.
+D-045 fixed retrieval routing — coaching-path quality gates remain blocked behind D-048 + M-06.
 
 ## 2. Remaining
 
-### Session 47 Priority 1 — non-code blockers (unchanged since sessions 30+)
+### Session 48 Priority 1 — non-code blockers (unchanged since sessions 30+)
 
 | ID | Title | Status |
 |---|---|---|
@@ -69,17 +64,16 @@ First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality 
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
 | — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 47 Priority 2 — PR #85 D-### follow-ups (bundle-candidate)
+### Session 48 Priority 2 — PR #85 + #87 D-### follow-ups (bundle-candidate)
 
 | ID | Title | Size | Source |
 |---|---|---|---|
-| D-045 | Investigate why `retrieval_source=papers_only_fallback` persists on prod after M-04 re-embed. Hypotheses: Cohere SEARCH_QUERY/SEARCH_DOCUMENT asymmetry; ADR-BRAIN-02 prefix vocabulary mismatch with natural-language queries; seed content too generic; richer FR-BRAIN-03 natural-language template helps on short docs. Start with a diagnostic script that queries coach_brain directly with known seed content and inspects rerank scores. | M | session 46 E2E |
+| D-048 | Apply M-05-style max_tokens bump to coaching-path `app/services/cove.py::CoveVerificationService`. Session 46 prod E2E showed output_tokens 1024→2048→3072 all truncated; **session 47 D-045 verification reproduced the exact same failure on `de316a7a` post-D-045 fix** — proves D-048 is independent of retrieval routing and is the next blocker on `eval_scores.cove_verified=true`. | S | session 46 + session 47 |
 | D-046 | Extract `_HAIKU_MODEL` to `app/constants.py` — currently duplicated in `cove_brain.py`, `extract.py`, + `cove.py`. Drift risk. | S | auditor M-03 |
-| D-047 | Additive test in `test_distillation_cove_brain.py` for the pre-fix M-05 failure mode via stubbed `ValidationError` side effect. Prevents silent regression if max_tokens ever gets reduced below 2048. | S | code-reviewer suggestion |
-| D-048 | Apply M-05-style max_tokens bump to coaching-path `app/services/cove.py::CoveVerificationService`. Session 46 prod E2E showed output_tokens 1024→2048→3072 all truncated — identical failure mode to BrainCoveService pre-fix. Coaching-path still succeeds (gracefully falls back) but `eval_scores.cove_verified=false` gets persisted spuriously. | S | session 46 E2E |
-| D-049 | Pydantic `Citation` serializer warning spam in worker logs on every coaching call with citations. Non-functional but noisy. Root cause likely dict-vs-model mismatch in instructor deserialization. | S | session 46 worker log |
+| D-047 | Additive test in `test_distillation_cove_brain.py` for the pre-fix M-05 failure mode via stubbed `ValidationError` side effect. | S | code-reviewer suggestion |
+| D-049 | Pydantic `Citation` serializer warning spam in worker logs on every coaching call with citations. | S | session 46 worker log |
 
-### Session 47 Priority 3 — D-### follow-ups from PR #84 (unchanged from session 45)
+### Session 48 Priority 3 — PR #84 D-### follow-ups (unchanged from sessions 45+)
 
 | ID | Title | Size | Source |
 |---|---|---|---|
@@ -87,7 +81,7 @@ First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality 
 | D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` | S | auditor M-2 |
 | D-044 | Investigate `atharva-bench.mov` 13-rep over-count (pre-existing; MediaPipe flicker / Savgol over-smoothing) | M | session 45 |
 
-### Session 47 Priority 4 — P3-007 D-### bundle (unchanged from sessions 44+)
+### Session 48 Priority 4 — P3-007 D-### bundle (unchanged from sessions 44+)
 
 | ID | Title | Size |
 |---|---|---|
@@ -114,45 +108,53 @@ First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality 
 ## 3. Test counts
 
 **Backend** (final local run, post-audit-fix pre-merge):
-- `uv run pytest -x -q --ignore=tests/e2e` → **1694 passed, 25 skipped, 0 failed** (baseline 1693 + 1 M-05 TDD test).
+- `uv run pytest -x -q --ignore=tests/e2e` → **1696 passed, 25 skipped, 0 failed** (1694 baseline + 2 new tests).
 - `uv run ruff check .` — clean.
 - `uv run pyright app/` — **0 errors, 0 warnings, 0 informations**.
-- New/updated test files: `test_distillation_cove_brain.py` (+1 test for `max_tokens` + `model` kwarg introspection).
+- New/updated test file: `test_agents_tools.py` (+2 tests: vocabulary assertion + unknown-exercise graceful-degradation).
 - **Known failures:** none.
 
-**Frontend** (local run, pre-merge):
-- `npx tsc --noEmit` — 0 errors (not re-run full vitest on this docs-only-adjacent PR).
+**Frontend** (no frontend changes in this PR — vitest not re-run beyond CI which passed in 1m22s).
 
-**CI on PR #85** (head `a1f0f78` after fixup, run `24597166061`): all 6 gate checks green — Backend Lint 36s, Backend Tests 1m55s, Frontend Lint 26s, Frontend Tests 1m32s, Secret Scanning 13s, Vercel pass. **Deploy to Production on main (merge commit `a0a86fc`) also green in 39s.**
+**CI on PR #87** — both head commits green:
+- `607b193` (initial): all 6 gates pass on run `24598320869` (Backend Lint 36s, Backend Tests 1m54s, Frontend Lint 23s, Frontend Tests 1m16s, Secret Scanning 15s, Vercel pass).
+- `a084e06` (audit-fixup): all 6 gates pass on run `24598408857`.
+- Merge commit `811a6c3` Deploy to Production green on run `24598457531`.
 
 ## 4. Key learnings captured in this session
 
-1. **The FR-BRAIN-03 contextualized prefix was already being applied before M-04.** `BrainEmbeddingService.embed_and_upsert_batch` has called `build_contextual_text` since P2-024 landed, and the seed script called `embed_and_upsert_batch` from day 1. The backlog hypothesis ("current seeds were embedded with raw content only") was incorrect. The re-embed still ran cleanly and produced 24 identical upserts, so nothing was broken — but it also did not flip `retrieval_source` off `papers_only_fallback` because the missing-prefix hypothesis was wrong. The true cause is something else — filed as D-045.
-2. **Two CoVe services coexist and both have max_tokens issues.** `app/distillation/cove_brain.py::BrainCoveService` (M-05 target — now 2048 tokens, verified) is distinct from `app/services/cove.py::CoveVerificationService` (coaching-path, still at ~3072 and still truncating per the session 46 prod E2E logs). ADR-DISTILL-03 established the separation deliberately; the M-05 fix correctly only touches the distillation service. D-048 tracks the coaching-path counterpart.
-3. **Prod container layout mismatch** — the runtime `spelix-backend-1` container has `/app/app/...` (no `backend/` prefix, no `scripts/` subtree). Scripts are not in the Docker image and are not volume-mounted; the plan assumed `/app/backend/scripts/oneoff/...` based on the repo layout, which does not exist on the droplet. Workaround: `docker exec -u root mkdir -p /app/scripts/oneoff && docker cp ~deploy/spelix/backend/scripts/oneoff/X.py spelix-backend-1:/app/scripts/oneoff/X.py` — the script's `sys.path` patch then correctly puts `/app` on the path. Any future oneoff plan should specify this workflow, not the in-repo path. Worth a `backend/CLAUDE.md` gotcha entry but deferred until we see this twice.
+1. **The Cohere Rerank cross-encoder bottleneck is on the QUERY side, not the document side.** ADR-BRAIN-02's contextualized prefix shapes dense candidate retrieval but never reaches the reranker (because `coach_brain` payload stores raw `content` not prefixed `text`). For small corpora (~8 docs per exercise filter), all docs surface as candidates anyway, so dense quality doesn't matter — only rerank scores do. And rerank scores are bounded by query lexical surface area. ADR-BRAIN-09 captures the resulting design rule: agent retrieval queries need vocabulary enrichment, not just exercise-type/variant tokens.
+
+2. **The diagnostic script pattern is reusable.** `backend/scripts/oneoff/diagnose_coach_brain_retrieval.py` is generic enough to drop in for any future "why does Coach Brain not surface?" or "why is paper retrieval thin?" question — just swap the queries, add Q5 candidates, re-run on prod via the same `docker exec spelix-backend-1 /app/.venv/bin/python /app/scripts/oneoff/...` pattern. Worth keeping in the repo (already committed).
+
+3. **`/app/.venv/bin/python` not `python` for prod oneoffs.** The base `/usr/local/bin/python` in the container has none of the project deps. Always use the venv interpreter. (Session 46 reembed script worked because the worker's invocation used the venv via the streaq entrypoint; standalone exec needs the explicit path.) Worth a `backend/CLAUDE.md` gotcha entry next time we hit this.
+
+4. **Auditor H-01 was wrong but worth checking.** The auditor flagged a possible `"bench"` vs `"bench_press"` key mismatch in `_COACH_BRAIN_QUERY_VOCAB`. I had to verify against `ExerciseType` Literal in the schema AND query prod DB before declaring it false. Per `superpowers:verification-before-completion`, "should be fine" doesn't cut it. Cost: ~2 min. Saved: shipping a real bug if H-01 had turned out to be true. Pattern worth keeping: when an audit finding is plausible, run a 30-second verification before dismissing.
+
+5. **Ship D-045 changes to anything that touches retrieval, not just coach_brain.** `retrieve_papers` in the same file uses an even more generic query `"{exercise} {variant} technique coaching biomechanics"`. Papers_rag has many docs so a low-relevance match still produces a top result — but the retrieval quality is almost certainly suboptimal. Not urgent (papers always returns SOMETHING), but worth noting if a future RAG investigation suggests papers retrieval also drifts. Could file as D-### follow-up if observed.
 
 ## 5. Blockers
 
-**Code-side:** none — PR #85 shipped and verified on prod. D-045 through D-049 captured as follow-ups; none block any in-flight L2 sprint work.
+**Code-side:** none — PR #87 shipped, verified on prod, screenshots captured. D-046 through D-049 + D-042/D-043/D-044 are bundle-ready for next session. D-048 is now the highest-impact remaining bug (proven still active on `de316a7a`).
 
 ### Non-code blockers (carry-over from earlier sessions, unchanged)
 
 - **Kin expert onboarding call** still pending since session 30. 15 days to 2026-05-03 L2 deadline. Each day of slip compounds against landing readiness.
-- **`papers_only_fallback` over-use on prod retrieval** remains (D-045 replaces M-04's original hypothesis). Coach Brain retrieval is still dark on prod — seeds are eligible but not scoring high enough to cross the 0.65 rerank threshold.
+- **`papers_only_fallback` over-use** — RESOLVED for bench by D-045. Squat and deadlift were already routing through Coach Brain pre-fix per the diagnostic. This blocker is now closed.
 
 ### Worktree / branch state
 
-- Feature branch `fix/m04-m05-coach-brain-reembed-cove-tokens` merged on origin; can be deleted via `git push origin --delete fix/m04-m05-coach-brain-reembed-cove-tokens` when cleanup is desired.
-- Local `main` at `a0a86fc` (PR #85 merge commit). Origin `main` matches.
+- Feature branch `fix/d045-coach-brain-query-enrichment` merged on origin; can be deleted via `git push origin --delete fix/d045-coach-brain-query-enrichment` when cleanup is desired.
+- Local `main` at `811a6c3` (PR #87 merge commit). Origin `main` matches.
 
-## 6. E2E Findings — M-04 / M-05 verification
+## 6. E2E Findings — D-045 verification
 
-- **Analysis UUID:** `6aa7b42b-1039-4e1e-a429-5d3f599ae79f` (bench fixture, admin test account).
-- **Screenshot:** `e2e/screenshots/m04-m05-post-reembed-prod-verified-6aa7b42b.png`.
-- **Pre-re-embed `retrieval_source`:** known from session 42 prod observation — `papers_only_fallback`.
-- **Post-re-embed `retrieval_source`:** still `papers_only_fallback` (see D-045). Coaching pipeline itself completes cleanly: analysis status `completed`, all form scores populated, 0 console errors, 0 network 4xx/5xx.
-- **`coach_brain_candidates` rows created this session:** 0 (distillation did not fire because coaching `eval_scores.faithfulness_passed=false`). M-05 therefore not exercised on prod this session — unit-test-verified only. Will be exercised on first subsequent distillation-eligible run.
-- **Observed coaching-path CoVe failure:** `cove_trace` shows three retries at 1024→2048→3072 all truncated — that's the `CoveVerificationService` (coaching path), NOT the `BrainCoveService` (distillation path that M-05 targeted). Tracked as D-048.
+- **Analysis UUID:** `de316a7a-b4fd-4fb4-afc4-a1d6be596fa2` (bench fixture, admin test account, fresh upload).
+- **Screenshot:** `e2e/screenshots/d045-post-fix-bench-coach-brain-primary-de316a7a.png`.
+- **Pre-fix `retrieval_source`:** `papers_only_fallback` (session 46 baseline `6aa7b42b`).
+- **Post-fix `retrieval_source`:** **`coach_brain_primary`** — flip confirmed via direct Postgres SELECT on `coaching_results.agent_trace_json`. Coaching pipeline completes cleanly: analysis status `completed`, 0 console errors, 0 network 4xx/5xx.
+- **Coach Brain candidates created this session:** unknown (didn't query `coach_brain_candidates` directly — distillation may not have fired due to D-048 coaching-path CoVe failure persisting `faithfulness=0.0`).
+- **D-048 still active:** Same `cove_trace` truncation symptom as session 46 — `eval_scores.faithfulness=0.0` and `cove_verified=false` on `de316a7a`. Not a D-045 regression. Tracked as D-048 (top of Priority 2 next session).
 
 ## 7. Next session start
 
@@ -164,11 +166,11 @@ First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality 
 #   - Expert corpus push: first 10 papers via expert portal
 #   - Landing page V1 prod verification
 
-# PRIORITY 2 — PR #85 D-### follow-ups (bundle-candidate)
-#   - D-045 investigate papers_only_fallback root cause (M — tops priority because it blocks retrieval)
+# PRIORITY 2 — PR #85 + #87 D-### follow-ups (bundle-candidate)
+#   - D-048 M-05-style max_tokens bump on coaching-path CoveVerificationService
+#     (S; tops priority — proven active on de316a7a, blocks faithfulness/cove_verified)
 #   - D-046 hoist _HAIKU_MODEL to shared constant (S)
 #   - D-047 additive ValidationError regression test for BrainCoveService (S)
-#   - D-048 M-05-style max_tokens bump on coaching-path CoveVerificationService (S)
 #   - D-049 Citation serializer warning cleanup (S)
 
 # PRIORITY 3 — PR #84 D-### follow-ups
@@ -184,18 +186,21 @@ First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality 
 #   - Adaptive-mode reasoner-loop UI polish (M)
 
 # ENVIRONMENT NOTES:
-#   - Local main = a0a86fc (PR #85 merge). Origin main same.
+#   - Local main = 811a6c3 (PR #87 merge). Origin main same.
 #   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42
 #   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32
 #   - Test admin account: atharva6905+admin-p3006@gmail.com /
 #     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Now owns 4 analyses — session 44 cea2312b (0 reps pre-fix),
-#     session 45 f36f8367 (1 rep post-D-040/D-041 fix),
+#     Now owns 5 analyses — session 44 cea2312b (0 reps pre-fix),
+#     session 45 f36f8367 (1 rep post-D-040/D-041),
 #     session 46 adbad4bf (squat, quality_gate_rejected),
-#     session 46 6aa7b42b (bench, completed post-M04/M05).
-#     Re-use for future verification.
+#     session 46 6aa7b42b (bench, retrieval_source=papers_only_fallback),
+#     session 47 de316a7a (bench, retrieval_source=coach_brain_primary post-D-045).
 #   - Qdrant coach_brain: 26 points (24 seeds, UUID-match upsertable via re-embed script).
-#   - Oneoff scripts path on prod: scripts are NOT in the Docker image. Use
-#     `docker exec -u root mkdir -p /app/scripts/oneoff && docker cp ...`
-#     to install into the running container before running.
+#   - Oneoff scripts on prod: NOT in the Docker image. Use the docker cp
+#     workflow into /app/scripts/oneoff/ AND invoke via /app/.venv/bin/python
+#     (not the system python, which lacks deps).
+#   - D-045 diagnostic script lives in repo at backend/scripts/oneoff/
+#     diagnose_coach_brain_retrieval.py — re-runnable for any future RAG
+#     retrieval investigation.
 ```
