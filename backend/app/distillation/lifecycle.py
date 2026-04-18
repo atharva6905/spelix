@@ -51,7 +51,15 @@ async def lifecycle_decision(
     qdrant_client: Any,
     brain_embedding_svc: Any,
 ) -> dict[str, Any]:
-    """Route each candidate to ADD / UPDATE / NOOP via cosine similarity."""
+    """Route each candidate to ADD / UPDATE / NOOP via cosine similarity.
+
+    D-053 (ADR-DISTILL-07): uses QdrantClientWrapper.query_points — NOT
+    AsyncQdrantClient.search (removed in qdrant-client 1.x). The wrapper's
+    query_points returns a QueryResponse envelope; nearest hits live on
+    response.points. A try/except is retained as a safety net against
+    legitimate Qdrant outages (which would otherwise crash the distillation
+    graph for every candidate in a batch).
+    """
     candidates: list[CandidateInsight] = state.get("candidates") or []
     if not candidates:
         return {"decisions": []}
@@ -77,16 +85,17 @@ async def lifecycle_decision(
         query_filter = qdrant_models.Filter(must=[exercise_filter, status_filter])
 
         try:
-            hits = await qdrant_client.search(
-                collection_name=COLLECTION_COACH_BRAIN,
-                query_vector=vector,
+            response = await qdrant_client.query_points(
+                COLLECTION_COACH_BRAIN,
+                vector,
                 query_filter=query_filter,
                 limit=1,
                 with_payload=False,
             )
+            hits = list(response.points)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "lifecycle_decision: qdrant search failed (%s) — treating as ADD",
+                "lifecycle_decision: qdrant query_points failed (%s) — treating as ADD",
                 exc,
             )
             hits = []

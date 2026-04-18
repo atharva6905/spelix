@@ -144,35 +144,26 @@ async def test_lifecycle_decision_never_calls_legacy_search() -> None:
     on AsyncQdrantClient; the prod warning 'AsyncQdrantClient object
     has no attribute search — treating as ADD' meant every candidate
     was silently routed to ADD, over-admitting duplicates to the review
-    queue. Regression guard: inject a mock that exposes ONLY
-    `query_points`, and make any attempt to touch `.search` a loud
-    AttributeError.
+    queue. Regression guard: use spec=QdrantClientWrapper so any attempt
+    to access `.search` (not on the wrapper) raises AttributeError —
+    stricter than __getattr__ override which MagicMock blocks.
     """
+    from app.services.qdrant import QdrantClientWrapper
+
     nearest = uuid.uuid4()
     state = _state_with_candidates([_stub_candidate()])
 
-    # Build a Qdrant client mock whose .search attribute, if accessed,
-    # raises AttributeError. MagicMock's default auto-child-creation
-    # would silently make .search addressable — override that with a
-    # property-like sentinel.
-    q = MagicMock()
+    # spec=QdrantClientWrapper enforces the attribute boundary: any attribute
+    # not on QdrantClientWrapper (including .search) raises AttributeError.
+    # QdrantClientWrapper exposes .query_points but NOT .search, so the spec
+    # is the exact boundary we want.
+    q = MagicMock(spec=QdrantClientWrapper)
     response = MagicMock()
     hit = MagicMock()
     hit.id = str(nearest)
     hit.score = 0.95
     response.points = [hit]
     q.query_points = AsyncMock(return_value=response)
-
-    def _raise_if_search_accessed(name: str):
-        if name == "search":
-            raise AttributeError(
-                "D-053 regression: lifecycle_decision must not call "
-                "AsyncQdrantClient.search; use query_points via the "
-                "QdrantClientWrapper instead."
-            )
-        return MagicMock()
-
-    q.__getattr__ = MagicMock(side_effect=_raise_if_search_accessed)
 
     update = await lifecycle_decision(
         state,
