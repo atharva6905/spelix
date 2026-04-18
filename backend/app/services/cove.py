@@ -113,10 +113,16 @@ def _build_claim_extraction_prompt(output: CoachingOutput) -> str:
     biomechanics claims and SKIP lifter-specific measurement values.
     Research sources describe optimal ranges and targets; they cannot
     confirm or refute one lifter's measured value, so measurement claims
-    always return Uncertain and block all-Yes convergence. Session 48 prod
-    E2E on bench analysis ``bfbed270`` demonstrated this: 26 answers
-    across 2 iterations, every principle-claim Yes with citation, every
-    measurement-claim Uncertain.
+    always return Uncertain and block all-Yes convergence.
+
+    D-052 (ADR-COVE-03): adds an inversion-guard and an extrapolation-
+    guard to close the gap surfaced by D-050 prod E2E on bench analysis
+    ``c46023c9``. The D-050 rule ("do not invent a principle that was
+    not written") is too soft against paraphrases that invert polarity
+    ("fast descent is bad" → "slow descent is bad") or extrapolate a
+    stated optimal range into an invented minimum / maximum / alternative
+    reference range. The D-052 additions name both failure modes
+    explicitly and add one before/after worked example per guard.
     """
     text_to_analyse = "\n".join(
         [
@@ -147,6 +153,15 @@ def _build_claim_extraction_prompt(output: CoachingOutput) -> str:
         "45\u201375\u00b0 from torso') \u2014 never the measurement. If the coaching "
         "cites a measurement without stating any principle, SKIP it; do "
         "not invent a principle that was not written.\n\n"
+        "DO NOT invert, reverse, or negate the direction of a principle. "
+        "If the coaching says a rushed or fast eccentric descent reduces "
+        "time under tension, extract that as-is \u2014 do NOT extract the "
+        "opposite (slow descent reduces time under tension). DO NOT "
+        "extrapolate beyond what the coaching states. If the coaching "
+        "cites an optimal range (e.g. 45\u201375\u00b0 is optimal), extract only "
+        "that range \u2014 do NOT invent a minimum, a maximum, or a separate "
+        "reference range that the coaching does not state. The extractor "
+        "must translate principles, never transform them.\n\n"
         "Worked examples:\n\n"
         "Coaching says: 'Your eccentric phase duration measured 5.16 "
         "seconds.'\n"
@@ -163,6 +178,19 @@ def _build_claim_extraction_prompt(output: CoachingOutput) -> str:
         "lever arm through the bench press.'\n"
         "Extract: 'A slight diagonal J-curve bar path optimizes the "
         "lever arm through the bench press.'\n\n"
+        "Coaching says: 'A rushed, fast eccentric descent reduces time "
+        "under tension and compromises the touch point on the chest.'\n"
+        "Extract: 'A rushed or fast eccentric descent reduces time under "
+        "tension in the bench press.'\n"
+        "Do NOT extract: 'A slow eccentric descent reduces time under "
+        "tension' \u2014 that inverts the direction of the stated principle.\n\n"
+        "Coaching says: 'Optimal elbow angle at the bottom of the bench "
+        "press is 45\u201375\u00b0 from the torso.'\n"
+        "Extract: 'Optimal elbow angle at the bottom of the bench press "
+        "is 45\u201375\u00b0 from the torso.'\n"
+        "Do NOT extract: 'Minimum elbow angle is 60\u00b0' or 'Reference "
+        "range is 60\u2013100\u00b0' \u2014 the coaching did not state a minimum or "
+        "an alternative range; inventing one is extrapolation.\n\n"
         "Return one claim per distinct principle. Do not duplicate the "
         "same principle across issues. Return an empty list if no "
         "principle-level claims are present.\n\n"
