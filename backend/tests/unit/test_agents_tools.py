@@ -186,6 +186,60 @@ async def test_retrieve_coach_brain_includes_seed_in_status_filter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retrieve_coach_brain_query_includes_seed_corpus_vocabulary() -> None:
+    """D-045 regression: agent query MUST contain exercise-specific
+    biomechanics tokens that overlap the seed corpus.
+
+    Pre-fix prod E2E (analysis 6aa7b42b, bench): the literal query
+    ``"bench flat coaching cue correction"`` scored 0.32 on the Cohere
+    Rerank 4.0 cross-encoder against the bench seed corpus — well below
+    the FR-BRAIN-05 hybrid floor (0.65) — leaving every bench analysis
+    stuck at ``retrieval_source='papers_only_fallback'``.
+
+    The diagnostic at ``backend/scripts/oneoff/diagnose_coach_brain_retrieval.py``
+    shows that adding seed-vocabulary tokens (e.g. ``elbow``, ``scapular``,
+    ``lat`` for bench) lifts the score to 0.92 — well into
+    ``coach_brain_primary``. This test asserts the agent emits a query
+    rich enough to clear the threshold by checking for known high-signal
+    tokens drawn from the FR-BRAIN-09 seed ``trigger_tags``.
+
+    Squat and deadlift Q1 already crossed 0.82 pre-fix (vocabulary
+    coincidentally overlapped), but we still assert their queries to
+    prevent the fix from being scoped to bench only.
+    """
+    cases: list[tuple[str, set[str]]] = [
+        # Tokens chosen from seed_coach_brain.py trigger_tags + content nouns.
+        ("bench", {"elbow", "scapular", "lat"}),
+        ("squat", {"depth", "knee", "lumbar"}),
+        ("deadlift", {"hinge", "lockout", "lat"}),
+    ]
+
+    for exercise, required_tokens in cases:
+        state = make_initial_state(
+            analysis_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            exercise_type=exercise,
+            exercise_variant="x",
+            confidence_score=0.8,
+        )
+        retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+        await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+        # First positional arg to hybrid_search is the query string.
+        actual_query = retrieval_svc.hybrid_search.await_args.args[0]
+        actual_tokens = set(actual_query.lower().split())
+        missing = required_tokens - actual_tokens
+        assert not missing, (
+            f"D-045: query for exercise={exercise!r} missing required "
+            f"high-signal tokens {missing}. Without these the Cohere reranker "
+            f"scores the query below the FR-BRAIN-05 hybrid floor (0.65) and "
+            f"every analysis falls back to papers_only_fallback. "
+            f"Actual query: {actual_query!r}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_retrieve_coach_brain_empty_result_cold_start():
     state = make_initial_state(
         analysis_id=uuid.uuid4(),

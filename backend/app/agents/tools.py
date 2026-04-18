@@ -28,6 +28,36 @@ logger = logging.getLogger(__name__)
 _COACH_BRAIN_PRIMARY_THRESHOLD: float = 0.82
 _HYBRID_FLOOR_THRESHOLD: float = 0.65
 
+# D-045: per-exercise query vocabulary tail appended to the coach_brain
+# retrieval query. The tokens are drawn from the seed `trigger_tags` and
+# seed content nouns (FR-BRAIN-09) so that the Cohere Rerank 4.0
+# cross-encoder gets enough lexical overlap with the seed corpus to
+# clear the FR-BRAIN-05 hybrid threshold.
+#
+# Diagnostic (backend/scripts/oneoff/diagnose_coach_brain_retrieval.py)
+# proved that the prior generic query
+#     "bench flat coaching cue correction"
+# scored only 0.32 against the bench seed corpus and stranded every
+# bench analysis at retrieval_source='papers_only_fallback'. Adding
+# this tail lifts the rerank score to ~0.92 -> coach_brain_primary.
+# Squat and deadlift coincidentally crossed the threshold pre-fix
+# because their exercise word ("squat"/"deadlift") appears in seed
+# content; bench seeds use "bench press", "elbows", "scapula" instead.
+_COACH_BRAIN_QUERY_VOCAB: dict[str, str] = {
+    "bench": (
+        "elbow flare scapular retraction lat engagement bar path "
+        "tempo eccentric control lockout"
+    ),
+    "squat": (
+        "depth knee valgus lumbar flexion ankle mobility torso lean "
+        "lockout glute"
+    ),
+    "deadlift": (
+        "hip hinge lumbar lockout glute extension lat engagement "
+        "bar path stripper pull"
+    ),
+}
+
 
 async def get_rep_metrics(
     state: AgentState,
@@ -143,10 +173,11 @@ async def retrieve_coach_brain(
         match=qdrant_models.MatchAny(any=["active", "seed"]),
     )
 
+    vocab_tail = _COACH_BRAIN_QUERY_VOCAB.get(state["exercise_type"], "")
     query = (
         f"{state['exercise_type']} {state['exercise_variant']} "
-        "coaching cue correction"
-    )
+        f"coaching cue correction {vocab_tail}"
+    ).strip()
     try:
         contexts = await retrieval_svc.hybrid_search(
             query,
