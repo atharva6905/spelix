@@ -413,3 +413,149 @@ async def test_cove_uses_haiku_for_extraction() -> None:
     assert captured_models[6] == HAIKU_MODEL
 
     assert result.cove_verified is True
+
+
+# ---------------------------------------------------------------------------
+# D-048: max_tokens headroom tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cove_max_tokens_meets_headroom_happy_path() -> None:
+    """D-048: Steps 1-3 max_tokens give Haiku 4.5 headroom against truncation.
+
+    Session 46 + 47 prod E2E on bench-fixture analyses (6aa7b42b, de316a7a)
+    both observed VerificationAnswers truncation at max_tokens 1024, 2048,
+    and 3072. 4096 sits comfortably below Haiku 4.5's 8192 hard cap and
+    leaves room for N=5 claims x ~60-token reasoning with source citations.
+    Claim extraction and question generation are short-list outputs but are
+    bumped 512 -> 1024 as cheap headroom against instructor's structured-output
+    retry loop.
+    """
+    initial_output = _make_coaching_output()
+    contexts = [_make_retrieved_context()]
+
+    claims_response = ClaimList(claims=["c1", "c2"])
+    questions_response = VerificationQuestions(questions=["q1?", "q2?"])
+    answers_response = VerificationAnswers(
+        answers=[
+            VerificationAnswer(question="q1?", answer="Yes", reasoning="r1"),
+            VerificationAnswer(question="q2?", answer="Yes", reasoning="r2"),
+        ]
+    )
+    mock_client = _make_mock_instructor_client(
+        [claims_response, questions_response, answers_response]
+    )
+
+    with patch("app.services.cove.instructor.from_anthropic", return_value=mock_client):
+        anthropic_client = MagicMock()
+        svc = CoveVerificationService(anthropic_client=anthropic_client)
+        result: CoveResult = await svc.verify(
+            initial_output=initial_output,
+            retrieved_contexts=contexts,
+            max_iterations=2,
+        )
+
+    assert result.cove_verified is True, "happy path must converge on first iter"
+
+    calls = mock_client.chat.completions.create.await_args_list
+    assert len(calls) == 3, f"expected 3 calls (claim, question, answer); got {len(calls)}"
+
+    # Step 1: claim extraction
+    claim_kwargs = calls[0].kwargs
+    assert claim_kwargs["response_model"] is ClaimList
+    assert claim_kwargs["max_tokens"] >= 1024, (
+        f"claim-extraction max_tokens {claim_kwargs['max_tokens']} < 1024 "
+        "-- cheap headroom against instructor structured-output retries (D-048)."
+    )
+
+    # Step 2: question generation
+    question_kwargs = calls[1].kwargs
+    assert question_kwargs["response_model"] is VerificationQuestions
+    assert question_kwargs["max_tokens"] >= 1024, (
+        f"question-generation max_tokens {question_kwargs['max_tokens']} < 1024 "
+        "-- cheap headroom against instructor structured-output retries (D-048)."
+    )
+
+    # Step 3: verification answers
+    answer_kwargs = calls[2].kwargs
+    assert answer_kwargs["response_model"] is VerificationAnswers
+    assert answer_kwargs["max_tokens"] >= 4096, (
+        f"verification-answer max_tokens {answer_kwargs['max_tokens']} < 4096 "
+        "-- session 46 + 47 observed truncation at 1024, 2048, and 3072 on prod "
+        "aggregated N-claim VerificationAnswers output (D-048)."
+    )
+
+
+@pytest.mark.asyncio
+async def test_cove_max_tokens_meets_headroom_revision_path() -> None:
+    """D-048: Step 4 revision max_tokens >= 3072 so Sonnet can regenerate a
+    full CoachingOutput (summary + issues + correction_plan + cues + citations
+    + disclaimer) without mid-field truncation.
+    """
+    initial_output = _make_coaching_output()
+    contexts = [_make_retrieved_context()]
+
+    claims_response = ClaimList(claims=["c1"])
+    questions_response = VerificationQuestions(questions=["q1?"])
+    # First verification answer is "No" -> triggers revision.
+    failed_answers = VerificationAnswers(
+        answers=[
+            VerificationAnswer(
+                question="q1?",
+                answer="No",
+                reasoning="Evidence does not support this claim.",
+            )
+        ]
+    )
+    # After revision, second iteration's claim extraction returns no claims -> converge.
+    revised_output = _make_coaching_output(summary="Revised summary.")
+    converged_claims = ClaimList(claims=[])
+
+    mock_client = _make_mock_instructor_client(
+        [
+            claims_response,         # Step 1 pre-loop
+            questions_response,      # Step 2 iter 1
+            failed_answers,          # Step 3 iter 1 (No -> revise)
+            revised_output,          # Step 4 revision (Sonnet)
+            converged_claims,        # Step 1 iter 2 -> empty -> converge
+        ]
+    )
+
+    with patch("app.services.cove.instructor.from_anthropic", return_value=mock_client):
+        anthropic_client = MagicMock()
+        svc = CoveVerificationService(anthropic_client=anthropic_client)
+        result: CoveResult = await svc.verify(
+            initial_output=initial_output,
+            retrieved_contexts=contexts,
+            max_iterations=2,
+        )
+
+    assert result.cove_verified is True, (
+        "revision + re-extract with empty claims must converge on iter 2"
+    )
+
+    calls = mock_client.chat.completions.create.await_args_list
+    assert len(calls) == 5, (
+        f"expected 5 calls (pre-loop claim, question, answer, revise, iter2 claim); "
+        f"got {len(calls)}"
+    )
+
+    # Step 3 answer call (defensive — happy-path test covers this too).
+    answer_kwargs = calls[2].kwargs
+    assert answer_kwargs["response_model"] is VerificationAnswers
+    assert answer_kwargs["max_tokens"] >= 4096, (
+        f"verification-answer max_tokens {answer_kwargs['max_tokens']} < 4096 "
+        "— defensive regression guard against Step 3 budget drift (D-048)."
+    )
+
+    # Step 4 revision is the 4th call
+    revision_kwargs = calls[3].kwargs
+    assert revision_kwargs["model"] == SONNET_MODEL, (
+        f"Step 4 revision must use Sonnet, got {revision_kwargs['model']}"
+    )
+    assert revision_kwargs["response_model"] is CoachingOutput
+    assert revision_kwargs["max_tokens"] >= 3072, (
+        f"revision max_tokens {revision_kwargs['max_tokens']} < 3072 "
+        "-- Sonnet needs room to regenerate a full CoachingOutput (D-048)."
+    )

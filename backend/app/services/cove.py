@@ -257,9 +257,11 @@ class CoveVerificationService:
         trace: list[dict[str, Any]] = []
 
         # --- Step 1: claim extraction (happens once before the loop) ----------
+        # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+        # trivial cost delta for this short-list output (cf. Step 3 at 4096).
         claim_list = await self._instructor_client.chat.completions.create(
             model=HAIKU_MODEL,
-            max_tokens=512,
+            max_tokens=1024,
             response_model=ClaimList,
             messages=[
                 {
@@ -281,9 +283,11 @@ class CoveVerificationService:
         for iteration in range(1, max_iterations + 1):
             # Step 1 on iterations > 1 uses the revised output's claims
             if iteration > 1:
+                # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+                # trivial cost delta for this short-list output (cf. Step 3 at 4096).
                 claim_list = await self._instructor_client.chat.completions.create(
                     model=HAIKU_MODEL,
-                    max_tokens=512,
+                    max_tokens=1024,
                     response_model=ClaimList,
                     messages=[
                         {
@@ -310,9 +314,11 @@ class CoveVerificationService:
                     )
 
             # --- Step 2: verification question generation --------------------
+            # D-048: bumped 512→1024 for instructor structured-output retry headroom;
+            # trivial cost delta for this short-list output (cf. Step 3 at 4096).
             verification_questions = await self._instructor_client.chat.completions.create(
                 model=HAIKU_MODEL,
-                max_tokens=512,
+                max_tokens=1024,
                 response_model=VerificationQuestions,
                 messages=[
                     {
@@ -323,9 +329,10 @@ class CoveVerificationService:
             )
 
             # --- Step 3: independent verification ----------------------------
+            # D-048: session 46 + 47 observed truncation at 1024, 2048, and 3072. 4096 is below Haiku 4.5's 8192 cap.
             verification_answers = await self._instructor_client.chat.completions.create(
                 model=HAIKU_MODEL,
-                max_tokens=1024,
+                max_tokens=4096,
                 response_model=VerificationAnswers,
                 messages=[
                     {
@@ -366,9 +373,10 @@ class CoveVerificationService:
 
             # --- Step 4: revision (only when not converged and more iterations remain) ---
             if iteration < max_iterations:
+                # D-048: 3072 lets Sonnet regenerate a full CoachingOutput without mid-field truncation.
                 revised_output = await self._instructor_client.chat.completions.create(
                     model=SONNET_MODEL,
-                    max_tokens=2048,
+                    max_tokens=3072,
                     response_model=CoachingOutput,
                     messages=[
                         {
@@ -384,9 +392,10 @@ class CoveVerificationService:
                 current_output = revised_output
             else:
                 # Final iteration exhausted — run revision anyway for latest output
+                # D-048: 3072 lets Sonnet regenerate a full CoachingOutput without mid-field truncation.
                 revised_output = await self._instructor_client.chat.completions.create(
                     model=SONNET_MODEL,
-                    max_tokens=2048,
+                    max_tokens=3072,
                     response_model=CoachingOutput,
                     messages=[
                         {
