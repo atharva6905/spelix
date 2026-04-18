@@ -1,67 +1,67 @@
-# Session 45 Handoff → Session 46: D-040 hybrid rep detection + D-041 degenerate scoring guard shipped to prod (PR #84)
+# Session 46 Handoff → Session 47: M-04 + M-05 Coach Brain maintenance bundle shipped to prod (PR #85)
 
-**Context refresh:** Session 45 (2026-04-18, L2 Sprint Day 9) closed out session 44's Priority 1. The original ADR-REPDET-01 plan was pure `scipy.signal.find_peaks`; mid-session fixture calibration with user hand-counts disproved that approach (over-counted by 3–4× on noisy real-video signals) and we pivoted to a **hybrid** detector: state machine primary + peak/valley fallback. D-041 degenerate-scoring guard shipped alongside. Both shipped in PR #84 (`bc17250`), auto-deployed via CI, verified on prod with a fresh admin-account upload of the session-44 regression fixture — went from **0 reps → 1 rep**, form scores cleanly populated, no "Very Low + 10.0" contradiction.
+**Context refresh:** Session 46 (2026-04-18, L2 Sprint Day 10) closed session 45's Priority 2 — the M-04/M-05 maintenance bundle from backlog `## Discovered backlog items (post-L2 follow-ups)`. Both fixes shipped in one PR, auto-deployed, prod re-embed script executed cleanly on the droplet, and a Playwright MCP E2E upload through the admin account verified the coaching pipeline still completes. Two finding-class discoveries surfaced during E2E — both filed as new D-### backlog rows rather than re-opened against M-04/M-05, because the fixes each did exactly what the backlog asked; the observed symptoms turned out to have different root causes.
 
 ## 1. Completed
 
-### PR #84 (`bc17250`) — D-040 hybrid rep detection + D-041 degenerate scoring guard
+### PR #85 (`a0a86fc`) — M-04 re-embed Coach Brain seeds + M-05 bump BrainCoveService max_tokens
 
-Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 7 commits preserved to show the learning path (pure peak/valley → empirical calibration → hybrid pivot). Plan at `docs/superpowers/plans/2026-04-17-d040-d041-rep-detection-and-degenerate-scoring.md`.
+Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 5 commits preserved (feat + quality-review fixup for M-04, test + impl for M-05, audit-finding fixup). Plan at `docs/superpowers/plans/2026-04-18-priority2-m04-m05-maintenance-bundle.md`.
 
 | Ref | What | Commit |
 |---|---|---|
-| L2-D040-01 | Initial pure peak/valley rewrite (superseded) | `f237ccf` |
-| L2-D040-02 | Test-file update for peak/valley semantics (delete 8, update 3, add 4) | `109abfc` |
-| L2-D040-03 | `_BENCH_*_L` clarifying comment | `b15f770` |
-| L2-D041-01 | D-041 `_is_degenerate_scoring_input` guard + Step 9b short-circuit + 6 tests | `a7477f0` |
-| L2-D040-05 | D-040 smoke script | `41100b8` |
-| L2-D040-06 | **Hybrid pivot** — state machine primary + peak/valley fallback + `TestHybridStateMachineWins` | `dffa59e` |
-| L2-D040-07 | Auditor-finding fixes (H-2 asymmetric hysteresis comment, M-3 smoke docstring, M-4 probe_duration_seconds patch, M-5 signal_processing.py landmark comment) | `e35b86d` |
-| L2-D040-08 | PR #84 → CI 6/6 green → merge (merge, NOT squash) → Deploy to Production auto-run → droplet HEAD match + containers healthy → Playwright E2E verified on prod | `bc17250` (merge) |
-
-### Fixture hand-count ground truth (established this session)
-
-User provided hand counts for all 6 in-repo fixtures:
-
-| fixture | duration | hand | pre-PR prod (state-machine) | pure peak/valley | hybrid |
-|---|---|---|---|---|---|
-| `atharva-bench-nw-10s-720p.mp4` | 10 s | 1 | 0 ❌ | 1 ✓ | **1 ✓** |
-| `atharva-bench-nw-10s.mp4` | 10 s | 1 | 0 ❌ | 1 ✓ | **1 ✓** |
-| `atharva-bench-no-weight.mov` | 22.5 s | 5 | 0 ❌ | 7 🟡 | **7** (over-by-2, was unusable) |
-| `atharva-bench.mov` (loaded) | 23 s | 5 | 13 🟡 | 21 ⚠ | **13** (SM wins = current prod, no regression) |
-| `atharva-squat.mov` | 20.2 s | 5 | 5 ✓ | 14 ⚠ | **5 ✓** |
-| `atharva-deadlift.mov` | 25.8 s | 5 | 5 ✓ | 4 🟡 | **5 ✓** |
-
-Hybrid = strict Pareto improvement over prod: 3 partial-lockout fixtures unlocked, 0 regressions.
-
-### Post-merge docs commits on `main` (session 45)
-
-| What | Commit |
-|---|---|
-| `docs(backlog,handoff)` — close D-040/D-041 with `bc17250` SHA + register D-042 (ThresholdConfig wiring), D-043 (<20° prominence test), D-044 (bench.mov signal-quality investigation) + session 45 handoff → 46 | **pending — commit this after session close** |
+| L2-M04-01 | New oneoff script `backend/scripts/oneoff/reembed_coach_brain_seeds.py` — loads seed rows + calls `BrainEmbeddingService.embed_and_upsert_batch` | `28404a7` |
+| L2-M04-02a | Code-review fixup #1: move `engine.dispose()` out of session context + add `try/finally` around embed call | `b8b88b5` |
+| L2-M05-01 | TDD failing test `test_verify_claim_uses_adequate_max_tokens` | `7d2b3c1` |
+| L2-M05-02 | Impl: `cove_brain.py` question `max_tokens=256→512` + answer `max_tokens=512→2048` with rationale comments | `66e255d` |
+| L2-M04-M05-audit-fix | Audit-finding fixup #2: single outer `try/finally` (auditor H-01); `assert len(point_ids) == len(schema_entries)` invariant (M-04); strip `str(exc)` from stderr prints (security LOW-1 + LOW-2); assert `model == _HAIKU_MODEL` in test (M-01) | `a1f0f78` |
+| L2-M04-M05-PR | PR #85 → CI 6/6 green → audits PASS_WITH_FINDINGS (all actionable items fixed inline; H-02 + M-03 deferred as D-045 + D-046) → merge (`merge`, NOT squash) → Deploy to Production 39s → droplet HEAD match + containers healthy → prod re-embed executed → Playwright E2E verified | `a0a86fc` (merge) |
 
 ### Audit verdicts (pre-merge)
 
-- **spelix-auditor** — PASS_WITH_FINDINGS. 0 CRITICAL, 2 HIGH (H-2 fixed in `e35b86d`, H-1 deferred → D-042), 5 MEDIUM (M-3/M-4/M-5 fixed in `e35b86d`, M-1 declined, M-2 deferred → D-043). All actionable findings addressed pre-merge.
-- **spelix-security-reviewer** — PASS. 0 findings across 7 checks (SaMD language FR-SCOR-09, JWT/auth scope, RLS, secrets, error leakage, injection, FR-SCOR-10 confidence label).
+- **spelix-auditor** — PASS_WITH_FINDINGS. 0 CRITICAL, 2 HIGH (H-01 fixed in `a1f0f78`, H-02 deferred → D-045 — pre-existing FR-BRAIN-03 `embedding_text` Qdrant payload gap, not introduced by this PR), 4 MEDIUM (M-01/M-04 fixed in `a1f0f78`; M-02 no-action by auditor; M-03 deferred → D-046 shared HAIKU_MODEL constant). All actionable findings addressed pre-merge.
+- **spelix-security-reviewer** — PASS_WITH_FINDINGS. 0 CRITICAL, 0 HIGH, 2 LOW (both ADR-DISTILL-05-style `str(exc)` leakage hygiene findings, both fixed in `a1f0f78`). 7/7 core security checks PASS (secret exposure, SQL injection, ADR-DISTILL-05 compliance in `cove_brain.py`, JWT/auth scope, RLS, SaMD language, Qdrant payload injection).
 
-### Prod E2E (2026-04-18 02:47 UTC)
+### Prod re-embed (2026-04-18 05:02 UTC)
 
-Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. Analysis `f36f8367-ee53-4ae6-b91a-614fcb2d394e`. Screenshot: `e2e/screenshots/d040-d041-post-merge-prod-verified.png`.
+Ran `docker cp` to install the script into `spelix-backend-1:/app/scripts/oneoff/`, then `docker exec` to run it.
+
+```
+[reembed] Loaded 24 seed rows from coach_brain_entries
+[reembed] Re-embedding 24 entries via Cohere embed-v4.0 (SEARCH_DOCUMENT) with FR-BRAIN-03 prefix...
+[reembed] Upserted 24 points to coach_brain collection
+  bench: 8 entries
+  deadlift: 8 entries
+  squat: 8 entries
+```
+
+Qdrant coach_brain point count: **26 before / 26 after** — confirmed UUID-match upsert replaces in place (no duplicate points). Exit 0.
+
+### Prod E2E (2026-04-18 05:02–05:08 UTC)
+
+Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. Analysis `6aa7b42b-1039-4e1e-a429-5d3f599ae79f`. Screenshot: `e2e/screenshots/m04-m05-post-reembed-prod-verified-6aa7b42b.png`.
 
 | Check | Result |
 |---|---|
-| Rep count | **1 rep** (was 0 session 44) — D-040 fallback working |
-| Confidence label | "Low" — NOT "Very Low" (real Tier 5 from 1 detected rep, not 0.0 fallback) |
-| Form scores | Overall 7.8 / MovQ 8.0 / Tech 8.5 / P&B 5.2 / Ctrl 10.0 — all populated |
-| No "Very Low + 10.0" contradiction | ✓ (D-041 guard path not needed because D-040 upstream fix removed 0-rep input) |
-| Coaching feedback rendered | ✓ summary + 3 strengths + 3 issues + 5 correction items + 5 cues + 4 citations |
+| Analysis status | `completed` |
+| Detected exercise | Bench — flat, 79% confidence |
+| Rep count | 1 rep (10s single-rep fixture) |
+| Form scores | Overall 7.8 / MovQ 8.0 / Tech 8.5 / P&B 6.2 / Ctrl 10.0 — all populated |
 | Console errors (Playwright) | 0 |
 | Network 4xx/5xx | 0 |
+| `retrieval_source` | `papers_only_fallback` — **unchanged** vs pre-re-embed |
+| `degraded_mode` | false |
+| `agent_trace_json.nodes_executed` count | 10 |
+| Distillation fired | **No** — coaching `faithfulness_passed=false` (faithfulness=0.42) blocked the gate |
+| `coach_brain_candidates` rows for this analysis | 0 |
+
+### Additional squat fixture upload (failed pre-pipeline, not an M-04/M-05 defect)
+
+First verification attempt used `atharva-squat.mov` (5-rep, 20.2s). The quality gate rejected with `qg_passed=false` (`quality_gate_rejected`). This fixture is side-view but has body partially out of frame — same `quality_gate_result` shape as other rejected uploads. Not an M-04/M-05 regression. The bench fixture retry (above) is the authoritative verification.
 
 ## 2. Remaining
 
-### Session 46 Priority 1 — non-code blockers (carry-over from sessions 30+)
+### Session 47 Priority 1 — non-code blockers (unchanged since sessions 30+)
 
 | ID | Title | Status |
 |---|---|---|
@@ -69,22 +69,25 @@ Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. A
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
 | — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 46 Priority 2 — M-04 / M-05 maintenance bundle (~1–2h)
+### Session 47 Priority 2 — PR #85 D-### follow-ups (bundle-candidate)
 
-| ID | Title | Why |
-|---|---|---|
-| M-04 | Re-embed Coach Brain seeds with FR-BRAIN-03 contextualized prefix | Fixes `papers_only_fallback` overuse observed live on session 44 P3-007 E2E |
-| M-05 | Bump `BrainCoveService.max_tokens` to ≥2048 OR shorten verification prompt | Unblocks D-039 (re-run CoVe after admin content edit) |
+| ID | Title | Size | Source |
+|---|---|---|---|
+| D-045 | Investigate why `retrieval_source=papers_only_fallback` persists on prod after M-04 re-embed. Hypotheses: Cohere SEARCH_QUERY/SEARCH_DOCUMENT asymmetry; ADR-BRAIN-02 prefix vocabulary mismatch with natural-language queries; seed content too generic; richer FR-BRAIN-03 natural-language template helps on short docs. Start with a diagnostic script that queries coach_brain directly with known seed content and inspects rerank scores. | M | session 46 E2E |
+| D-046 | Extract `_HAIKU_MODEL` to `app/constants.py` — currently duplicated in `cove_brain.py`, `extract.py`, + `cove.py`. Drift risk. | S | auditor M-03 |
+| D-047 | Additive test in `test_distillation_cove_brain.py` for the pre-fix M-05 failure mode via stubbed `ValidationError` side effect. Prevents silent regression if max_tokens ever gets reduced below 2048. | S | code-reviewer suggestion |
+| D-048 | Apply M-05-style max_tokens bump to coaching-path `app/services/cove.py::CoveVerificationService`. Session 46 prod E2E showed output_tokens 1024→2048→3072 all truncated — identical failure mode to BrainCoveService pre-fix. Coaching-path still succeeds (gracefully falls back) but `eval_scores.cove_verified=false` gets persisted spuriously. | S | session 46 E2E |
+| D-049 | Pydantic `Citation` serializer warning spam in worker logs on every coaching call with citations. Non-functional but noisy. Root cause likely dict-vs-model mismatch in instructor deserialization. | S | session 46 worker log |
 
-### Session 46 Priority 3 — D-### follow-ups from PR #84
+### Session 47 Priority 3 — D-### follow-ups from PR #84 (unchanged from session 45)
 
 | ID | Title | Size | Source |
 |---|---|---|---|
 | D-042 | Wire `_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` through `ThresholdConfig` (FR-SCOR-11) | S | auditor H-1 |
 | D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` | S | auditor M-2 |
-| D-044 | Investigate `atharva-bench.mov` 13-rep over-count (pre-existing; likely MediaPipe flicker or Savgol over-smoothing) | M | session 45 calibration |
+| D-044 | Investigate `atharva-bench.mov` 13-rep over-count (pre-existing; MediaPipe flicker / Savgol over-smoothing) | M | session 45 |
 
-### Session 46 Priority 4 — P3-007 D-### follow-ups (from session 44)
+### Session 47 Priority 4 — P3-007 D-### bundle (unchanged from sessions 44+)
 
 | ID | Title | Size |
 |---|---|---|
@@ -100,7 +103,7 @@ Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. A
 |---|---|---|
 | D-037 | Surface top-2 similar existing approved entries on P3-006 review card | open |
 | D-038 | Add `compensation` to `coach_brain_candidates.entry_type` CHECK constraint | open |
-| D-039 | Re-run CoVe after admin content edit on approve | blocks on M-05 |
+| D-039 | Re-run CoVe after admin content edit on approve | D-048 helps but doesn't fully close this |
 | P3-008 | FR-BRAIN-08 auto-triage — blocks on ≥50 human-reviewed candidates | deferred post-L2 |
 | D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` | LOW |
 | D-030 | Orphan `rag_documents` cleanup cron | LOW |
@@ -111,42 +114,47 @@ Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. A
 ## 3. Test counts
 
 **Backend** (final local run, post-audit-fix pre-merge):
-- `uv run pytest -x -q --ignore=tests/e2e` → **1693 passed, 25 skipped, 0 failed** (baseline 1690; +1 D-040 hybrid distinguishing test + 6 D-041 − churn = +3 net).
+- `uv run pytest -x -q --ignore=tests/e2e` → **1694 passed, 25 skipped, 0 failed** (baseline 1693 + 1 M-05 TDD test).
 - `uv run ruff check .` — clean.
 - `uv run pyright app/` — **0 errors, 0 warnings, 0 informations**.
-- New/updated test files: `test_rep_detection.py` (40→41 tests; +5 new, −8 deleted, 3 updated); `test_pipeline.py` (+6 new D-041 tests).
+- New/updated test files: `test_distillation_cove_brain.py` (+1 test for `max_tokens` + `model` kwarg introspection).
 - **Known failures:** none.
 
 **Frontend** (local run, pre-merge):
-- `npx vitest run` — 332/333 passed (1 `AdminPage.test.tsx` timeout flake under heavy-suite load; passes 24/24 in isolation). Unrelated to this PR.
-- `npx tsc --noEmit` — 0 errors.
+- `npx tsc --noEmit` — 0 errors (not re-run full vitest on this docs-only-adjacent PR).
 
-**CI on PR #84** (merge-commit run `24594795597`): all 6 gate checks green on main — Backend Lint 34s, Backend Tests 2m3s, Frontend Lint 27s, Frontend Tests 1m29s (AdminPage flake did NOT recur on CI), Secret Scanning 15s, Vercel green. **Deploy to Production: success.**
-
-**Coverage:** not re-measured this session. Phase 2 gate baseline 90.31%. This PR touches only `rep_detection.py`, `signal_processing.py` (comment), `pipeline.py` — all well-covered by the 1693-test suite.
+**CI on PR #85** (head `a1f0f78` after fixup, run `24597166061`): all 6 gate checks green — Backend Lint 36s, Backend Tests 1m55s, Frontend Lint 26s, Frontend Tests 1m32s, Secret Scanning 13s, Vercel pass. **Deploy to Production on main (merge commit `a0a86fc`) also green in 39s.**
 
 ## 4. Key learnings captured in this session
 
-1. **Pure `find_peaks` is insufficient for real-video rep detection.** State-machine's absolute thresholds absorb MediaPipe landmark flicker and Savgol over-smoothing artefacts that create phantom mid-range valleys. Peak/valley alone over-counts 3–4× on loaded-bench / squat videos at any tested prominence 20°–80°, and at any clamping / percentile-sanity filter combination tested.
-2. **Hybrid (state-machine first, peak/valley fallback) is the right shape.** Preserves known-good prod behaviour on lockout lifts while catching partial-lockout cases the state machine can't see. Test: `TestHybridStateMachineWins::test_hybrid_prefers_state_machine_over_peak_valley` distinguishes hybrid from pure peak/valley using a synthetic signal where both paths produce different answers.
-3. **D-041 mostly fires as backup, not primary.** Once D-040 correctly detects 1 rep on partial-lockout clips, session confidence lands in "Low" (not "Very Low") so D-041's `< 0.50` guard never triggers. D-041 remains important for the truly-poseless / Very-Low-quality case and the `rep_metrics=[]` short-circuit.
-4. **Signal-quality issue on `atharva-bench.mov` pre-exists and is unchanged.** 13-rep over-count is on main since before this PR. D-044 captures the investigation follow-up — suspected MediaPipe landmark flicker or Savgol `window=7, polyorder=3` over-smoothing.
+1. **The FR-BRAIN-03 contextualized prefix was already being applied before M-04.** `BrainEmbeddingService.embed_and_upsert_batch` has called `build_contextual_text` since P2-024 landed, and the seed script called `embed_and_upsert_batch` from day 1. The backlog hypothesis ("current seeds were embedded with raw content only") was incorrect. The re-embed still ran cleanly and produced 24 identical upserts, so nothing was broken — but it also did not flip `retrieval_source` off `papers_only_fallback` because the missing-prefix hypothesis was wrong. The true cause is something else — filed as D-045.
+2. **Two CoVe services coexist and both have max_tokens issues.** `app/distillation/cove_brain.py::BrainCoveService` (M-05 target — now 2048 tokens, verified) is distinct from `app/services/cove.py::CoveVerificationService` (coaching-path, still at ~3072 and still truncating per the session 46 prod E2E logs). ADR-DISTILL-03 established the separation deliberately; the M-05 fix correctly only touches the distillation service. D-048 tracks the coaching-path counterpart.
+3. **Prod container layout mismatch** — the runtime `spelix-backend-1` container has `/app/app/...` (no `backend/` prefix, no `scripts/` subtree). Scripts are not in the Docker image and are not volume-mounted; the plan assumed `/app/backend/scripts/oneoff/...` based on the repo layout, which does not exist on the droplet. Workaround: `docker exec -u root mkdir -p /app/scripts/oneoff && docker cp ~deploy/spelix/backend/scripts/oneoff/X.py spelix-backend-1:/app/scripts/oneoff/X.py` — the script's `sys.path` patch then correctly puts `/app` on the path. Any future oneoff plan should specify this workflow, not the in-repo path. Worth a `backend/CLAUDE.md` gotcha entry but deferred until we see this twice.
 
 ## 5. Blockers
 
-**Code-side:** none — D-040 + D-041 shipped and verified on prod. D-042/D-043/D-044 captured as follow-ups.
+**Code-side:** none — PR #85 shipped and verified on prod. D-045 through D-049 captured as follow-ups; none block any in-flight L2 sprint work.
 
 ### Non-code blockers (carry-over from earlier sessions, unchanged)
 
 - **Kin expert onboarding call** still pending since session 30. 15 days to 2026-05-03 L2 deadline. Each day of slip compounds against landing readiness.
-- **`papers_only_fallback` over-use on prod retrieval** (M-04 — FR-BRAIN-03 contextualized-prefix mismatch). Coach Brain content effectively dark in prod until M-04 ships.
+- **`papers_only_fallback` over-use on prod retrieval** remains (D-045 replaces M-04's original hypothesis). Coach Brain retrieval is still dark on prod — seeds are eligible but not scoring high enough to cross the 0.65 rerank threshold.
 
 ### Worktree / branch state
 
-- Feature branch `fix/d040-d041-rep-detection-and-degenerate-scoring` merged on origin; can be deleted via `git push origin --delete fix/d040-d041-rep-detection-and-degenerate-scoring` when cleanup is desired.
-- Local `main` at `bc17250` (PR #84 merge commit). Origin `main` matches.
+- Feature branch `fix/m04-m05-coach-brain-reembed-cove-tokens` merged on origin; can be deleted via `git push origin --delete fix/m04-m05-coach-brain-reembed-cove-tokens` when cleanup is desired.
+- Local `main` at `a0a86fc` (PR #85 merge commit). Origin `main` matches.
 
-## 6. Next session start
+## 6. E2E Findings — M-04 / M-05 verification
+
+- **Analysis UUID:** `6aa7b42b-1039-4e1e-a429-5d3f599ae79f` (bench fixture, admin test account).
+- **Screenshot:** `e2e/screenshots/m04-m05-post-reembed-prod-verified-6aa7b42b.png`.
+- **Pre-re-embed `retrieval_source`:** known from session 42 prod observation — `papers_only_fallback`.
+- **Post-re-embed `retrieval_source`:** still `papers_only_fallback` (see D-045). Coaching pipeline itself completes cleanly: analysis status `completed`, all form scores populated, 0 console errors, 0 network 4xx/5xx.
+- **`coach_brain_candidates` rows created this session:** 0 (distillation did not fire because coaching `eval_scores.faithfulness_passed=false`). M-05 therefore not exercised on prod this session — unit-test-verified only. Will be exercised on first subsequent distillation-eligible run.
+- **Observed coaching-path CoVe failure:** `cove_trace` shows three retries at 1024→2048→3072 all truncated — that's the `CoveVerificationService` (coaching path), NOT the `BrainCoveService` (distillation path that M-05 targeted). Tracked as D-048.
+
+## 7. Next session start
 
 ```bash
 /status
@@ -156,11 +164,14 @@ Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. A
 #   - Expert corpus push: first 10 papers via expert portal
 #   - Landing page V1 prod verification
 
-# PRIORITY 2 — M-04 / M-05 maintenance bundle (~1-2h)
-#   - M-04 re-embed Coach Brain seeds with FR-BRAIN-03 contextualized prefix
-#   - M-05 bump BrainCoveService.max_tokens to 2048 OR shorten verification prompt
+# PRIORITY 2 — PR #85 D-### follow-ups (bundle-candidate)
+#   - D-045 investigate papers_only_fallback root cause (M — tops priority because it blocks retrieval)
+#   - D-046 hoist _HAIKU_MODEL to shared constant (S)
+#   - D-047 additive ValidationError regression test for BrainCoveService (S)
+#   - D-048 M-05-style max_tokens bump on coaching-path CoveVerificationService (S)
+#   - D-049 Citation serializer warning cleanup (S)
 
-# PRIORITY 3 — PR #84 D-### follow-ups (smallest first, bundle-candidate)
+# PRIORITY 3 — PR #84 D-### follow-ups
 #   - D-042 wire rep-detection knobs through ThresholdConfig (S)
 #   - D-043 partial-descent <20° prominence test (S)
 #   - D-044 atharva-bench.mov signal-quality investigation (M)
@@ -173,20 +184,18 @@ Fresh admin-account upload of `atharva-bench-nw-10s-720p.mp4` on `spelix.app`. A
 #   - Adaptive-mode reasoner-loop UI polish (M)
 
 # ENVIRONMENT NOTES:
-#   - Local main = bc17250 (PR #84 merge). Origin main same.
+#   - Local main = a0a86fc (PR #85 merge). Origin main same.
 #   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42
 #   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32
 #   - Test admin account: atharva6905+admin-p3006@gmail.com /
 #     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Now owns 2 analyses — cea2312b (session 44, 0 reps pre-fix) and
-#     f36f8367 (session 45, 1 rep post-fix). Re-use for future verification.
-#   - @xyflow/react@12.10.2 in frontend deps (session 44).
-#   - scipy>=1.17.1 in backend deps (new rep-detection dependency).
-#   - Hand-counted fixture ground truth:
-#       atharva-bench-nw-10s-720p.mp4 = 1 rep (session 45, truncated)
-#       atharva-bench-nw-10s.mp4      = 1 rep (same source)
-#       atharva-bench-no-weight.mov   = 5 reps (full length)
-#       atharva-bench.mov             = 5 reps (loaded; algorithm gives 13)
-#       atharva-squat.mov             = 5 reps (algorithm gives 5)
-#       atharva-deadlift.mov          = 5 reps (algorithm gives 5)
+#     Now owns 4 analyses — session 44 cea2312b (0 reps pre-fix),
+#     session 45 f36f8367 (1 rep post-D-040/D-041 fix),
+#     session 46 adbad4bf (squat, quality_gate_rejected),
+#     session 46 6aa7b42b (bench, completed post-M04/M05).
+#     Re-use for future verification.
+#   - Qdrant coach_brain: 26 points (24 seeds, UUID-match upsertable via re-embed script).
+#   - Oneoff scripts path on prod: scripts are NOT in the Docker image. Use
+#     `docker exec -u root mkdir -p /app/scripts/oneoff && docker cp ...`
+#     to install into the running container before running.
 ```
