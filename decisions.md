@@ -750,3 +750,32 @@ A second degenerate case compounded: with `rep_metrics=[]`, downstream scoring p
 
 **Related:** FR-CVPL-15, FR-REPM-01, FR-REPM-05 (rep detection spec), FR-SCOR-02 / FR-SCOR-04 (degenerate scoring path for D-041), `backend/app/cv/rep_detection.py`, `backend/app/cv/scoring.py`. Supersedes the per-exercise threshold dict in `rep_detection.py::_STANDING_THRESHOLD` and `_DEPTH_THRESHOLD` once D-040 ships.
 
+## ADR-REPDET-02: Hybrid state-machine + peak/valley rep detection supersedes pure peak/valley (Session 45, Shipped in PR #84)
+
+**Context:** ADR-REPDET-01 specified replacing the fixed-threshold state machine with pure `scipy.signal.find_peaks`. Session 45 hand-counted calibration across 6 in-repo fixtures (user-supplied ground truth: 1/1/5/5/5/5 reps) disproved that plan. Pure peak/valley fixed the 3 partial-lockout cases (`bench-nw-10s-720p/10s/no-weight` 0→1/1/7) but regressed 3 clean-lockout cases that state machine was getting right: `atharva-bench.mov` 13→21, `atharva-squat.mov` 5→14, `atharva-deadlift.mov` 5→4. Root cause: MediaPipe landmark flicker and Savgol-filter overshoot (window=7, polyorder=3) create sub-rep-amplitude valleys that any prominence/distance/clamp/percentile-sanity tuning (tested 20°–80° prominence × 3 filter variants) fails to separate from real rep bottoms. State-machine's absolute-threshold gating absorbed those artefacts because every rep requires a full `STANDING → BOTTOM → STANDING` traversal.
+
+**Decision:** `backend/app/cv/rep_detection.py::detect_reps` runs the legacy state-machine (`_detect_reps_state_machine`) first; if it returns ≥1 rep, that result is used. Only when SM returns 0 (partial-lockout case) does it fall back to `_detect_reps_peak_valley` (find_peaks with `_PROMINENCE_DEG=20°` + `_MIN_REP_DURATION_S=0.5`). `_STANDING_THRESHOLD`, `_DEPTH_THRESHOLD`, `_HYSTERESIS_DEG` are restored in the module (were deleted in the pure-peak/valley commit `f237ccf`, re-added in the hybrid pivot `dffa59e`). New distinguishing test: `TestHybridStateMachineWins::test_hybrid_prefers_state_machine_over_peak_valley`.
+
+**Consequences:**
+- **Strict Pareto improvement over prod:** 3 partial-lockout fixtures unlocked (0→1/1/7), 0 clean-lockout regressions — `atharva-bench.mov` stays at 13 (unchanged from pre-PR prod), `squat.mov` stays at 5, `deadlift.mov` stays at 5.
+- **Tuning simplification:** no per-exercise prominence-tuning needed. `20°` is conservative enough for the fallback path because the state machine already consumes all lockout-complete rep traffic. If future partial-lockout videos show false positives, tune `_PROMINENCE_DEG` per exercise.
+- **Supersedes ADR-REPDET-01's core decision.** The "signal-relative tuning knobs replace exercise-absolute thresholds" claim in that ADR is rejected empirically. State-machine's absolute thresholds remain load-bearing — they're just scoped to the clean-lockout majority case.
+- **`bench.mov` 13-rep over-count is unchanged** and still wrong vs hand count 5. This is pre-existing prod behaviour (state machine was doing it before this PR too). Captured as **D-044** for post-L2 investigation of signal quality — likely MediaPipe flicker or Savgol over-smoothing. Not a regression of this PR.
+- **`_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` remain hardcoded** rather than flowing through `ThresholdConfig`. spelix-auditor H-1 flagged this as FR-SCOR-11 drift; deferred to **D-042** for a later ThresholdConfig-wiring pass.
+
+**Related:** supersedes ADR-REPDET-01. FR-CVPL-15, FR-REPM-01, FR-REPM-05. `backend/app/cv/rep_detection.py`, `backend/tests/unit/test_rep_detection.py::TestHybridStateMachineWins`. PR #84 (`bc17250`), session 45.
+
+## ADR-SCOR-DEGENERATE-01: Degenerate scoring guard lives at pipeline level, not inside `ScoreComponent` (Session 45, Shipped in PR #84)
+
+**Context:** D-041 target: when `rep_metrics` is empty or `session_confidence < 0.50` ("Very Low" boundary per `confidence_label`), `form_score_*` columns must be `None` so frontend `FormScoreCards` renders "Not available" instead of defaulting to 10.0. Two implementation locations considered: (a) mutate each of the four `ScoreComponent` subclasses (`SafetyScore`, `TechniqueScore`, `PathBalanceScore`, `ControlScore`) to check for empty input and return `None`; (b) add a single guard at the pipeline step that runs the scorers. Verified via `rg "\.score_result" backend/app`: nothing outside `pipeline.py` reads `result.score_result`.
+
+**Decision:** Add `_is_degenerate_scoring_input(rep_metrics, session_confidence) -> bool` in `backend/app/services/pipeline.py` (line ~172) and short-circuit `run_cv_pipeline` Step 9b with an `if/else`: degenerate → set all five `analysis.form_score_*` columns to `None` and skip `OverallFormScore.compute` entirely; otherwise → existing `agg_metrics + scorer.compute` path unchanged. The `0.50` threshold lives in `_DEGENERATE_CONFIDENCE_THRESHOLD` (module-level constant) and matches `confidence_label`'s "Low ≥ 0.50" boundary in `backend/app/cv/confidence.py`.
+
+**Consequences:**
+- **Zero changes to `ScoreComponent` subclasses** — the Protocol contract is preserved, all four scorers remain callable with their existing `(metrics, bar_path, cfg, exercise_type)` signature. Future 5th/6th scorers inherit the degenerate-input handling for free (pipeline layer gates them).
+- **Single source of truth** for the `0.50` threshold — one module-level constant tied by comment to `confidence_label`, not repeated in four class bodies.
+- **`result.score_result` stays at `PipelineResult.__init__` default `None`** in the degenerate branch. Verified safe: no external reader. If a future summary service or PDF generator starts consuming it, that code needs a None-guard — flagged in `backlog.md` for ADR review before adding such a consumer.
+- **Threshold is signal-relative to the UI** (same `0.50` the user sees as the "Very Low" banner boundary) — if product ever shifts that boundary, both places update together.
+
+**Related:** FR-SCOR-02, FR-SCOR-04, FR-SCOR-07, FR-SCOR-10 (confidence label). `backend/app/services/pipeline.py::_is_degenerate_scoring_input`, `backend/app/cv/confidence.py::confidence_label`, `frontend/src/pages/ResultsPage.tsx:123-203` (FormScoreCards null-handling). PR #84 (`bc17250`), session 45.
+
