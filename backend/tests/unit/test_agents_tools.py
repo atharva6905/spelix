@@ -240,6 +240,33 @@ async def test_retrieve_coach_brain_query_includes_seed_corpus_vocabulary() -> N
 
 
 @pytest.mark.asyncio
+async def test_retrieve_coach_brain_unknown_exercise_type_degrades_gracefully() -> None:
+    """D-045 H-02 (auditor): an exercise_type not present in
+    `_COACH_BRAIN_QUERY_VOCAB` must NOT raise — it must produce a
+    well-formed un-enriched query and let the call complete. This
+    protects future exercises (e.g. overhead_press) from regressing the
+    pipeline before vocabulary is added for them.
+    """
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="overhead_press",  # not in _COACH_BRAIN_QUERY_VOCAB
+        exercise_variant="standing",
+        confidence_score=0.8,
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+    update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    # Call completes without raising and returns the cold-start fallback.
+    assert update["retrieval_source"] == "papers_only_fallback"
+
+    # Query is still well-formed (no trailing whitespace from missing tail).
+    actual_query = retrieval_svc.hybrid_search.await_args.args[0]
+    assert actual_query == "overhead_press standing coaching cue correction"
+
+
+@pytest.mark.asyncio
 async def test_retrieve_coach_brain_empty_result_cold_start():
     state = make_initial_state(
         analysis_id=uuid.uuid4(),

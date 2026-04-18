@@ -174,6 +174,15 @@ async def retrieve_coach_brain(
     )
 
     vocab_tail = _COACH_BRAIN_QUERY_VOCAB.get(state["exercise_type"], "")
+    if not vocab_tail:
+        # Unknown exercise_type — coaching degrades silently to the
+        # un-enriched query. Surface so the gap is fixable without grepping
+        # rerank logs (auditor M-01).
+        logger.warning(
+            "retrieve_coach_brain: no D-045 vocab tail for exercise_type=%s "
+            "— query falls back to un-enriched form",
+            state["exercise_type"],
+        )
     query = (
         f"{state['exercise_type']} {state['exercise_variant']} "
         f"coaching cue correction {vocab_tail}"
