@@ -666,3 +666,122 @@ def test_claim_extraction_prompt_still_references_falsifiability() -> None:
         "the extractor drifts into subjective or motivational claims "
         "(regression guard, D-050)."
     )
+
+
+# ---------------------------------------------------------------------------
+# D-052: claim extraction — inversion-guard + extrapolation-guard
+# ---------------------------------------------------------------------------
+
+
+def test_claim_extraction_prompt_prohibits_inversion() -> None:
+    """D-052: prompt must explicitly forbid inverting the direction of a
+    principle stated in the coaching output.
+
+    Session 49 prod E2E on bench analysis ``c46023c9`` observed iteration 2
+    reached 7/8 Yes but one No blocked convergence: the extractor emitted
+    'excessively slow eccentric makes bar path control harder' — source 2
+    says fast/rushed descent is the problem, so the extractor inverted the
+    direction. The D-050 'do not invent' rule is too soft against
+    paraphrases that preserve vocabulary but flip polarity. See ADR-COVE-03.
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    # The prompt must name inversion/reversal explicitly so Haiku 4.5
+    # recognises the failure mode, not just 'do not invent'.
+    inversion_markers = ("invert", "reverse", "negate")
+    assert any(marker in lowered for marker in inversion_markers), (
+        "Refined prompt must explicitly forbid inversion / reversal / "
+        "negation of the coaching's stated direction (any of: invert, "
+        "reverse, negate). Without this clause the extractor paraphrases "
+        "'fast descent bad' into 'slow descent bad' and blocks "
+        "cove_verified=true (D-052 ADR-COVE-03)."
+    )
+
+    # 'Direction' should appear in the prompt body so the instruction
+    # lands against the specific failure shape (polarity flip of a stated
+    # principle), not just a generic 'do not change meaning'.
+    assert "direction" in lowered, (
+        "Refined prompt must reference the 'direction' of a principle so "
+        "the inversion-guard reads as a concrete rule, not a vague "
+        "semantic injunction (D-052)."
+    )
+
+
+def test_claim_extraction_prompt_prohibits_extrapolation() -> None:
+    """D-052: prompt must explicitly forbid extrapolating beyond the
+    principle stated in the coaching output.
+
+    Session 49 iteration 1 invented three principles the coaching never
+    stated: 'minimum of 60°', '60–100° reference range', and 'stretch-
+    shortening cycle disruption'. The first two are extrapolations of a
+    stated 45–75° optimal range — the extractor invented a 'minimum' at
+    the lower bound and an alternative 'reference range'. The D-050
+    'translate-not-invent' rule is soft against extrapolation because the
+    extractor isn't inventing from nothing, it's over-reading what's
+    there. The guard names 'minimum' / 'maximum' / 'reference range' as
+    disallowed extensions.
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    # 'Extrapolate' / 'extrapolation' is the canonical name for the
+    # failure mode. Accept either surface form so the phrasing isn't
+    # over-pinned.
+    assert "extrapolat" in lowered, (
+        "Refined prompt must explicitly forbid extrapolation "
+        "(matching root 'extrapolat', surfaces as extrapolate / "
+        "extrapolation). Without this clause the extractor turns a "
+        "stated optimal range into an invented minimum, maximum, or "
+        "alternative reference range (D-052 ADR-COVE-03)."
+    )
+
+    # The disallowed-extensions paragraph should name at least one of
+    # 'minimum' / 'maximum' / 'reference range' so the rule is concrete.
+    disallowed_extensions = ("minimum", "maximum", "reference range")
+    assert any(marker in lowered for marker in disallowed_extensions), (
+        "Refined prompt must name at least one disallowed extrapolation "
+        "surface (minimum / maximum / reference range). Without a named "
+        "example the extractor interprets an optimal range as license "
+        "to invent a minimum at the lower bound (D-052)."
+    )
+
+
+def test_claim_extraction_prompt_has_negative_worked_examples() -> None:
+    """D-052: prompt must include at least one negative worked example
+    labelled 'Do NOT extract' (or equivalent) so the model sees the
+    before/after shape of an inversion and/or extrapolation rejection,
+    not just rule text.
+
+    D-050 added 4 positive 'Extract:' worked examples. D-052 adds at
+    least one 'Do NOT extract:' counterpart per guard so the model has
+    concrete anchors for BOTH the inversion failure shape and the
+    extrapolation failure shape.
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    # At least one 'Do NOT extract' label in a worked-example block.
+    # Accept synonyms so the phrasing isn't over-pinned.
+    negative_example_markers = (
+        "do not extract:",
+        "do not extract ",  # trailing space — 'do not extract "..."' form
+    )
+    assert any(marker in lowered for marker in negative_example_markers), (
+        "Refined prompt must include at least one 'Do NOT extract:' "
+        "worked-example block so the model has a concrete before/after "
+        "anchor for an inversion or extrapolation rejection. Pure rule "
+        "text without negative examples is fragile (D-052)."
+    )
