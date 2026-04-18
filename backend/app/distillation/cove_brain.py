@@ -84,7 +84,10 @@ class BrainCoveService:
             question_out: _VerificationQuestion = (
                 await self._instructor_client.chat.completions.create(
                     model=_HAIKU_MODEL,
-                    max_tokens=256,
+                    # M-05: 512 gives instructor headroom on structured-output
+                    # retries if Haiku 4.5 emits a verbose question; Haiku 4.5
+                    # pricing makes the extra tokens negligible (~$0.0006/call).
+                    max_tokens=512,
                     response_model=_VerificationQuestion,
                     messages=[{"role": "user", "content": _build_question_prompt(claim)}],
                 )
@@ -92,7 +95,13 @@ class BrainCoveService:
             answer_out: _VerificationAnswerOut = (
                 await self._instructor_client.chat.completions.create(
                     model=_HAIKU_MODEL,
-                    max_tokens=512,
+                    # M-05: 2048 gives Haiku 4.5's reasoning string room to
+                    # cite source numbers + a one-sentence justification
+                    # without hitting instructor's structured-output retry
+                    # loop. Session-42 blew 11/11 candidates at max_tokens=512
+                    # because the Pydantic validation loop truncated the
+                    # reasoning JSON and instructor retried until failure.
+                    max_tokens=2048,
                     response_model=_VerificationAnswerOut,
                     messages=[
                         {
