@@ -559,3 +559,110 @@ async def test_cove_max_tokens_meets_headroom_revision_path() -> None:
         f"revision max_tokens {revision_kwargs['max_tokens']} < 3072 "
         "-- Sonnet needs room to regenerate a full CoachingOutput (D-048)."
     )
+
+
+# ---------------------------------------------------------------------------
+# D-050: claim extraction — principle-level only, skip measurements
+# ---------------------------------------------------------------------------
+
+
+def test_claim_extraction_prompt_emphasises_principle_level() -> None:
+    """D-050: prompt must explicitly instruct the extractor to pull
+    principle-level claims and SKIP lifter-specific measurement claims.
+
+    Session 48 prod E2E on bench analysis ``bfbed270`` observed 26
+    VerificationAnswers across 2 iterations. Every principle-claim
+    answered Yes with source citation; every measurement-claim answered
+    Uncertain ("no specific performance data for any lifter in the
+    retrieved evidence"). All-Yes convergence (``cove_verified=true``)
+    is structurally unreachable as long as measurement claims are
+    extracted. See ADR-COVE-02.
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    # Must use the words "principle" and "measurement" explicitly so
+    # the instruction lands unambiguously for Haiku 4.5.
+    assert "principle" in lowered, (
+        "Refined prompt must name the PRINCIPLE-level concept explicitly "
+        "(D-050 ADR-COVE-02)."
+    )
+    assert "measurement" in lowered, (
+        "Refined prompt must name the MEASUREMENT-level concept explicitly "
+        "(D-050 ADR-COVE-02)."
+    )
+
+    # Must instruct the extractor to skip / exclude measurement-level
+    # claims. Accept several synonyms so the phrasing isn't over-pinned.
+    skip_markers = ("skip", "do not extract", "exclude", "not extract")
+    assert any(marker in lowered for marker in skip_markers), (
+        "Refined prompt must explicitly instruct the extractor to skip "
+        "measurement-level claims (any of: skip / do not extract / exclude). "
+        "Without this, Haiku 4.5 defaults to extracting measurements and "
+        "blocks cove_verified=true (D-050)."
+    )
+
+
+def test_claim_extraction_prompt_includes_worked_examples() -> None:
+    """D-050: prompt must contain at least two worked examples so the
+    model has concrete anchors, not just abstract rules.
+
+    Pure rule-based instructions are fragile. Concrete examples match
+    the observed shape of session 48's coaching output (measurement-only,
+    measurement + principle pair, measurement-embedded principle, and
+    bare principle).
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    # "Coaching says" (or equivalent) signals a worked example.
+    example_markers = ("coaching says", "example", "e.g.")
+    marker_hits = sum(lowered.count(m) for m in example_markers)
+    assert marker_hits >= 2, (
+        f"Refined prompt must include at least 2 worked examples; "
+        f"found {marker_hits} (markers: 'coaching says', 'example', 'e.g.'). "
+        "See ADR-COVE-02 for the required example shape."
+    )
+
+    # "Extract:" and a skip/empty counterpart should appear at least once
+    # each to anchor both the positive and negative pattern.
+    assert lowered.count("extract:") >= 2, (
+        f"Refined prompt must contain at least 2 'Extract:' example labels; "
+        f"found {lowered.count('extract:')}. Without these labels the prompt "
+        "loses its positive-example anchors (D-050)."
+    )
+
+
+def test_claim_extraction_prompt_still_references_falsifiability() -> None:
+    """D-050 regression guard: the refined prompt must preserve the
+    existing falsifiability / testability framing so the extractor
+    stays grounded in evidence-based claims rather than drifting into
+    motivational or subjective extraction.
+    """
+    from app.services.cove import _build_claim_extraction_prompt
+
+    output = _make_coaching_output()
+    prompt = _build_claim_extraction_prompt(output)
+
+    lowered = prompt.lower()
+
+    falsifiability_markers = (
+        "falsifiable",
+        "testable",
+        "verifiable",
+        "peer-reviewed",
+        "research",
+    )
+    assert any(marker in lowered for marker in falsifiability_markers), (
+        "Refined prompt must preserve the falsifiability framing; otherwise "
+        "the extractor drifts into subjective or motivational claims "
+        "(regression guard, D-050)."
+    )

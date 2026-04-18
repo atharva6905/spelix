@@ -107,7 +107,17 @@ class CoveResult:
 
 
 def _build_claim_extraction_prompt(output: CoachingOutput) -> str:
-    """Build the Step 1 user prompt for claim extraction."""
+    """Build the Step 1 user prompt for claim extraction.
+
+    D-050 (ADR-COVE-02): instructs the extractor to pull principle-level
+    biomechanics claims and SKIP lifter-specific measurement values.
+    Research sources describe optimal ranges and targets; they cannot
+    confirm or refute one lifter's measured value, so measurement claims
+    always return Uncertain and block all-Yes convergence. Session 48 prod
+    E2E on bench analysis ``bfbed270`` demonstrated this: 26 answers
+    across 2 iterations, every principle-claim Yes with citation, every
+    measurement-claim Uncertain.
+    """
     text_to_analyse = "\n".join(
         [
             f"Summary: {output.summary}",
@@ -118,12 +128,45 @@ def _build_claim_extraction_prompt(output: CoachingOutput) -> str:
         ]
     )
     return (
-        "Extract all falsifiable factual claims from the following coaching "
-        "feedback. A falsifiable claim is a specific, testable assertion about "
-        "movement mechanics, technique, or biomechanics — not a general "
-        "observation or subjective comment. Return only claims that could in "
-        "principle be confirmed or refuted by peer-reviewed research.\n\n"
-        f"{text_to_analyse}"
+        "You are extracting falsifiable factual claims from AI-generated "
+        "barbell coaching feedback so they can be verified against "
+        "peer-reviewed biomechanics research.\n\n"
+        "Extract ONLY PRINCIPLE-LEVEL claims — statements about what is "
+        "biomechanically optimal, recommended, or correct for a barbell "
+        "lift in general. These describe the SCIENCE of the lift, not the "
+        "particular lifter's execution in the analysed session.\n\n"
+        "DO NOT extract MEASUREMENT-LEVEL claims — statements about what "
+        "THIS lifter's specific values were in the analysed session. "
+        "Research sources describe optimal ranges and targets; they "
+        "cannot confirm or refute a single lifter's measured value, so "
+        "measurement-level claims will always return Uncertain and block "
+        "verification convergence.\n\n"
+        "When the coaching cites a measured value AND the principle "
+        "behind it (e.g. 'your elbow was 38\u00b0, below the 45\u201375\u00b0 optimal'), "
+        "extract ONLY the principle ('Optimal bench press elbow angle is "
+        "45\u201375\u00b0 from torso') \u2014 never the measurement. If the coaching "
+        "cites a measurement without stating any principle, SKIP it; do "
+        "not invent a principle that was not written.\n\n"
+        "Worked examples:\n\n"
+        "Coaching says: 'Your eccentric phase duration measured 5.16 "
+        "seconds.'\n"
+        "Extract: nothing (measurement-only; no principle stated).\n\n"
+        "Coaching says: 'Your eccentric phase measured 5.16 seconds, "
+        "above the 2-second hypertrophy target.'\n"
+        "Extract: 'The recommended eccentric phase duration for "
+        "hypertrophy training is approximately 2 seconds.'\n\n"
+        "Coaching says: 'Elbow angle reached 38\u00b0 at the bottom, below "
+        "the optimal 45\u201375\u00b0 range.'\n"
+        "Extract: 'Optimal elbow angle at the bottom of the bench press "
+        "is 45\u201375\u00b0 from torso.'\n\n"
+        "Coaching says: 'A slight diagonal J-curve bar path optimizes "
+        "lever arm through the bench press.'\n"
+        "Extract: 'A slight diagonal J-curve bar path optimizes the "
+        "lever arm through the bench press.'\n\n"
+        "Return one claim per distinct principle. Do not duplicate the "
+        "same principle across issues. Return an empty list if no "
+        "principle-level claims are present.\n\n"
+        f"Coaching feedback to analyse:\n{text_to_analyse}"
     )
 
 
