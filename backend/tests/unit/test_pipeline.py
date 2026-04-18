@@ -1193,3 +1193,131 @@ class TestPipelineDurationGate:
         check = next(c for c in gate["checks"] if c["name"] == "duration")
         assert check["metric_value"] == 180.0
         assert check["threshold"] == 60.0
+
+
+# ---------------------------------------------------------------------------
+# D-041: Degenerate scoring short-circuit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_form_scores_set_to_none_when_rep_metrics_empty():
+    """
+    When detect_reps returns [] and therefore rep_metrics is [], all five
+    analysis.form_score_* columns must be set to None — NOT defaulted to
+    10.0 by scoring components on empty input (D-041).
+    """
+    landmarks = _make_landmarks()
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=[]),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=[]),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.0),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=None),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
+        patch("os.path.isfile", return_value=False),
+    ):
+        await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+        )
+
+    assert analysis.form_score_safety is None
+    assert analysis.form_score_technique is None
+    assert analysis.form_score_path_balance is None
+    assert analysis.form_score_control is None
+    assert analysis.form_score_overall is None
+
+
+@pytest.mark.asyncio
+async def test_form_scores_set_to_none_when_session_confidence_below_050():
+    """
+    When session confidence is below the Very-Low boundary (0.50), form
+    scores must be None — prevents the session 44 contradiction where
+    "Very Low confidence" banner rendered alongside Technique 10.0 (D-041).
+    """
+    landmarks = _make_landmarks()
+    angle_ts = _make_angle_timeseries()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+
+    analysis = _make_analysis()
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.35),  # Very Low
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=None),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch(f"{_PKG}.probe_duration_seconds", return_value=10.0),
+        patch("os.path.isfile", return_value=False),
+    ):
+        await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+        )
+
+    assert analysis.form_score_safety is None
+    assert analysis.form_score_technique is None
+    assert analysis.form_score_path_balance is None
+    assert analysis.form_score_control is None
+    assert analysis.form_score_overall is None
+
+
+# ---------------------------------------------------------------------------
+# D-041: Pure-function guard
+# ---------------------------------------------------------------------------
+
+
+def test_is_degenerate_scoring_input_empty_metrics():
+    from app.services.pipeline import _is_degenerate_scoring_input
+    assert _is_degenerate_scoring_input([], 0.9) is True
+
+
+def test_is_degenerate_scoring_input_very_low_confidence():
+    from app.services.pipeline import _is_degenerate_scoring_input
+    # Non-empty list content doesn't matter — the guard is list emptiness + threshold
+    assert _is_degenerate_scoring_input([object()], 0.49) is True
+
+
+def test_is_degenerate_scoring_input_boundary_050_not_degenerate():
+    """0.50 is the Low boundary — at-or-above Low is NOT degenerate."""
+    from app.services.pipeline import _is_degenerate_scoring_input
+    assert _is_degenerate_scoring_input([object()], 0.50) is False
+
+
+def test_is_degenerate_scoring_input_good_input():
+    from app.services.pipeline import _is_degenerate_scoring_input
+    assert _is_degenerate_scoring_input([object()], 0.85) is False

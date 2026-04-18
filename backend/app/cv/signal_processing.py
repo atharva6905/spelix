@@ -20,26 +20,28 @@ _COL_Y = 1
 
 # ---------------------------------------------------------------------------
 # Landmark index definitions
-# MediaPipe BlazePose (33 landmarks):
-#   LEFT side (primary for Phase 0 sagittal view):
-#     11 = left_shoulder,  12 = right_shoulder  (confusingly, "left" in
-#          MediaPipe means the subject's left, which appears on the RIGHT side
-#          of the image in a mirrored camera.  For the LEFT body side in a
-#          true sagittal view the convention varies.  The task spec uses
-#          "LEFT side landmarks (even indices: 12,14,16,24,26,28)" so we
-#          follow that exactly.)
 #
-#   RIGHT side (odd indices): 11,13,15,23,25,27
-#   LEFT  side (even in task spec): 12,14,16,24,26,28
+# MediaPipe BlazePose naming (subject-perspective, mirrored from the
+# camera's point of view):
+#   ODD indices  11/13/15/23/25/27 = subject's LEFT  (left_shoulder, etc.)
+#   EVEN indices 12/14/16/24/26/28 = subject's RIGHT (right_shoulder, etc.)
+#
+# The legacy Spelix task spec defined an "even indices" convention and
+# labelled those constants with a trailing `_L`. That `_L` is a spec
+# artefact, NOT a body-side indicator — the EVEN-indexed landmarks it
+# refers to are the subject's RIGHT side under MediaPipe's own naming.
+# Session 44 ADR-REPDET-01 investigation hit this confusion; we keep the
+# `_L` suffix for minimal diff risk but DO NOT assume it means "subject's
+# left".
 # ---------------------------------------------------------------------------
 
-# Squat / Deadlift — left side (as per task spec: even indices)
+# Squat / Deadlift — subject's RIGHT side (even indices per task spec).
 _SQUAT_SHOULDER_L = 12
 _SQUAT_HIP_L = 24
 _SQUAT_KNEE_L = 26
 _SQUAT_ANKLE_L = 28
 
-# Bench — left side (as per task spec: even indices)
+# Bench — subject's RIGHT side (even indices per task spec).
 _BENCH_SHOULDER_L = 12
 _BENCH_ELBOW_L = 14
 _BENCH_WRIST_L = 16

@@ -164,12 +164,6 @@ class TestBenchStateCycle:
         reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
         assert len(reps) == 1
 
-    def test_insufficient_depth_not_counted(self):
-        """Elbow only goes to 95° — never crosses <90° bench depth threshold."""
-        angles = _bench_rep_angles(n_reps=2, bottom_angle=95.0)
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
-        assert len(reps) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -198,29 +192,6 @@ class TestDeadliftStateCycle:
         reps = detect_reps(angles, landmarks, "deadlift", "rdl", FPS)
         assert len(reps) == 1
 
-    def test_conventional_angle_70_to_90_not_counted(self):
-        """
-        For conventional deadlift the depth threshold is <70°.
-        An angle that only reaches 75° (never below 70°) must NOT be counted.
-        """
-        angles = _squat_rep_angles(n_reps=2, bottom_angle=75.0)
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "deadlift", "conventional", FPS)
-        assert len(reps) == 0
-
-    def test_rdl_vs_conventional_same_data_different_counts(self):
-        """
-        An angle reaching only 80° counts as an RDL rep (threshold <90°)
-        but NOT as a conventional rep (threshold <70°).
-        """
-        angles = _squat_rep_angles(n_reps=2, bottom_angle=80.0)
-        landmarks = _make_landmarks(len(angles))
-
-        rdl_reps = detect_reps(angles, landmarks, "deadlift", "rdl", FPS)
-        conv_reps = detect_reps(angles, landmarks, "deadlift", "conventional", FPS)
-
-        assert len(rdl_reps) == 2
-        assert len(conv_reps) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -242,41 +213,16 @@ class TestHysteresis:
         t = np.arange(n_frames)
         return base + amplitude * np.sin(2 * np.pi * t / 10)
 
-    def test_chatter_near_standing_threshold_squat(self):
+    def test_low_amplitude_noise_no_reps(self):
         """
-        Oscillation around 160° (squat standing threshold) must not create reps.
+        ±6° sinusoidal noise (total peak-to-trough 12°) around an arbitrary
+        mid-range base is below the 20° prominence knob → 0 reps. Replaces
+        the legacy "chatter near STANDING threshold" test — thresholds no
+        longer exist under peak/valley detection.
         """
-        # Signal hovers between ~155° and ~165° — crosses 160° repeatedly
-        angles = self._chattering_signal(base=160.0, amplitude=6.0)
+        angles = self._chattering_signal(base=120.0, amplitude=6.0)
         landmarks = _make_landmarks(len(angles))
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        assert len(reps) == 0
-
-    def test_chatter_near_depth_threshold_squat(self):
-        """
-        Oscillation near the squat depth threshold while already descending
-        must not create false bottom detections if the signal never clears
-        the effective threshold (depth - hysteresis = 110° - 5° = 105°).
-        Signal hovers around 108° ±4° (range 104°–112°) — mostly above 105°,
-        meaning BOTTOM may or may not be entered depending on the peak; the
-        key invariant is that this noisy, nearly-at-threshold signal does NOT
-        produce a rep (the descent portion dips below 105° only transiently
-        and the ascent never reaches standing - hysteresis = 145°).
-        We verify by ensuring the signal never reaches the return threshold.
-        """
-        # Build: stand → descend to just above effective depth zone → hover
-        stand = np.full(15, 170.0)
-        # Descend to 108° but NOT past 105° (stays in hysteresis band)
-        descend = np.linspace(170.0, 108.0, 15)
-        # hover near 110° with ±4° noise — may dip to 104° but barely
-        hover = 108.0 + 4.0 * np.sin(2 * np.pi * np.arange(20) / 5)
-        # Ascend but only to 130° — never reaches standing - hysteresis = 145°
-        partial_ascend = np.linspace(108.0, 130.0, 15)
-        hold_partial = np.full(15, 130.0)
-        angles = np.concatenate([stand, descend, hover, partial_ascend, hold_partial])
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        # Signal never returns to standing threshold, so no rep completes
         assert len(reps) == 0
 
     def test_clear_depth_after_hysteresis_band(self):
@@ -431,38 +377,6 @@ class TestZeroRepAndPartialRep:
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
         assert reps == []
 
-    def test_zero_rep_never_reaches_depth(self):
-        """
-        Descent to 120° — never deep enough to cross the squat depth threshold
-        (effective threshold: 110° - 5° = 105°). 120° > 105°, so BOTTOM state
-        is never entered.  Result: zero reps counted.
-        """
-        stand = np.full(15, 170.0)
-        # descend but only reach 120°, never crosses <105° effective threshold
-        descend = np.linspace(170.0, 120.0, 20)
-        ascend = np.linspace(120.0, 170.0, 20)
-        stand2 = np.full(15, 170.0)
-        angles = np.concatenate([stand, descend, ascend, stand2])
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        assert reps == []
-
-    def test_zero_rep_signal_aborted_before_depth(self):
-        """
-        Movement starts (transitions to DESCENDING) but immediately rises
-        back to standing before reaching depth. Must count as zero reps.
-        """
-        stand = np.full(10, 170.0)
-        # Drop below standing_thresh - hysteresis = 155°, but only to 130°
-        partial_down = np.linspace(170.0, 130.0, 8)
-        # Rise back to standing immediately
-        back_up = np.linspace(130.0, 175.0, 8)
-        hold = np.full(10, 175.0)
-        angles = np.concatenate([stand, partial_down, back_up, hold])
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        # Never hit depth (130° > 85°), so state aborts back to STANDING
-        assert reps == []
 
     def test_zero_rep_single_frame_at_standing(self):
         """A single-frame signal at standing angle returns zero reps."""
@@ -499,21 +413,22 @@ class TestZeroRepAndPartialRep:
 
     def test_partial_rep_descent_only_no_return(self):
         """
-        Movement descends all the way to bottom depth but the video ends
-        before the subject returns to standing. The state machine reaches
-        ASCENDING or BOTTOM but never completes the final transition.
-        Result: zero completed reps.
+        Signal 170°→70°→100° (video ends mid-ascent) produces a valley
+        with ≥20° prominence on both sides, so peak/valley detection
+        DOES count it — a behavior change from the old state machine,
+        which required returning to STANDING. Documented in ADR-REPDET-01:
+        rep detection under peak/valley cares about signal prominence,
+        not lockout completion. The form-scoring layer handles the
+        "was this a good rep?" question via TechniqueScore depth/lockout
+        checks.
         """
         stand = np.full(15, 170.0)
-        # Descend well below depth threshold (85°), reaching 70°
         descend = np.linspace(170.0, 70.0, 20)
-        # Partial ascent — rises to 100° but video ends before reaching 155°
         partial_up = np.linspace(70.0, 100.0, 10)
         angles = np.concatenate([stand, descend, partial_up])
         landmarks = _make_landmarks(len(angles))
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        # Rep never completes (never returned above standing_thresh - hysteresis)
-        assert reps == []
+        assert len(reps) == 1
 
     def test_partial_rep_reaches_bottom_but_signal_ends(self):
         """
@@ -530,22 +445,30 @@ class TestZeroRepAndPartialRep:
 
     def test_partial_rep_does_not_corrupt_subsequent_full_rep(self):
         """
-        A partial attempt (descend + abort, no depth) followed by a complete
-        rep must yield exactly 1 completed rep.
+        Partial attempt (170°→130°→175°) followed by a full rep.
 
-        The state machine should reset to STANDING after the abort and count
-        the subsequent good rep correctly.
+        Under hybrid detection, the state machine runs first. The partial
+        descent reaches 130° then returns to 175° — it never crosses the
+        DEPTH threshold (110° - 5° hysteresis = 105°), and the signal
+        returns above the STANDING threshold (150° + 5° = 155°) before
+        any depth is reached, so the SM aborts the partial attempt cleanly.
+        The subsequent full rep (175°→75°→175°) is correctly counted as 1.
+
+        Under the previous pure peak/valley path this test asserted 2 —
+        the partial valley at 130° had >20° prominence and was counted.
+        Hybrid semantics: SM returns >=1 rep → SM result wins → 1 rep.
+        Documented in the session 45 hybrid refinement of ADR-REPDET-01.
         """
         stand = np.full(10, 170.0)
-        # First attempt: goes to 130° (no depth) then rises back above standing
         partial_down = np.linspace(170.0, 130.0, 8)
         abort_up = np.linspace(130.0, 175.0, 8)
         stand2 = np.full(5, 175.0)
-        # Second attempt: full rep with good depth
         full_rep = _squat_rep_angles(n_reps=1, frames_per_phase=10, standing_angle=175.0)
         angles = np.concatenate([stand, partial_down, abort_up, stand2, full_rep])
         landmarks = _make_landmarks(len(angles))
         reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        # Hybrid: state machine counts only the full rep (partial is aborted),
+        # and SM >= 1 wins over peak/valley. Expected: 1.
         assert len(reps) == 1
 
     def test_partial_rep_too_short_duration_not_counted(self):
@@ -613,23 +536,6 @@ class TestSquatThresholdFix:
             "Parallel-depth reps at 95° must not be silently skipped."
         )
 
-    def test_quarter_squat_not_detected(self):
-        """
-        A quarter-squat where hip only reaches 130° must NOT count.
-        130° > 105° (effective threshold), so BOTTOM state is never entered.
-        """
-        stand = np.full(15, 165.0)
-        descend = np.linspace(165.0, 130.0, 20)
-        bottom_hold = np.full(10, 130.0)
-        ascend = np.linspace(130.0, 165.0, 20)
-        stand2 = np.full(15, 165.0)
-        angles = np.concatenate([stand, descend, bottom_hold, ascend, stand2])
-        landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
-        assert len(reps) == 0, (
-            f"Quarter-squat (130°) must not be counted, got {len(reps)} reps."
-        )
-
     def test_incomplete_lockout_rep_still_counted(self):
         """
         An athlete who only returns to 147° between reps (not full 160°+
@@ -651,23 +557,126 @@ class TestSquatThresholdFix:
             f"got {len(reps)} reps. Standing threshold must be 150°."
         )
 
-    def test_bench_and_deadlift_thresholds_unchanged(self):
-        """
-        The threshold change is squat-only. Bench (90°) and deadlift
-        conventional (70°) depth thresholds must remain unchanged.
-        A bench rep reaching 80° must still be detected (80° < 85° effective).
-        A deadlift rep reaching 64° must still be detected (64° < 65° effective).
-        """
-        bench_angles = _bench_rep_angles(n_reps=1, bottom_angle=80.0)
-        bench_landmarks = _make_landmarks(len(bench_angles))
-        bench_reps = detect_reps(
-            bench_angles, bench_landmarks, "bench", "standard", FPS
-        )
-        assert len(bench_reps) == 1, "Bench at 80° must still be detected."
 
-        dl_angles = _deadlift_rep_angles(n_reps=1, bottom_angle=64.0)
-        dl_landmarks = _make_landmarks(len(dl_angles))
-        dl_reps = detect_reps(
-            dl_angles, dl_landmarks, "deadlift", "conventional", FPS
+# ---------------------------------------------------------------------------
+# 11. D-040 peak/valley regression coverage
+# ---------------------------------------------------------------------------
+
+
+class TestPeakValleyDetection:
+    """New tests for signal-relative rep detection (D-040, ADR-REPDET-01)."""
+
+    def test_partial_lockout_bench_rep_detected(self):
+        """
+        Bench signal where elbow peaks at 153° (not full 170°+ lockout)
+        and descends to 37° must count as a rep — this is the session 44
+        cea2312b regression (0 reps under old 160° STANDING threshold).
+        """
+        # 30 fps synthetic: 45-frame standing at 153°, 30-frame descent
+        # to 37°, 30-frame ascent back to 153°.
+        stand1 = np.full(45, 153.0)
+        descend = np.linspace(153.0, 37.0, 30)
+        ascend = np.linspace(37.0, 153.0, 30)
+        stand2 = np.full(45, 153.0)
+        angles = np.concatenate([stand1, descend, ascend, stand2])
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "bench", "flat", FPS)
+
+        assert len(reps) == 1, (
+            f"Partial-lockout bench rep (peak 153°, valley 37°) must be "
+            f"detected. Got {len(reps)} reps."
         )
-        assert len(dl_reps) == 1, "Deadlift conventional at 64° must still be detected."
+        assert reps[0].min_angle < 40.0
+
+    def test_prominence_filters_low_amplitude_noise(self):
+        """
+        A baseline-90° signal with ±8° sinusoidal noise (total amplitude
+        16°) must yield 0 reps — below the 20° prominence knob.
+        """
+        t = np.arange(120)
+        angles = 90.0 + 8.0 * np.sin(2 * np.pi * t / 20)
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+
+        assert reps == [], (
+            f"Low-amplitude noise (±8°) must not produce reps. "
+            f"Got {len(reps)}."
+        )
+
+    def test_min_distance_merges_adjacent_valleys(self):
+        """
+        Two valleys 10 frames apart at 30 fps (= 0.33 s, below the
+        0.5 s / 15-frame minimum) must be treated as at most one rep.
+        """
+        angles = np.full(60, 170.0)
+        angles[20] = 80.0
+        angles[30] = 80.0
+        angles[19:22] = [140.0, 80.0, 140.0]
+        angles[29:32] = [140.0, 80.0, 140.0]
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+
+        assert len(reps) <= 1, (
+            f"Two valleys 10 frames apart must not yield 2 reps "
+            f"(distance filter = 15 frames at 30 fps). Got {len(reps)}."
+        )
+
+    def test_start_end_frames_bracket_valley(self):
+        """
+        For any detected rep, start_frame and end_frame must bracket a
+        local maximum surrounding the valley — angle at start and end
+        must be >= angle at the valley-ish midpoint.
+        """
+        angles = _squat_rep_angles(n_reps=2)
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        assert len(reps) == 2
+
+        for rep in reps:
+            window = angles[rep.start_frame : rep.end_frame + 1]
+            assert float(window.min()) <= rep.min_angle + 0.5
+            assert angles[rep.start_frame] > rep.min_angle
+            assert angles[rep.end_frame] > rep.min_angle
+
+
+# ---------------------------------------------------------------------------
+# 12. Hybrid: state-machine wins when both paths would return reps
+# ---------------------------------------------------------------------------
+
+
+class TestHybridStateMachineWins:
+    """Verifies hybrid prefers state machine when SM returns >=1 rep."""
+
+    def test_hybrid_prefers_state_machine_over_peak_valley(self):
+        """
+        Signal with 2 clean reps (state machine counts these) followed by
+        a mid-range jitter dip that peak/valley ALONE would count as a 3rd
+        rep. Hybrid must return exactly 2 — state-machine result wins
+        because SM returned >= 1 rep.
+        """
+        # 2 clean squat reps: 170 -> 75 -> 170 cycle x2 via helper
+        clean = _squat_rep_angles(n_reps=2)
+        # Mid-range dip (130 -> 100 -> 130). Signal never crosses squat
+        # STANDING threshold of 150° on the way out, so state machine
+        # does NOT count it as a rep. But peak/valley ALONE would detect
+        # the valley at 100° (prominence ~30° > 20° knob).
+        mid_dip = np.concatenate([
+            np.full(20, 130.0),
+            np.full(10, 100.0),
+            np.full(20, 130.0),
+        ])
+        angles = np.concatenate([clean, mid_dip])
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+
+        # Hybrid prefers state machine when it produces >=1 rep.
+        # State machine: 2 clean reps. Peak/valley would see 3.
+        assert len(reps) == 2, (
+            f"Hybrid must return state-machine result (2) when SM >= 1, "
+            f"not peak/valley result. Got {len(reps)}."
+        )

@@ -162,6 +162,40 @@ async def download_video(
 
 
 # ---------------------------------------------------------------------------
+# D-041: Degenerate scoring-input guard
+# ---------------------------------------------------------------------------
+
+# Matches the "Very Low" boundary in app.cv.confidence.confidence_label —
+# below this the UI already tells the user scores are unreliable, so
+# returning numeric scores (which otherwise default to 10.0 on empty or
+# low-quality input) is a trust-violating contradiction.
+_DEGENERATE_CONFIDENCE_THRESHOLD = 0.50
+
+
+def _is_degenerate_scoring_input(
+    rep_metrics: list,
+    session_confidence: float,
+) -> bool:
+    """
+    Return True when the scoring pipeline has no useful signal.
+
+    Degenerate when:
+    - `rep_metrics` is empty (nothing to score), OR
+    - `session_confidence < 0.50` (per-rep Tier 5 aggregation below
+      the "Very Low" UI boundary — scores would be unreliable).
+
+    Callers set `analysis.form_score_*` to None and skip
+    `OverallFormScore.compute` entirely. Frontend FormScoreCards
+    already renders None as "Not available" (ResultsPage.tsx:191).
+    """
+    if not rep_metrics:
+        return True
+    if session_confidence < _DEGENERATE_CONFIDENCE_THRESHOLD:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -676,27 +710,39 @@ async def run_cv_pipeline(
 
     # ------------------------------------------------------------------ #
     # Step 9b: Form scoring (FR-SCOR-01–08) — needs bar_path from Step 9
+    #
+    # D-041: Short-circuit on degenerate input (no reps OR session
+    # confidence below the "Very Low" boundary). Writes None to all
+    # five form_score_* columns instead of letting scorers default to
+    # 10.0 on empty input. Frontend renders None as "Not available".
     # ------------------------------------------------------------------ #
-    from app.cv.scoring import OverallFormScore
+    if _is_degenerate_scoring_input(rep_metrics, session_confidence):
+        analysis.form_score_safety = None
+        analysis.form_score_technique = None
+        analysis.form_score_path_balance = None
+        analysis.form_score_control = None
+        analysis.form_score_overall = None
+    else:
+        from app.cv.scoring import OverallFormScore
 
-    with timer.stage("form_scoring"):
-        scorer = OverallFormScore()
-        # Aggregate per-rep metrics into a single dict (mean across reps)
-        agg_metrics = _aggregate_rep_metrics(rep_metrics, reps, session_confidence)
-        score_result = scorer.compute(agg_metrics, bar_path, cfg, exercise_type)
-    result.score_result = score_result
+        with timer.stage("form_scoring"):
+            scorer = OverallFormScore()
+            # Aggregate per-rep metrics into a single dict (mean across reps)
+            agg_metrics = _aggregate_rep_metrics(rep_metrics, reps, session_confidence)
+            score_result = scorer.compute(agg_metrics, bar_path, cfg, exercise_type)
+        result.score_result = score_result
 
-    # Write form scores to analysis row
-    safety_dim = score_result.get_dimension("safety")
-    technique_dim = score_result.get_dimension("technique")
-    path_dim = score_result.get_dimension("path_balance")
-    control_dim = score_result.get_dimension("control")
+        # Write form scores to analysis row
+        safety_dim = score_result.get_dimension("safety")
+        technique_dim = score_result.get_dimension("technique")
+        path_dim = score_result.get_dimension("path_balance")
+        control_dim = score_result.get_dimension("control")
 
-    analysis.form_score_safety = safety_dim.score if safety_dim else None
-    analysis.form_score_technique = technique_dim.score if technique_dim else None
-    analysis.form_score_path_balance = path_dim.score if path_dim else None
-    analysis.form_score_control = control_dim.score if control_dim else None
-    analysis.form_score_overall = score_result.overall
+        analysis.form_score_safety = safety_dim.score if safety_dim else None
+        analysis.form_score_technique = technique_dim.score if technique_dim else None
+        analysis.form_score_path_balance = path_dim.score if path_dim else None
+        analysis.form_score_control = control_dim.score if control_dim else None
+        analysis.form_score_overall = score_result.overall
     analysis.timing_json = timer.as_dict()
     await repo.update(analysis)
     await repo.db.commit()
