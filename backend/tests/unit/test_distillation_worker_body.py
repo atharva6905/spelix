@@ -273,7 +273,7 @@ async def test_build_distillation_ctx_returns_expected_keys() -> None:
         "db_session_maker",
     }
     assert ctx["cohere_client"] is fake_cohere
-    assert ctx["qdrant_client"] is fake_qdrant_wrapper._client
+    assert ctx["qdrant_client"] is fake_qdrant_wrapper
 
 
 @pytest.mark.asyncio
