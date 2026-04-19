@@ -33,6 +33,7 @@ from app.cv.barbell_detection import (
     compute_bar_path_from_landmarks,
     track_barbell_from_video,
 )
+from app.config import ThresholdConfig
 from app.cv.confidence import (
     compute_session_confidence,
 )
@@ -553,6 +554,10 @@ async def run_cv_pipeline(
     result.angle_timeseries = angle_timeseries
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
+    # Load threshold config once — used by rep_detection (Step 5),
+    # confidence scoring (Step 7), and downstream form scoring.
+    cfg = ThresholdConfig()
+
     # ------------------------------------------------------------------ #
     # Step 5: Rep detection (CPU-bound)
     # ------------------------------------------------------------------ #
@@ -573,6 +578,7 @@ async def run_cv_pipeline(
             exercise_type,
             exercise_variant,
             fps,
+            cfg,
         )
     result.reps = reps
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
@@ -599,10 +605,8 @@ async def run_cv_pipeline(
     # ------------------------------------------------------------------ #
     # Step 7: Tier 1–5 confidence scoring (FR-CVPL-20–25, replaces Phase 0)
     # ------------------------------------------------------------------ #
-    from app.config import ThresholdConfig
     from app.cv.confidence import compute_confidence_result
 
-    cfg = ThresholdConfig()
     with timer.stage("confidence_scoring"):
         confidence_results = []
         for rm in rep_metrics:
