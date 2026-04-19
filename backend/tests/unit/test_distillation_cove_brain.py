@@ -216,3 +216,60 @@ async def test_verify_claim_uses_adequate_max_tokens() -> None:
         "when max_tokens=512 (M-05)."
     )
     assert answer_kwargs["model"] == _HAIKU_MODEL
+
+
+@pytest.mark.asyncio
+async def test_verify_claim_instructor_validation_error_returns_safe_default() -> None:
+    """D-047: pre-M-05 failure-mode regression guard.
+
+    Session 42 observed 11/11 coach_brain_candidates rows persisted with
+    explanation='evaluation_failed: ValidationError' because instructor's
+    schema-validation retry loop ultimately raised ValidationError when
+    max_tokens was too low. M-05 fixed the root cause; this test guards
+    the downstream invariant: if instructor EVER raises ValidationError
+    (for any reason — not just truncation), the result must carry
+    explanation='evaluation_failed: ValidationError' with no embedded
+    exception text (H-2 secrets-leak invariant from PR #85 security
+    review).
+    """
+    from pydantic import ValidationError
+
+    from app.distillation.cove_brain import _VerificationAnswerOut
+
+    # Build a real ValidationError with at least one line item so
+    # str(exc) is non-empty. We don't embed the str(exc) in the
+    # explanation — that's the invariant this test enforces.
+    try:
+        _VerificationAnswerOut(answer="Maybe", reasoning="bad")  # type: ignore[arg-type]
+    except ValidationError as raised_exc:
+        validation_exc = raised_exc
+    else:
+        pytest.fail(
+            "setup: expected ValidationError on invalid 'Maybe' literal"
+        )
+
+    anthropic_client = MagicMock()
+    instructor_client = MagicMock()
+    instructor_client.chat.completions.create = AsyncMock(
+        side_effect=validation_exc
+    )
+    svc = BrainCoveService(
+        anthropic_client=anthropic_client, instructor_client=instructor_client
+    )
+    result = await svc.verify_claim(
+        claim="any claim",
+        contexts=[_stub_context("evidence text")],
+    )
+
+    assert result.verified is False
+    assert result.explanation == "evaluation_failed: ValidationError", (
+        f"explanation {result.explanation!r} must be exactly "
+        "'evaluation_failed: ValidationError' — no raw exception text "
+        "(H-2 secrets-leak invariant, PR #85 security review)."
+    )
+    # str(validation_exc) contains the line-item error text from Pydantic
+    # (which can include input values + URLs). Must NOT be embedded.
+    assert str(validation_exc) not in result.explanation
+    assert result.trace == [
+        {"claim": "any claim", "error_type": "ValidationError"}
+    ]

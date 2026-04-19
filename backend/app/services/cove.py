@@ -11,9 +11,9 @@ SaMD-triggering language in prompts or output strings.
 
 Models:
     Steps 1-3 (claim extraction, question generation, verification):
-        claude-haiku-4-5-20251001
+        ``HAIKU_MODEL`` (imported from ``app.constants``; D-046).
     Step 4 (revision):
-        claude-sonnet-4-6
+        ``SONNET_MODEL`` (defined below).
 
 Error handling:
     The verify() method never raises. All exceptions are caught and returned
@@ -30,6 +30,7 @@ import anthropic
 import instructor
 from pydantic import BaseModel
 
+from app.constants import HAIKU_MODEL
 from app.schemas.coaching import CoachingOutput
 from app.schemas.rag import RetrievedContext
 
@@ -39,7 +40,6 @@ logger = logging.getLogger(__name__)
 # Model constants
 # ---------------------------------------------------------------------------
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
 
 # ---------------------------------------------------------------------------

@@ -17,12 +17,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from app.constants import HAIKU_MODEL as _HAIKU_MODEL
 from app.distillation.state import BrainCoveResult
 from app.schemas.rag import RetrievedContext
 
 logger = logging.getLogger(__name__)
-
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 
 class _VerificationQuestion(BaseModel):

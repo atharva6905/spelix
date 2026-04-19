@@ -1,5 +1,6 @@
 """Unit tests for lifecycle_decision — embed + Qdrant cosine routing."""
 
+import logging
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -195,4 +196,96 @@ def _stub_coaching_output():
         ),
         raw_prompt_tokens=0,
         raw_completion_tokens=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_decision_logs_qdrant_4xx_at_error_level(caplog) -> None:
+    """D-054: Qdrant 401/403/404 must be logged at ERROR level (not WARNING).
+
+    A sustained auth drift (revoked API key) would otherwise be
+    operationally invisible at WARNING level. Ops dashboards that
+    page on ERROR-and-above miss it. The broad fallback → ADD stays
+    intact — distillation must not crash on transient errors —
+    but 4xx gets promoted so it surfaces.
+    """
+
+    class _Fake4xx(Exception):
+        """Duck-types the Qdrant UnexpectedResponse status_code attribute."""
+
+        status_code = 401
+
+    state = _state_with_candidates([_stub_candidate()])
+
+    q = MagicMock()
+    q.query_points = AsyncMock(side_effect=_Fake4xx("Unauthorized"))
+
+    with caplog.at_level(logging.WARNING, logger="app.distillation.lifecycle"):
+        update = await lifecycle_decision(
+            state,
+            cohere_client=_mock_cohere([0.0] * 1024),
+            qdrant_client=q,
+            brain_embedding_svc=_mock_brain_embedding([0.0] * 1024),
+        )
+
+    # Broad fallback is preserved — pipeline must not crash on auth errors.
+    assert len(update["decisions"]) == 1
+    assert update["decisions"][0].decision == "ADD"
+
+    # 4xx must be logged at ERROR so ops dashboards surface auth drift.
+    error_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.ERROR and "lifecycle_decision" in r.message
+    ]
+    assert error_records, (
+        "Expected at least one ERROR log containing 'lifecycle_decision' "
+        "for a Qdrant 4xx failure, but got none. "
+        f"All captured records: {[(r.levelname, r.message) for r in caplog.records]}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_decision_logs_transient_error_at_warning_level(caplog) -> None:
+    """D-054: non-4xx errors (ConnectionError, timeout, RuntimeError) stay at WARNING.
+
+    Keeps noise down for transient network flakes that don't need paging.
+    """
+    state = _state_with_candidates([_stub_candidate()])
+
+    q = MagicMock()
+    q.query_points = AsyncMock(side_effect=ConnectionError("connection refused"))
+
+    with caplog.at_level(logging.WARNING, logger="app.distillation.lifecycle"):
+        update = await lifecycle_decision(
+            state,
+            cohere_client=_mock_cohere([0.0] * 1024),
+            qdrant_client=q,
+            brain_embedding_svc=_mock_brain_embedding([0.0] * 1024),
+        )
+
+    # Broad fallback is preserved.
+    assert len(update["decisions"]) == 1
+    assert update["decisions"][0].decision == "ADD"
+
+    # Transient errors must log at WARNING, not ERROR.
+    warning_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.WARNING and "lifecycle_decision" in r.message
+    ]
+    assert warning_records, (
+        "Expected at least one WARNING log containing 'lifecycle_decision' "
+        "for a transient error, but got none. "
+        f"All captured records: {[(r.levelname, r.message) for r in caplog.records]}"
+    )
+
+    error_records = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.ERROR and "lifecycle_decision" in r.message
+    ]
+    assert not error_records, (
+        "Transient ConnectionError must NOT be logged at ERROR level, "
+        f"but found: {[(r.levelname, r.message) for r in error_records]}"
     )
