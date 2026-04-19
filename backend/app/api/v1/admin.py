@@ -28,6 +28,7 @@ from app.schemas.candidate_review import (
     PendingQueueStats,
     RejectRequest,
     RejectResponse,
+    SimilarEntriesResponse,
 )
 from app.schemas.coach_brain import (
     CoachBrainEntry as CoachBrainEntrySchema,
@@ -495,6 +496,8 @@ async def _get_review_service(
         candidate_repo=cand_repo,
         entry_repo=entry_repo,
         brain_embedding=brain_embedding,
+        cohere_client=cohere,
+        qdrant_client=qdrant,
     )
 
 
@@ -631,3 +634,34 @@ async def reject_coach_brain_candidate(
                 }
             },
         )
+
+
+@router.get(
+    "/coach-brain/candidates/{candidate_id}/similar",
+    response_model=SimilarEntriesResponse,
+)
+async def list_similar_entries_for_candidate(
+    candidate_id: UUID,
+    limit: int = Query(2, ge=1, le=5),
+    user: CurrentUser = Depends(get_admin_user),
+    service: CandidateReviewService = Depends(_get_review_service),
+) -> SimilarEntriesResponse:
+    """FR-ADMN-12 (D-037): top N existing approved entries nearest to this
+    pending candidate, so the reviewer can spot near-duplicates before promoting.
+    """
+    try:
+        items = await service.get_similar_entries(
+            candidate_id=candidate_id, limit=limit
+        )
+    except CandidateNotFound:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Candidate not found.",
+                    "detail": None,
+                }
+            },
+        )
+    return SimilarEntriesResponse(items=items)
