@@ -122,7 +122,7 @@ class TestCoachBrainEntry:
     def test_all_entry_type_values_accepted(self) -> None:
         from app.schemas.coach_brain import CoachBrainEntry
 
-        for et in ("cue", "correction", "principle", "drill"):
+        for et in ("cue", "correction", "principle", "drill", "compensation"):
             data = {**_make_valid_entry_dict(), "entry_type": et}
             entry = CoachBrainEntry(**data)
             assert entry.entry_type == et
@@ -261,7 +261,7 @@ class TestCoachBrainEntryCreate:
     def test_all_entry_types_accepted(self) -> None:
         from app.schemas.coach_brain import CoachBrainEntryCreate
 
-        for et in ("cue", "correction", "principle", "drill"):
+        for et in ("cue", "correction", "principle", "drill", "compensation"):
             create = CoachBrainEntryCreate(**{**self._valid_create_dict(), "entry_type": et})
             assert create.entry_type == et
 
