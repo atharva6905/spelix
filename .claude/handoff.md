@@ -1,67 +1,63 @@
-# Session 51 Handoff → Session 52: D-044 investigation closed out as deferred-post-L2 (PR #98)
+# Session 52 Handoff → Session 53: Priority 2 Maintenance Bundle shipped (PR #100)
 
-**Context refresh (session 51, 2026-04-19, L2 Sprint Day 13):** D-044 investigated and deferred. 4-commit PR (3 investigation scripts + ADR-REPDET-03 + backlog-deferral). No production code changed. Merged at `fbb7611`; deploy-to-production green. Revised root-cause interpretation captured in ADR-REPDET-03: the 13 detected motions on `atharva-bench.mov` correspond to 5 working reps + ~8 setup/re-grip/rack motions; detector is faithful, not broken. Re-scoped as new backlog row D-056 (post-L2: distinguish working-reps from non-working bar motions via velocity/dwell/ROM-consistency features). Parameter-tuning path and Tier-1 visibility-gating path both empirically rejected with data.
+**Context refresh (session 52, 2026-04-19, L2 Sprint Day 13):** Six-item Priority 2 maintenance bundle shipped as PR #100. Merged to `main` as `72aac69` via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 10 commits preserved. No user-facing changes. No migration. Net `+5 tests` (baseline 1705 → 1710 passed). No ADR — all items execute existing decisions. CI 6/6 green on initial push and on post-audit-fixup push; Deploy to Production green on `72aac69`; droplet containers `spelix-backend-1` + `spelix-worker-1` restarted 2min post-deploy and healthy.
 
 ## 1. Completed
 
-### PR #98 (`fbb7611`) — D-044 investigation closeout
+### PR #100 (`72aac69`) — Priority 2 maintenance bundle
 
-Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 4 commits preserved.
+Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` per `feedback_no_squash_merge.md`. Executed via subagent-driven development (superpowers skill); 8 task-implementer subagents + 2 review subagents + 2 main-agent in-line fixups.
 
-| Ref | What | Commit |
-|---|---|---|
-| L2-D044-INV-01 | `backend/scripts/oneoff/diagnose_rep_detection_d044.py` — per-fixture pose extract + raw/smoothed angle stats + SM-vs-PV split + matplotlib plot to `/tmp/d044-<stem>.png`. Operator-run. (Subagent: spelix-cv-engineer.) | `95be9ba` |
-| L2-D044-INV-02 | `backend/scripts/oneoff/sweep_rep_detection_d044.py` — 640-combo grid over `(savgol_window ∈ {7,11,15,21}, polyorder ∈ {2,3}, prominence ∈ {20,25,30,35,40}, min_rep_s ∈ {0.5,0.75,1.0,1.5})`. Writes `/tmp/d044-sweep.csv`. Operator-run. | `f402e97` |
-| L2-D044-INV-03 | `backend/scripts/oneoff/prototype_visibility_gate.py` — Tier-1 `sigmoid(visibility) * sigmoid(presence)` masking + linear-interp prototype at thresholds {0.25, 0.30, 0.35, 0.40}. Caches MediaPipe extraction per fixture. Operator-run. | `5b92e3e` |
-| L2-D044-INV-04 | ADR-REPDET-03 appended to `decisions.md` (findings, 7 rejected alternatives, consequences). `backlog.md` D-044 row flipped `open → deferred-post-L2`; new D-056 successor row added (post-L2 design work: velocity/dwell/ROM-consistency rep classifier). | `c3007bc` |
-| L2-D044-PR | PR #98 → CI 6/6 green (Backend Lint 36s, Backend Tests 1m51s, Frontend Lint 28s, Frontend Tests 1m26s, Secret Scanning 13s, Vercel pass) → merge → Deploy to Production green on `fbb7611` → worktree `../spelix-d044` removed → remote branch `fix/d044-bench-over-count` deleted. No prod E2E run (docs-only, no behavioural change). | `fbb7611` (merge) |
+| Ref | Item | SRS | Commit(s) |
+|---|---|---|---|
+| L2-P2-D055 | `testpaths = ["tests"]` in `backend/pyproject.toml`. Prevents accidental collection of `scripts/oneoff/` helpers. | — | `d5aa1e4` |
+| L2-P2-D046 | Hoist `HAIKU_MODEL` → new `backend/app/constants.py`. Private `_HAIKU_MODEL` aliases preserved in `distillation/cove_brain.py`, `distillation/extract.py`. `services/cove.py` imports `HAIKU_MODEL` directly. Grep-guard confirms ONLY `constants.py` holds the literal. | ADR-DISTILL-03 | `b763ff7` |
+| L2-P2-D047 | Additive regression test in `test_distillation_cove_brain.py`: constructs a real Pydantic `ValidationError` from `_VerificationAnswerOut(answer="Maybe")`, asserts H-2 invariant (`explanation == "evaluation_failed: ValidationError"` AND `str(exc) not in explanation`). | FR-BRAIN-14 | `81507b9` |
+| L2-P2-D049 | TDD pair. Test: stubs `instructor.create_partial` to yield two partial snapshots with dict-shaped `citations`, captures warnings via `warnings.catch_warnings(record=True)`, asserts zero Pydantic serializer warnings. Fix: `partial.model_dump_json(exclude_none=True, warnings=False)` at `coaching.py:588`. Note: Pydantic 2.12.5 emits as `UserWarning` (not a dedicated warning class). Test filter matches on `issubclass(w.category, UserWarning) and "PydanticSerializationUnexpectedValue" in str(w.message)`. | FR-AICP-01, FR-AICP-07 | `7a2645f` (test) + `533b78c` (fix) |
+| L2-P2-D051 | Regression test for `_run_cove_loop` else-branch revision. `max_iterations=1` + "No" answer → `iteration == max_iterations` → else-branch Sonnet call with `max_tokens >= 3072`. Asserts `result.iterations_run == 1`, `len(calls) == 4`, `response_model is CoachingOutput`. | FR-AICP-08, ADR-COVE-02 | `99daca1` |
+| L2-P2-D054 | TDD pair. Test: two tests — 4xx (duck-type `_Fake4xx(Exception)` with `status_code=401`) must log at ERROR; `ConnectionError` must stay at WARNING. Fix: new `_is_qdrant_4xx` helper (duck-types on `getattr(exc, "status_code", None)` + `_QDRANT_4XX_STATUS_CODES = frozenset({401, 403, 404, 429})`). Broad ADD-fallback preserved. | FR-BRAIN-17, ADR-DISTILL-07 | `e9ca620` (test) + `0750ab3` (fix) |
+| L2-P2-AUDIT-M-01 | Auditor MEDIUM follow-up: `cove.py` module docstring still hardcoded `"claude-haiku-4-5-20251001"`. Replaced with symbolic references to `HAIKU_MODEL` / `SONNET_MODEL`. `rg "claude-haiku-4-5-20251001" backend/app/` now returns ONLY `constants.py`. | — | `0197f6c` |
+| L2-P2-SEC-HIGH-1 | Security-reviewer HIGH follow-up: `logger.error("... (%s)", exc)` in `lifecycle.py` interpolated `UnexpectedResponse.__str__`, which embeds the response `content` body. On a 401 response, Qdrant Cloud may echo request context (headers/fragments) into log aggregators. Dropped `exc` interpolation; now logs only `status_code` + `type(exc).__name__`. Transient-path WARNING kept as-is (pre-existing behaviour, reviewer flagged as lower severity). | — | `b3b514b` |
 
-### Investigation data points captured in ADR-REPDET-03
+### Audits (pre-merge)
 
-- atharva-bench.mov baseline: SM=13, PV=21, hybrid=13. GT=5. 4 of 13 rep detections have invalid negative `min_angle` (Savgol polynomial overshoot below [0°, 180°]).
-- atharva-bench-nw-10s-720p.mp4: SM=0, PV=1, hybrid=1. GT=1. Clean signal (raw elbow [37.7, 153.0]).
-- atharva-squat.mov: SM-path 5, hybrid=5. GT=5. (Earlier "squat=12" was my diagnostic-script bug — hardcoded elbow angle instead of hip.)
-- atharva-deadlift.mov: SM=0 (elbow stays above 160° standing threshold — expected for deadlift where arms don't flex), PV=4 via elbow-angle-computed-on-deadlift (wrong angle but shows stable signal). Sweep script used correct hip angle → hybrid=5 ✓.
-- Sweep result: 0/640 combos land 5/1/5/5 exactly. 0/640 get bench ≤ 7 with squat=5 AND deadlift=5 exactly.
-- Visibility prototype: Tier-1 confidence on bench.mov ranges 0.25–0.49 (mean 0.37). Low-angle frames mean 0.258 vs mid-range 0.373 — weak correlation. Thresholds 0.30/0.35 leave bench at 13; 0.40 drops bench to 8 but regresses squat to 4.
+- `spelix-auditor` → **PASS** (0 CRITICAL / 0 HIGH). 3 MEDIUM reported; only M-01 was valid (addressed in `0197f6c`). M-02 ("D-047 test missing") and M-03 ("D-051 missing `iterations_run` assertion") were **false positives** — auditor read truncated views of the test files. Verified by grep: D-047 test `test_verify_claim_instructor_validation_error_returns_safe_default` is at `test_distillation_cove_brain.py:222`; D-051 test `iterations_run == 1` assertion is at `test_cove.py:623`.
+- `spelix-security-reviewer` → **PASS_WITH_FINDINGS** (0 CRITICAL, 1 HIGH). HIGH addressed in `b3b514b`. Also verified: (a) `warnings=False` appears at exactly one live call-site (coaching.py:597); no scope creep; (b) DB-persistence path (`analysis_worker.py:591,784`) uses `.model_dump()` without `warnings=` kwarg — warning suppression is isolated to streaming partials; (c) `constants.py` contains no secrets; (d) no auth/RLS/JWT touch; (e) no SaMD/FTC forbidden terms in new strings.
 
-### Plan file on main
+### Smoke (post-deploy)
 
-`docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md` — the investigation plan written earlier today. UNCOMMITTED on main (plan was superseded by ADR-REPDET-03 as the canonical record). Untracked; safe to delete or leave — harmless either way. Not committed to keep the PR history clean.
+Minimum-viable smoke per the plan's scope clause:
+- `curl https://spelix.app/` → 307 (auth redirect, expected).
+- `ssh spelix-droplet "docker ps ..."` → `spelix-backend-1` + `spelix-worker-1` up 2 min, healthy. Restart timing aligns with deploy timestamp (`09:22:52Z` CI → `09:26:42Z` worker start).
+- `docker logs spelix-worker-1 --since 10m | grep -c PydanticSerializationUnexpectedValue` → 0. Worker restarted 2min ago so this is a cold-log baseline — the D-049 behavioural validation will fire the moment real coaching traffic runs. Unit test `test_generate_coaching_streaming_emits_no_pydantic_serializer_warnings` is the strong guarantee; live count will confirm.
+- No ERROR-level `lifecycle_decision` entries post-deploy (distillation fires only when `eval_scores.overall >= 0.6`; absence of entries is expected on zero-traffic windows).
+
+### Test counts after this session
+
+- Backend: **1710 passed, 25 skipped** (up from 1705 baseline at session 52 start). `+5` new tests: D-047, D-049, D-051 (×1), D-054 (×2).
+- Frontend: unchanged (this PR is backend-only).
+- Known pre-existing wall-clock flake: `tests/unit/test_barbell_detection.py::TestTrackBarbellStageBudget::test_stage_wall_time_under_30s_on_720p` — fails intermittently on this dev machine at ~33-37s vs 30s budget. Confirmed machine-speed-dependent; passes in isolation on faster runs. Pre-existing, not in scope for this session.
 
 ## 2. Remaining
 
-### Session 52 Priority 1 — non-code blockers (unchanged, critical path for L2)
+### Session 53 Priority 1 — non-code blockers (unchanged, critical path for L2 with **~14 days remaining to 2026-05-03**)
 
 | ID | Title | Status |
 |---|---|---|
-| — | Kin expert onboarding call (pending since session 30) — target 10+ papers by 2026-05-03 | open, blocks expert corpus push, **13 days to L2 deadline** |
+| — | Kin expert onboarding call (pending since session 30) — target 10+ papers by 2026-05-03 | open, blocks expert corpus push |
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
 | — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 52 Priority 2 — D-### maintenance bundle (all S, zero-risk, ~2h single PR)
-
-Replaces old Session 50/51 P2 scope (D-052 ✅ + D-053 ✅ already shipped). Six items below could land as one bundled PR.
-
-| ID | Title | Size | Deps | Source |
-|---|---|---|---|---|
-| D-046 | Hoist `_HAIKU_MODEL = "claude-haiku-4-5-20251001"` into shared constant (currently duplicated in `app/distillation/cove_brain.py` + `extract.py`; `app/services/cove.py` has its own) | S | — | auditor M-03 on PR #85 |
-| D-047 | Additive coverage test in `test_distillation_cove_brain.py` for pre-fix M-05 failure mode via stubbed `ValidationError` → `BrainCoveResult.explanation == "evaluation_failed: ValidationError"` | S | — | code-reviewer on PR #85 |
-| D-049 | `Citation` Pydantic serializer warning spam in worker logs on every coaching call with citations. Non-functional. | S | — | sessions 46 + 48 + 49 + 50 worker logs |
-| D-051 | Additive regression test for `_run_cove_loop` else-branch (`iteration == max_iterations`) via `max_iterations=1` + "No" answer. Structural coverage of `cove.py:389`. | S | — | auditor M-02 on PR #88 |
-| D-054 | Narrow the `except Exception` catch in `lifecycle_decision` to emit `logger.error` for Qdrant 4xx auth failures (sustained 401/403 currently invisible at WARNING-only severity). Keep broad fallback intact. | S | — | security-reviewer on PR #94 |
-| D-055 | Add `testpaths = ["tests"]` under `[tool.pytest.ini_options]` in `backend/pyproject.toml` so `scripts/oneoff/` smoke/diagnostic scripts can't be accidentally collected. | S | — | auditor M-01 on PR #92 |
-
-### Session 52 Priority 3 — PR #84 D-### follow-ups (D-044 closed via deferral this session)
+### Session 53 Priority 2 — PR #84 D-### follow-ups (promoted from session 52 Priority 3)
 
 | ID | Title | Size | Deps | Status |
 |---|---|---|---|---|
 | D-042 | Wire `_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` through `ThresholdConfig` (FR-SCOR-11) | S | — | open |
 | D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` must return 0 reps | S | — | open |
 | D-044 | `atharva-bench.mov` 13-rep over-count investigation | M | — | **deferred-post-L2** (session 51, ADR-REPDET-03) |
-| D-056 | **Post-L2 successor to D-044** — distinguish working reps from non-working bar motions (velocity/dwell-time/ROM-consistency features, possibly ML classifier) | L | — | open-post-L2 |
+| D-056 | Post-L2 successor to D-044 — distinguish working reps from non-working bar motions (velocity/dwell-time/ROM-consistency features, possibly ML classifier) | L | — | open-post-L2 |
 
-### Session 52 Priority 4 — P3-007 D-### bundle (carry-over unchanged)
+### Session 53 Priority 3 — P3-007 D-### bundle (carry-over unchanged)
 
 | ID | Title | Size |
 |---|---|---|
@@ -78,99 +74,51 @@ Replaces old Session 50/51 P2 scope (D-052 ✅ + D-053 ✅ already shipped). Six
 | D-037 | Surface top-2 similar existing approved entries on P3-006 review card | open |
 | D-038 | Add `compensation` to `coach_brain_candidates.entry_type` CHECK constraint | open |
 | D-039 | Re-run CoVe after admin content edit on approve | partially addressed by D-048/D-050/D-052 |
-| P3-008 | FR-BRAIN-08 auto-triage — blocks on ≥50 human-reviewed candidates | deferred post-L2 |
-| D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` | LOW |
-| D-030 | Orphan `rag_documents` cleanup cron | LOW |
-| D-031 | Admin `GET /rag/documents` Literal constraint | LOW |
-| D-036 | GPU offload for pose extraction | post-beta |
-| M-06 | Phase 4 `overall` population → audit faithfulness fallback sites | Phase 4 |
 
-## 3. Test counts
+## 3. Natural-traffic observability validation (follow-up for session 53 or next admin run)
 
-**Backend** (post-merge local; no production code changed this session):
-- **1704 passed, 27 skipped, 0 failed** (unchanged from post-D-053 baseline session 50).
-- `uv run ruff check .` — clean.
-- `uv run pyright app/` — 0 errors, 0 warnings, 0 informations.
-- **No new tests.** Investigation scripts are operator-run; no CI collection.
-- **Known failures:** none.
-
-**Frontend:**
-- `npx tsc --noEmit` — 0 errors (unchanged).
-- vitest — passed on PR head in 1m26s (unchanged).
-- **Known failures:** none.
-
-**CI on PR #98:**
-- `c3007bc` (PR head): 6/6 gates pass.
-- Merge commit `fbb7611` Deploy to Production green.
-
-## 4. E2E verification
-
-**SKIPPED — docs-only session.** No user-facing feature merged; no prod behavioural change. `rep_detection.py`, `signal_processing.py`, API endpoints, frontend components all untouched.
-
-## 5. Blockers
-
-**Code-side:** none — PR #98 shipped, deployed, verified via CI.
-
-### Non-code blockers (carry-over, unchanged)
-
-- **Kin expert onboarding call** still pending since session 30. **13 days to 2026-05-03 L2 deadline.** Each day of slip compounds against landing readiness.
-
-### Worktree / branch state
-
-- `fix/d044-bench-over-count` branch: merged (`fbb7611`), remote branch deleted, worktree `../spelix-d044` removed.
-- Untracked `docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md` on main — superseded by ADR-REPDET-03; can be deleted or left. Harmless either way.
-- Pre-existing `M frontend/src/api/__tests__/beta.test.ts` modification carried from session 47 is still in the working tree (unrelated, noted since session 47).
-
-## 6. Key learnings captured in this session
-
-1. **The systematic-debugging "Iron Law" saved time.** Plan wrote 4 hypotheses (A prominence, B distance, C fallback trigger, D savgol) BEFORE running any code. First diagnostic on atharva-bench.mov immediately invalidated A/B/C (peak/valley fallback didn't fire — SM produced 13). Then the sweep invalidated D at scale (0/640 combos hit target). Then the visibility-gate prototype invalidated a new Hypothesis F. Total investigation time: ~3 hours of MediaPipe wall time. Total wasted code changes: 0. Compare to "guess-and-check" mode where each hypothesis failure would have required its own PR/revert cycle.
-
-2. **Plan-written-before-evidence-gathered has limits.** The 4 hypotheses in the plan were plausible but all wrong — the real root cause was not in the plan at all. Lesson: when writing investigation plans, the hypothesis section is scaffolding, not prediction. The plan's value is structuring the evidence-gathering pipeline; the actual hypothesis picks only after diagnostics run.
-
-3. **Parameter sweeps are cheap compared to serial hypothesis testing.** 640 combos in one script run vs. 4-10 separate PR cycles. Even at 30 min MediaPipe-extraction-per-fixture cost, the sweep paid off by exhaustively proving NO parameter combo works. Without it, we would likely have shipped `w=11` (13→12) as a "partial fix" and called D-044 done.
-
-4. **Deferred is a valid outcome.** The right framing is not "we failed to fix D-044" but "we re-scoped the problem from 1-hour parameter tweak to a design-level classifier (D-056)". ADR-REPDET-03 captures the 7 rejected alternatives so post-L2 reviewer does not retread any of them.
-
-5. **Tier-1 visibility scores on real video are much lower than CLAUDE.md's UI-label bands imply.** `sigmoid(visibility) × sigmoid(presence)` on atharva-bench.mov ranges 0.25–0.49. The CLAUDE.md thresholds (≥0.80 High, 0.65–0.79 Moderate, 0.50–0.64 Low, <0.50 Very Low) imply real videos should produce mostly High/Moderate confidence. They don't — real videos land uniformly in "Very Low" territory. Either the formula is wrong (maybe visibility/presence are already post-sigmoid in current MediaPipe versions?) or the UI labels need recalibration. Filed as observation in ADR-REPDET-03; not investigated further. **This is worth a look in the post-L2 confidence-calibration pass.**
-
-## 7. Next session start
+Post-deploy smoke in session 52 was minimum-viable because the worker had just restarted (no traffic to measure against). A full D-049 + D-054 observational validation requires ONE real coaching run after deploy:
 
 ```bash
-/status
+# After any real coaching run completes on prod:
+ssh spelix-droplet "docker logs spelix-worker-1 --since 1h 2>&1 | grep -c PydanticSerializationUnexpectedValue"
+# Expected: 0. Pre-fix: 20-40 per analysis.
 
-# PRIORITY 1 — Non-code blockers (unchanged — critical path for L2 launch)
-#   - Kin expert onboarding call (target: 10+ papers by 2026-05-03, 13 days left)
-#   - Expert corpus push: first 10 papers via expert portal
-#   - Landing page V1 prod verification
-
-# PRIORITY 2 — D-### maintenance bundle (all S, zero-risk, ~2h bundled PR)
-#   - D-046 hoist _HAIKU_MODEL to shared constant
-#   - D-047 additive ValidationError regression test for BrainCoveService
-#   - D-049 Citation serializer warning cleanup (still visible in prod worker logs)
-#   - D-051 additive test for cove.py `else` branch Step 4 revision
-#   - D-054 narrow lifecycle_decision except-catch: logger.error for Qdrant 4xx auth
-#   - D-055 add testpaths = ["tests"] to backend/pyproject.toml
-
-# PRIORITY 3 — PR #84 D-### follow-ups (D-044 closed via deferral session 51)
-#   - D-042 wire rep-detection knobs through ThresholdConfig (FR-SCOR-11)
-#   - D-043 partial-descent <20° prominence test
-#   - D-056 post-L2 design work: working-rep-vs-non-working-motion classifier
-
-# PRIORITY 4 — P3-007 D-### bundle (unchanged)
-
-# ENVIRONMENT NOTES:
-#   - Local main = fbb7611 (PR #98 merge — D-044 investigation closeout).
-#     Prior: 701dc77 (PR #96 D-054/D-055 backlog rows), 5f06ae3 (PR #95 D-053 docs),
-#     88fb0ae (PR #94 D-053 code).
-#   - No env flag changes in session 51.
-#   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42 (unchanged).
-#   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32 (unchanged).
-#   - Test admin account: atharva6905+admin-p3006@gmail.com /
-#     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Owns 9 analyses (unchanged from session 50 — no new analyses ingested session 51).
-#   - Qdrant coach_brain: 26 points (24 seeds + 2 from pre-D-053 distillation) (unchanged).
-#   - Droplet deploy dir is /home/deploy/spelix (NOT /srv/spelix).
-#   - Backend test baseline: 1704 passed, 27 skipped, 0 failed (unchanged).
-#   - Untracked on main: docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md
-#     (investigation plan, superseded by ADR-REPDET-03 — delete or keep, both safe).
+# And no spurious ERROR lifecycle_decision entries:
+ssh spelix-droplet "docker logs spelix-worker-1 --since 1h 2>&1 | grep -E 'ERROR.*lifecycle_decision'"
+# Expected: empty. Any ERROR here = investigate Qdrant auth drift.
 ```
+
+Either wait for natural traffic or drive an upload via Playwright MCP through the admin test account (`atharva6905+admin-p3006@gmail.com`).
+
+## 4. Session 53 start — first moves
+
+1. `/status` to load env state.
+2. Read this handoff.
+3. Run the natural-traffic observability check above (quick one-liner).
+4. Pick Priority 1 blocker or Priority 2 D-042 + D-043 bundle (both S-sized, could ship together). No Priority 1 code work this session unless the expert call lands.
+
+## 5. Files modified this session
+
+- `backend/app/constants.py` (NEW, 17 lines)
+- `backend/app/distillation/cove_brain.py` (import swap)
+- `backend/app/distillation/extract.py` (import swap)
+- `backend/app/distillation/lifecycle.py` (+43 lines: `_is_qdrant_4xx` helper + branched except + security-HIGH redaction)
+- `backend/app/services/coaching.py` (+10 lines: `warnings=False` + D-049 comment)
+- `backend/app/services/cove.py` (+2 lines: import + docstring-M-01 fix; -1 line: local `HAIKU_MODEL` literal)
+- `backend/pyproject.toml` (+5 lines: `testpaths = ["tests"]`)
+- `backend/tests/unit/test_coaching_streaming.py` (NEW, ~100 lines)
+- `backend/tests/unit/test_cove.py` (+81 lines: D-051 else-branch test)
+- `backend/tests/unit/test_distillation_cove_brain.py` (+57 lines: D-047 test)
+- `backend/tests/unit/test_distillation_lifecycle.py` (+93 lines: 2 D-054 tests)
+- `backlog.md` (6 rows flipped + new Completed Day-13 section)
+- `.claude/handoff.md` (this file)
+
+Plan file (not committed, scratch): `docs/superpowers/plans/2026-04-19-priority2-maintenance-bundle-d046-d047-d049-d051-d054-d055.md`.
+
+## 6. Process notes for future sessions
+
+- **Subagent-driven development worked well for S-sized bundles.** 15 tasks, 8 implementer subagents, 2 reviewer subagents, 2 main-agent in-line fixups for audit findings. Sequential (one at a time) because commits share a branch. Main agent kept a clean context (1 plan file + 1 handoff load) while subagents churned the actual edits.
+- **Auditor reliability caveat**: session 52's `spelix-auditor` run reported 3 MEDIUM findings — only 1 was valid (the docstring). The other 2 were based on truncated file reads. When an auditor claims a test is "missing", always verify with `grep -n "def test_<name>"` before spending cycles. Don't fix false-positive findings on the strength of the auditor's word alone.
+- **Security-reviewer needs a prominently-listed FR-ID** in the prompt — the agent has a hard-stop that refuses work without one. Re-dispatching with an explicit `SRS Requirement IDs in scope for this review:` header at the top was required.
+- **Pydantic warning class caveat**: on Pydantic 2.12.5, the serializer warning is emitted as plain `UserWarning` (not a dedicated `PydanticSerializationUnexpectedValueWarning` class). Test filters should match on `issubclass(w.category, UserWarning) and "PydanticSerializationUnexpectedValue" in str(w.message)` rather than importing a named warning class.
