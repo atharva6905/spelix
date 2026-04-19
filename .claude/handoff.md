@@ -92,15 +92,18 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
 | — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 50 Priority 2 — D-### follow-up bundle (candidate)
+### Session 51 Priority 2 — D-### maintenance bundle (candidate)
+
+All six items below are Size S, zero-risk (no migrations, no prod verification needed). Could land as one bundled PR in ~2h of work. Replaces the old Session 50 Priority 2 bundle (D-052 ✅ and D-053 ✅ both shipped end of session 50).
 
 | ID | Title | Size | Source |
 |---|---|---|---|
-| D-053 | **Distillation lifecycle_decision `AsyncQdrantClient.search` API drift**. Silent fallback to `ADD` over-admits duplicates. Migrate to `query_points`. Visible every distillation run in worker logs. | M | session 49 worker log |
 | D-046 | Hoist `_HAIKU_MODEL` to shared `app/constants.py`. | S | auditor M-03 on PR #85 |
 | D-047 | Additive test in `test_distillation_cove_brain.py` for pre-fix M-05 failure mode via stubbed `ValidationError`. | S | code-reviewer on PR #85 |
-| D-049 | `Citation` Pydantic serializer warning spam in worker logs on every coaching call (confirmed still present in session 49 worker log). Non-functional. | S | sessions 46 + 48 + 49 worker logs |
+| D-049 | `Citation` Pydantic serializer warning spam in worker logs on every coaching call (still present on session 50 runs). Non-functional. | S | sessions 46 + 48 + 49 + 50 worker logs |
 | D-051 | Additive regression test for `_run_cove_loop` else-branch (`iteration == max_iterations`) via `max_iterations=1` + "No" answer. The `if` branch is covered; the structurally-identical `else` branch at `cove.py:389` is not. | S | auditor M-02 on PR #88 |
+| D-054 | Narrow the `except Exception` catch in `lifecycle_decision` to emit `logger.error` for Qdrant 4xx auth failures (sustained 401/403 currently invisible at WARNING-only severity). Non-blocking, keep broad fallback intact. | S | security-reviewer on PR #94 |
+| D-055 | Add `testpaths = ["tests"]` under `[tool.pytest.ini_options]` in `backend/pyproject.toml` so `scripts/oneoff/` smoke scripts can't be accidentally collected. | S | auditor M-01 on PR #92 |
 
 ### Session 50 Priority 3 — PR #84 D-### follow-ups (carry-over unchanged)
 
@@ -193,19 +196,20 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 ```bash
 /status
 
-# PRIORITY 1 — Non-code blockers
+# PRIORITY 1 — Non-code blockers (unchanged — critical path for L2 launch)
 #   - Kin expert onboarding call (target: 10+ papers by 2026-05-03, 14 days left)
 #   - Expert corpus push: first 10 papers via expert portal
 #   - Landing page V1 prod verification
 
-# PRIORITY 2 — D-### follow-up bundle (candidate)
-#   - D-052 tighten D-050 prompt with inversion-guard — new highest-impact bug,
-#     surfaced by D-050 working correctly on principle-shape
-#   - D-053 fix distillation AsyncQdrantClient.search API drift (silent ADD fallback)
+# PRIORITY 2 — D-### maintenance bundle (all S, zero-risk)
+#   Session 50 shipped D-052 ✅ (PR #92) and D-053 ✅ (PR #94) — highest-impact items done.
+#   Remaining candidates below could land as one bundled PR in ~2h:
 #   - D-046 hoist _HAIKU_MODEL to shared constant
 #   - D-047 additive ValidationError regression test for BrainCoveService
-#   - D-049 Citation serializer warning cleanup (still visible in session 49 worker logs)
+#   - D-049 Citation serializer warning cleanup (still visible in session 50 worker logs)
 #   - D-051 additive test for cove.py `else` branch Step 4 revision
+#   - D-054 narrow lifecycle_decision except-catch: logger.error for Qdrant 4xx auth (NEW)
+#   - D-055 add testpaths = ["tests"] to backend/pyproject.toml (NEW)
 
 # PRIORITY 3 — PR #84 D-### follow-ups (unchanged)
 #   - D-042 wire rep-detection knobs through ThresholdConfig
@@ -215,15 +219,23 @@ The refined prompt's `"do not invent a principle that was not written"` rule is 
 # PRIORITY 4 — P3-007 D-### bundle (unchanged)
 
 # ENVIRONMENT NOTES:
-#   - Local main = 6c41953 (PR #90 merge) — will advance after session 49 docs commit
-#   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42
-#   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32
+#   - Local main = 701dc77 (PR #96 merge — D-054/D-055 backlog rows filed).
+#     Prior: 5f06ae3 (PR #95 D-053 docs), 88fb0ae (PR #94 D-053 code),
+#     8740388 (PR #92 D-052 code), 09eaa95 (PR #93 D-052 docs).
+#   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42 — now routing correctly
+#     post-D-053 (no longer silent ADD fallback).
+#   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32.
 #   - Test admin account: atharva6905+admin-p3006@gmail.com /
 #     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Now owns 7 analyses — the newest is session 49 c46023c9 (bench,
-#     post-D-050 verification with faithfulness=0.82 + principle-only claims).
-#   - Qdrant coach_brain: 26 points (24 seeds + 2 from earlier distillation runs).
+#     Now owns 9 analyses. Two most relevant session-50 runs:
+#       * 43f25db8 (bench, post-D-052) — cove_verified=true, faithfulness=0.88
+#       * 0e5d755b (bench, post-D-053) — first real FR-BRAIN-17 routing:
+#         2 UPDATE + 3 ADD candidates with non-zero nearest_cosine_sim.
+#   - Qdrant coach_brain: still 26 points (24 seeds + 2 from pre-D-053 runs). Session-50
+#     post-D-053 candidates landed in coach_brain_candidates (pending review), not
+#     coach_brain_entries — separation is load-bearing per ADR-DISTILL-01.
 #   - Droplet deploy dir is /home/deploy/spelix (NOT /srv/spelix).
+#   - Backend test baseline: 1703 passed, 27 skipped, 0 failed (post-D-053).
 ```
 
 ## E2E Findings — D-052 verification (session 50)
