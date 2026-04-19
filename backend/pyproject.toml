@@ -40,6 +40,11 @@ dependencies = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# D-055: make the collection boundary explicit so smoke scripts under
+# `scripts/oneoff/` that inadvertently define `test_*` helpers are not
+# silently picked up. Pre-existing hygiene gap from spelix-auditor M-01
+# on PR #92.
+testpaths = ["tests"]
 markers = [
     "integration: marks tests that require a live database (deselect with '-m not integration')",
     "slow: marks tests that run on real video fixtures (deselect with '-m not slow')",
