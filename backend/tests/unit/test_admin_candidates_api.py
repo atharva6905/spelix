@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.admin import router
-from app.schemas.candidate_review import ApproveResponse, RejectResponse
+from app.schemas.candidate_review import ApproveResponse, RejectResponse, SimilarEntry
 from app.schemas.coach_brain_candidate import CoachBrainCandidate
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
@@ -291,7 +291,6 @@ class TestRejectCandidate:
 
 class TestListSimilarEntries:
     def test_returns_top_2(self, admin_client, mock_service):
-        from app.schemas.candidate_review import SimilarEntry
 
         e1_id, e2_id = uuid.uuid4(), uuid.uuid4()
         cand_id = uuid.uuid4()
@@ -344,3 +343,17 @@ class TestListSimilarEntries:
             f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar",
         )
         assert resp.status_code == 403
+
+    def test_limit_zero_rejected(self, admin_client):
+        """FastAPI validates `limit >= 1` before the handler runs → 422."""
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar?limit=0",
+        )
+        assert resp.status_code == 422
+
+    def test_limit_above_max_rejected(self, admin_client):
+        """FastAPI validates `limit <= 5` before the handler runs → 422."""
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar?limit=6",
+        )
+        assert resp.status_code == 422
