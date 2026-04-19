@@ -12,6 +12,12 @@ via `scipy.signal.find_peaks`. Session 44 ADR-REPDET-01 motivated the
 fallback path; session 45 fixture calibration proved that peak/valley
 alone over-counts on noisy real-video signals, hence the hybrid.
 
+All numeric knobs (standing/depth/prominence angles + global
+min_rep_duration_s) flow through `ThresholdConfig` per FR-SCOR-11
+(D-042, ADR-REPDET-03) so Expert Reviewers can tune them via PR.
+Hysteresis remains a module constant — it's a detector-internal
+numerical stability knob, not an expert-tunable kinesiology threshold.
+
 All functions are pure — no side effects, no DB, no IO.
 """
 
@@ -22,6 +28,8 @@ from enum import Enum
 
 import numpy as np
 from scipy.signal import find_peaks
+
+from app.config import ThresholdConfig
 
 
 # ---------------------------------------------------------------------------
@@ -46,50 +54,59 @@ class _RepState(Enum):
 
 
 # ---------------------------------------------------------------------------
-# Shared constants
+# Constants & cfg-reading helpers (FR-SCOR-11 — D-042)
 # ---------------------------------------------------------------------------
 
-_MIN_REP_DURATION_S = 0.5
+# Hysteresis is a detector-internal numerical stability knob — not an
+# expert-tunable kinesiology threshold. Kept as a module constant.
 _HYSTERESIS_DEG = 5.0
 
 
-# ---------------------------------------------------------------------------
-# State-machine primary path (FR-CVPL-07 thresholds)
-# ---------------------------------------------------------------------------
-
-# Standing threshold: angle must be above this to be considered "standing".
-# Squat 150° tolerates athletes who do not fully lock out between reps.
-# Bench and deadlift keep 160° (different joint geometry).
-_STANDING_THRESHOLD: dict[str, float] = {
-    "squat": 150.0,
-    "bench": 160.0,
-    "deadlift": 160.0,
-}
-
-# Depth threshold: angle must be below this to register "bottom".
-# Squat 110° catches parallel-depth squats (~90-110° hip).
-# Deadlift variants differ (conventional/sumo deeper than RDL/romanian).
-_DEPTH_THRESHOLD: dict[str, dict[str, float]] = {
-    "squat": {"default": 110.0},
-    "bench": {"default": 90.0},
-    "deadlift": {
-        "conventional": 70.0,
-        "sumo": 70.0,
-        "romanian": 90.0,
-        "rdl": 90.0,
-    },
-}
+def _get_standing_threshold_from_cfg(
+    cfg: ThresholdConfig, exercise_type: str
+) -> float:
+    """Standing-angle threshold for the state-machine STANDING state."""
+    return float(
+        cfg.get(exercise_type.lower(), "rep_detection_standing_angle_deg")
+    )
 
 
-def _get_standing_threshold(exercise_type: str) -> float:
-    return _STANDING_THRESHOLD.get(exercise_type.lower(), 160.0)
+def _get_depth_threshold_from_cfg(
+    cfg: ThresholdConfig, exercise_type: str, exercise_variant: str
+) -> float:
+    """Depth-angle threshold for the state-machine BOTTOM state.
 
-
-def _get_depth_threshold(exercise_type: str, exercise_variant: str) -> float:
+    For exercises with variant-specific depths (deadlift: romanian/rdl
+    deeper than conventional/sumo), prefer the variant-specific key
+    ``rep_detection_depth_angle_{variant}_deg``. Fall back to the
+    exercise default ``rep_detection_depth_angle_deg``.
+    """
     ex = exercise_type.lower()
     var = exercise_variant.lower()
-    depth_map = _DEPTH_THRESHOLD.get(ex, {"default": 90.0})
-    return depth_map.get(var, depth_map.get("default", 90.0))
+    variant_key = f"rep_detection_depth_angle_{var}_deg"
+    try:
+        return float(cfg.get(ex, variant_key))
+    except KeyError:
+        return float(cfg.get(ex, "rep_detection_depth_angle_deg"))
+
+
+def _get_prominence_from_cfg(
+    cfg: ThresholdConfig, exercise_type: str
+) -> float:
+    """Minimum valley prominence for the peak/valley fallback detector."""
+    return float(
+        cfg.get(exercise_type.lower(), "rep_detection_prominence_deg")
+    )
+
+
+def _get_min_rep_duration_s_from_cfg(cfg: ThresholdConfig) -> float:
+    """Global minimum rep duration in seconds (exercise-agnostic)."""
+    return float(cfg.get("rep_detection", "min_rep_duration_s"))
+
+
+# ---------------------------------------------------------------------------
+# State-machine primary path
+# ---------------------------------------------------------------------------
 
 
 def _detect_reps_state_machine(
@@ -97,6 +114,7 @@ def _detect_reps_state_machine(
     exercise_type: str,
     exercise_variant: str,
     fps: float,
+    cfg: ThresholdConfig,
 ) -> list[DetectedRep]:
     """
     Primary detector: STANDING -> DESCENDING -> BOTTOM -> ASCENDING -> STANDING.
@@ -105,13 +123,19 @@ def _detect_reps_state_machine(
     and the DEPTH threshold (rep bottom) within a min_rep_duration window.
     Robust to signal noise in the mid-range because state transitions
     require full up-and-down cycles through absolute thresholds.
+
+    All numeric knobs (STANDING/DEPTH/min rep duration) flow through
+    ``cfg`` per FR-SCOR-11 (D-042). Hysteresis remains a module constant.
     """
     if len(angle_timeseries) == 0:
         return []
 
-    standing_thresh = _get_standing_threshold(exercise_type)
-    depth_thresh = _get_depth_threshold(exercise_type, exercise_variant)
-    min_rep_frames = int(_MIN_REP_DURATION_S * fps)
+    standing_thresh = _get_standing_threshold_from_cfg(cfg, exercise_type)
+    depth_thresh = _get_depth_threshold_from_cfg(
+        cfg, exercise_type, exercise_variant
+    )
+    min_rep_duration_s = _get_min_rep_duration_s_from_cfg(cfg)
+    min_rep_frames = int(min_rep_duration_s * fps)
 
     state = _RepState.STANDING
     reps: list[DetectedRep] = []
@@ -145,9 +169,7 @@ def _detect_reps_state_machine(
             # Intentional asymmetry: ASCENDING re-enters STANDING at
             # `standing - hysteresis` (lenient re-entry), while DESCENDING
             # aborts back to STANDING at `standing + hysteresis` (strict
-            # abort). The lenient ASCENDING side tolerates athletes who
-            # don't fully lock out between reps (squat 150° standing →
-            # 145° effective re-entry). Per ADR-REPDET-01.
+            # abort). Per ADR-REPDET-01.
             if angle_f > standing_thresh - _HYSTERESIS_DEG:
                 rep_end_frame = i
                 rep_duration_frames = rep_end_frame - rep_start_frame
@@ -171,19 +193,12 @@ def _detect_reps_state_machine(
 # Peak/valley fallback path (D-040 — for partial-lockout lifts)
 # ---------------------------------------------------------------------------
 
-# Signal-relative minimum valley prominence (degrees). Only used when the
-# state machine returns 0 reps; keeps partial-lockout detection working.
-_PROMINENCE_DEG: dict[str, float] = {
-    "squat": 20.0,
-    "bench": 20.0,
-    "deadlift": 20.0,
-}
-
 
 def _detect_reps_peak_valley(
     angle_timeseries: np.ndarray,
     exercise_type: str,
     fps: float,
+    cfg: ThresholdConfig,
 ) -> list[DetectedRep]:
     """
     Fallback detector: valleys via `find_peaks` on the inverted signal.
@@ -191,13 +206,17 @@ def _detect_reps_peak_valley(
     Used only when the state-machine detector returns 0 reps — typical of
     partial-lockout lifts (bodyweight bench, fatigued reps, RDLs) whose
     signal peaks never exceed the STANDING threshold.
+
+    Prominence threshold and minimum rep duration flow through ``cfg`` per
+    FR-SCOR-11 (D-042).
     """
     n = len(angle_timeseries)
     if n < 3:
         return []
 
-    prominence = _PROMINENCE_DEG.get(exercise_type.lower(), 20.0)
-    min_rep_frames = max(1, int(_MIN_REP_DURATION_S * fps))
+    prominence = _get_prominence_from_cfg(cfg, exercise_type)
+    min_rep_duration_s = _get_min_rep_duration_s_from_cfg(cfg)
+    min_rep_frames = max(1, int(min_rep_duration_s * fps))
 
     inverted = -np.asarray(angle_timeseries, dtype=float)
     valley_indices, _ = find_peaks(
@@ -218,7 +237,9 @@ def _detect_reps_peak_valley(
         if start_hi <= start_lo:
             start_frame = start_lo
         else:
-            start_frame = start_lo + int(np.argmax(angle_timeseries[start_lo : start_hi + 1]))
+            start_frame = start_lo + int(
+                np.argmax(angle_timeseries[start_lo : start_hi + 1])
+            )
 
         if i + 1 < len(valley_indices):
             end_hi = int(valley_indices[i + 1])
@@ -258,6 +279,7 @@ def detect_reps(
     exercise_type: str,
     exercise_variant: str,
     fps: float,
+    cfg: ThresholdConfig,
 ) -> list[DetectedRep]:
     """
     Detect reps using a hybrid state-machine + peak/valley detector.
@@ -282,6 +304,10 @@ def detect_reps(
         only consulted by the state-machine path for per-variant depth.
     fps:
         Frames per second.
+    cfg:
+        ``ThresholdConfig`` carrying rep-detection knobs
+        (standing/depth/prominence angles + global min_rep_duration_s).
+        Required per FR-SCOR-11 (D-042) so Expert Reviewers can tune via PR.
 
     Returns
     -------
@@ -290,8 +316,8 @@ def detect_reps(
         peak/valley result otherwise).
     """
     sm_reps = _detect_reps_state_machine(
-        angle_timeseries, exercise_type, exercise_variant, fps
+        angle_timeseries, exercise_type, exercise_variant, fps, cfg
     )
     if len(sm_reps) >= 1:
         return sm_reps
-    return _detect_reps_peak_valley(angle_timeseries, exercise_type, fps)
+    return _detect_reps_peak_valley(angle_timeseries, exercise_type, fps, cfg)
