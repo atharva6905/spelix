@@ -561,6 +561,87 @@ async def test_cove_max_tokens_meets_headroom_revision_path() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_cove_max_tokens_meets_headroom_revision_path_final_iteration() -> None:
+    """D-051: regression test for the `else` branch of Step 4 revision.
+
+    `_run_cove_loop` has two structurally identical revision branches:
+      - `if iteration < max_iterations:`   (already guarded by
+         test_cove_max_tokens_meets_headroom_revision_path)
+      - `else:` final-iteration revision at cove.py:464 (previously UNTESTED)
+
+    Both currently use max_tokens=3072 per D-048. Running with
+    max_iterations=1 and a "No" answer forces iteration==max_iterations,
+    which takes the else branch. Filed as auditor M-02 follow-up from
+    PR #88.
+    """
+    initial_output = _make_coaching_output()
+    contexts = [_make_retrieved_context()]
+
+    claims_response = ClaimList(claims=["c1"])
+    questions_response = VerificationQuestions(questions=["q1?"])
+    failed_answers = VerificationAnswers(
+        answers=[
+            VerificationAnswer(
+                question="q1?",
+                answer="No",
+                reasoning="Evidence does not support this claim.",
+            )
+        ]
+    )
+    final_revised_output = _make_coaching_output(summary="Final-iter revised.")
+
+    # With max_iterations=1, the loop body runs once:
+    #   pre-loop: claims extraction (Step 1)  [claims_response]
+    #   iter 1 Step 2: question generation    [questions_response]
+    #   iter 1 Step 3: verification answer    [failed_answers]
+    #   iter 1 Step 4: iteration (1) == max_iterations (1) -> ELSE branch
+    #                  -> revision call using Sonnet, max_tokens=3072
+    #                  [final_revised_output]
+    # Loop exits; returns cove_verified=False because max iter exhausted
+    # without convergence.
+    mock_client = _make_mock_instructor_client(
+        [
+            claims_response,
+            questions_response,
+            failed_answers,
+            final_revised_output,
+        ]
+    )
+
+    with patch("app.services.cove.instructor.from_anthropic", return_value=mock_client):
+        anthropic_client = MagicMock()
+        svc = CoveVerificationService(anthropic_client=anthropic_client)
+        result: CoveResult = await svc.verify(
+            initial_output=initial_output,
+            retrieved_contexts=contexts,
+            max_iterations=1,
+        )
+
+    # Loop didn't converge (only one iter, answered No) -> cove_verified=False
+    assert result.cove_verified is False
+    assert result.iterations_run == 1
+
+    calls = mock_client.chat.completions.create.await_args_list
+    assert len(calls) == 4, (
+        f"expected 4 calls (claim, question, answer, else-branch revision); "
+        f"got {len(calls)}"
+    )
+
+    # The 4th call is the ELSE-branch revision.
+    else_revision_kwargs = calls[3].kwargs
+    assert else_revision_kwargs["model"] == SONNET_MODEL, (
+        f"else-branch revision must use Sonnet, got "
+        f"{else_revision_kwargs['model']}"
+    )
+    assert else_revision_kwargs["response_model"] is CoachingOutput
+    assert else_revision_kwargs["max_tokens"] >= 3072, (
+        f"else-branch revision max_tokens {else_revision_kwargs['max_tokens']} "
+        "< 3072 — Sonnet needs room to regenerate a full CoachingOutput "
+        "(D-048 invariant; D-051 extends coverage to the else branch)."
+    )
+
+
 # ---------------------------------------------------------------------------
 # D-050: claim extraction — principle-level only, skip measurements
 # ---------------------------------------------------------------------------
