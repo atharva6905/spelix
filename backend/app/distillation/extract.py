@@ -12,12 +12,12 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.constants import HAIKU_MODEL as _HAIKU_MODEL
 from app.distillation.state import CandidateInsight, DistillationState
 from app.schemas.coaching import CoachingOutput
 
 logger = logging.getLogger(__name__)
 
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 _MAX_TOKENS = 1024
 
 

@@ -30,6 +30,7 @@ import anthropic
 import instructor
 from pydantic import BaseModel
 
+from app.constants import HAIKU_MODEL
 from app.schemas.coaching import CoachingOutput
 from app.schemas.rag import RetrievedContext
 
@@ -39,7 +40,6 @@ logger = logging.getLogger(__name__)
 # Model constants
 # ---------------------------------------------------------------------------
 
-HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
 
 # ---------------------------------------------------------------------------
