@@ -924,3 +924,50 @@ This **falsified** all four backlog hypotheses (a Cohere SEARCH_QUERY/SEARCH_DOC
 
 **Related:** ADR-REPDET-01, ADR-REPDET-02, FR-CVPL-15, FR-REPM-01, FR-REPM-05. Session 51, branch `fix/d044-bench-over-count`. Backlog: D-044 (deferred-post-L2), D-056 (post-L2 successor).
 
+
+## ADR-REPDET-04: Rep-detection knobs flow through ThresholdConfig (Session 53, D-042)
+
+**Context:** ADR-REPDET-02 (session 45) documented that `_PROMINENCE_DEG`,
+`_STANDING_THRESHOLD`, `_DEPTH_THRESHOLD`, and `_MIN_REP_DURATION_S` in
+`backend/app/cv/rep_detection.py` remained hardcoded rather than flowing
+through `ThresholdConfig`, and deferred the fix to D-042. spelix-auditor
+flagged this as H-1 (FR-SCOR-11 drift) — Expert Reviewers could edit
+scoring/confidence thresholds via PR but not rep-detection thresholds.
+
+**Decision:** All four knobs are now read from `ThresholdConfig` at
+invocation time. Module-level dicts are deleted. New JSON keys live under
+each exercise (`rep_detection_standing_angle_deg`,
+`rep_detection_depth_angle_deg`, `rep_detection_prominence_deg`) plus
+per-variant deadlift overrides (`rep_detection_depth_angle_{romanian,rdl}_deg`)
+and a global `rep_detection.min_rep_duration_s` top-level section. Public
+`detect_reps` and its two private paths (`_detect_reps_state_machine`,
+`_detect_reps_peak_valley`) accept `cfg: ThresholdConfig` as a required
+final positional parameter. `pipeline.py` hoists its existing
+`cfg = ThresholdConfig()` instantiation from Step 7 (confidence scoring) to
+above Step 5 (rep detection) and passes the same instance into `detect_reps`.
+
+**Consequences:**
+- Expert Reviewers can now tune rep-detection thresholds via PR against
+  `config/thresholds_v1.json`, matching the FR-SCOR-11 workflow for all
+  other thresholds.
+- `analyses.threshold_version` already freezes the version per-analysis
+  (from Phase 1 wiring), so threshold edits do not retroactively alter
+  scored analyses.
+- Hysteresis (`_HYSTERESIS_DEG = 5.0`) remains a module constant — it's a
+  numerical-stability knob for state-machine transition edges, not a
+  kinesiology threshold. Promoting it to cfg would invite confusion and
+  offers no meaningful tunability.
+- Supersedes the final bullet of ADR-REPDET-02 (`"_PROMINENCE_DEG +
+  _STANDING_THRESHOLD + _DEPTH_THRESHOLD + _MIN_REP_DURATION_S remain
+  hardcoded…"`). Closes spelix-auditor H-1 from PR #84. D-043 (additive
+  regression test for <20° partial descent across both paths) closes
+  M-2 from the same audit.
+
+**Related:** FR-SCOR-11, FR-REPM-01, FR-REPM-05, FR-CVPL-15, FR-CVPL-07.
+`backend/app/cv/rep_detection.py`, `config/thresholds_v1.json`,
+`backend/app/services/pipeline.py`, `backend/tests/unit/test_rep_detection.py`,
+`backend/tests/unit/test_rep_detection_cfg_helpers.py`,
+`backend/tests/unit/test_threshold_config_rep_detection.py`,
+`backend/tests/unit/test_pipeline_rep_detection_cfg.py`. ADR-018 (ThresholdConfig
+design). Supersedes ADR-REPDET-02 final bullet; otherwise preserves
+ADR-REPDET-02 hybrid-detection decisions.
