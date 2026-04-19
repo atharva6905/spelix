@@ -43,8 +43,12 @@ def _build_extraction_prompt(coaching_output: CoachingOutput, exercise_type: str
         "feedback — do NOT invent new cues.",
         "- Tag each insight with: exercise (squat|bench|deadlift), phase "
         "(setup|descent|bottom|ascent|lockout|general|null), entry_type "
-        "(cue|correction|principle|drill), trigger_tags (e.g. knee_cave, "
+        "(cue|correction|principle|drill|compensation), trigger_tags (e.g. knee_cave, "
         "forward_lean).",
+        "- When the insight describes a multi-step causal chain where one weakness "
+        "drives a secondary error (e.g. 'knee valgus compensates for weak hip "
+        "abduction'), tag entry_type=\"compensation\". Biomechanics reviewers "
+        "will gate these separately (FR-ADMN-12).",
         "- If there is nothing worth distilling, return an empty list.",
         "",
         f"Coaching summary: {coaching_output.summary}",
