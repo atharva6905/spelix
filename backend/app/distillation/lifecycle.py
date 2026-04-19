@@ -123,12 +123,23 @@ async def lifecycle_decision(
             # ADD-fallback behaviour intact so distillation never
             # crashes on transient errors.
             if _is_qdrant_4xx(exc):
+                # Security (auditor HIGH on PR #100): do NOT interpolate the
+                # raw exception via %s — UnexpectedResponse.__str__ embeds the
+                # response `content` body, which on a 401 can echo request
+                # context (headers, fragments) that flow into log aggregators
+                # like Langfuse/Datadog. Log only the type name and status code.
                 logger.error(
-                    "lifecycle_decision: qdrant query_points 4xx (%s) — "
-                    "treating as ADD; investigate auth / collection state",
-                    exc,
+                    "lifecycle_decision: qdrant query_points 4xx "
+                    "status=%s type=%s — treating as ADD; investigate "
+                    "auth / collection state",
+                    getattr(exc, "status_code", "unknown"),
+                    type(exc).__name__,
                 )
             else:
+                # Transient (ConnectionError, timeout, etc.): %s interpolation
+                # is kept to preserve historical debugging signal, but we
+                # suppress the raw exception on the 4xx path above as a
+                # defensive measure.
                 logger.warning(
                     "lifecycle_decision: qdrant query_points failed (%s) — treating as ADD",
                     exc,
