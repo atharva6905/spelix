@@ -112,3 +112,25 @@ class PendingQueueStats(BaseModel):
     """Response for GET /admin/coach-brain/candidates/stats."""
 
     total_pending: int
+
+
+class SimilarEntry(BaseModel):
+    """One nearest approved/seed Coach Brain entry surfaced on the review card.
+
+    D-037 / FR-ADMN-12: the reviewer needs to see up to 2 existing entries
+    that already cover similar ground, so they can spot near-duplicates
+    before promoting a new candidate.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    content: str
+    exercise: ExerciseLiteral
+    phase: PhaseLiteral | None
+    entry_type: EntryTypeLiteral
+    cosine_sim: float
+
+
+class SimilarEntriesResponse(BaseModel):
+    items: list[SimilarEntry]
