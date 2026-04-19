@@ -585,7 +585,17 @@ class CoachingService:
                     # We diff the JSON representation of the partial model against
                     # the previous snapshot to produce an incremental text chunk.
                     if pubsub_redis and channel:
-                        current_json = partial.model_dump_json(exclude_none=True)
+                        # D-049: partial snapshots from instructor.create_partial
+                        # carry nested dicts (e.g. `citations: list[dict]`)
+                        # against a schema declaring `list[Citation]`. Pydantic
+                        # v2 fires PydanticSerializationUnexpectedValueWarning
+                        # on each call, spamming worker logs. The final
+                        # snapshot (returned from this method) is fully
+                        # validated — suppress only on the per-partial
+                        # serialization used for SSE delta publishing.
+                        current_json = partial.model_dump_json(
+                            exclude_none=True, warnings=False
+                        )
                         # Compute the new characters added since the last snapshot
                         delta = current_json[len(previous_json):]
                         if delta:
