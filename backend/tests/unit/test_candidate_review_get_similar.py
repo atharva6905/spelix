@@ -80,9 +80,9 @@ async def test_get_similar_entries_returns_top_2_ordered_by_cosine() -> None:
         candidate_repo=candidate_repo,
         entry_repo=entry_repo,
         brain_embedding=brain_embedding,
+        cohere_client=cohere,
+        qdrant_client=qdrant,
     )
-    svc._cohere_client = cohere  # type: ignore[attr-defined]
-    svc._qdrant_client = qdrant  # type: ignore[attr-defined]
 
     result = await svc.get_similar_entries(candidate_id=candidate.id, limit=2)
 
@@ -105,9 +105,9 @@ async def test_get_similar_entries_raises_when_candidate_missing() -> None:
         candidate_repo=candidate_repo,
         entry_repo=MagicMock(),
         brain_embedding=MagicMock(),
+        cohere_client=MagicMock(),
+        qdrant_client=MagicMock(),
     )
-    svc._cohere_client = MagicMock()  # type: ignore[attr-defined]
-    svc._qdrant_client = MagicMock()  # type: ignore[attr-defined]
 
     with pytest.raises(CandidateNotFound):
         await svc.get_similar_entries(candidate_id=uuid.uuid4(), limit=2)
@@ -133,9 +133,57 @@ async def test_get_similar_entries_empty_qdrant_returns_empty_list() -> None:
         candidate_repo=candidate_repo,
         entry_repo=MagicMock(),
         brain_embedding=brain_embedding,
+        cohere_client=cohere,
+        qdrant_client=qdrant,
     )
-    svc._cohere_client = cohere  # type: ignore[attr-defined]
-    svc._qdrant_client = qdrant  # type: ignore[attr-defined]
+
+    result = await svc.get_similar_entries(candidate_id=candidate.id, limit=2)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_similar_entries_returns_empty_on_qdrant_error() -> None:
+    """Qdrant outage degrades the review card panel gracefully — no 500."""
+    candidate = _make_candidate()
+    candidate_repo = MagicMock()
+    candidate_repo.get_by_id = AsyncMock(return_value=candidate)
+
+    brain_embedding = MagicMock()
+    brain_embedding.build_contextual_text = MagicMock(return_value="ctx")
+
+    cohere = MagicMock()
+    cohere.embed_batch = AsyncMock(return_value=[[0.1] * 1024])
+
+    qdrant = MagicMock()
+    qdrant.query_points = AsyncMock(side_effect=RuntimeError("qdrant down"))
+
+    svc = CandidateReviewService(
+        db=MagicMock(),
+        candidate_repo=candidate_repo,
+        entry_repo=MagicMock(),
+        brain_embedding=brain_embedding,
+        cohere_client=cohere,
+        qdrant_client=qdrant,
+    )
+
+    result = await svc.get_similar_entries(candidate_id=candidate.id, limit=2)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_similar_entries_returns_empty_when_clients_not_wired() -> None:
+    """Defensive: if the DI factory never wired the vector clients, return []."""
+    candidate = _make_candidate()
+    candidate_repo = MagicMock()
+    candidate_repo.get_by_id = AsyncMock(return_value=candidate)
+
+    svc = CandidateReviewService(
+        db=MagicMock(),
+        candidate_repo=candidate_repo,
+        entry_repo=MagicMock(),
+        brain_embedding=MagicMock(),
+        # cohere_client + qdrant_client intentionally omitted (None default)
+    )
 
     result = await svc.get_similar_entries(candidate_id=candidate.id, limit=2)
     assert result == []

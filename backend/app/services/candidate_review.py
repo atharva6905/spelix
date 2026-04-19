@@ -258,6 +258,12 @@ class CandidateReviewService:
         if candidate is None:
             raise CandidateNotFound(str(candidate_id))
 
+        if self._cohere_client is None or self._qdrant_client is None:
+            logger.warning(
+                "get_similar_entries: vector clients not wired — returning empty list"
+            )
+            return []
+
         proxy = CoachBrainEntryCreate(
             content=candidate.content,
             exercise=candidate.exercise,
@@ -284,14 +290,21 @@ class CandidateReviewService:
                 ),
             ]
         )
-        response = await self._qdrant_client.query_points(
-            collection=COLLECTION_COACH_BRAIN,
-            query=vector,
-            query_filter=query_filter,
-            limit=limit,
-            with_payload=False,
-        )
-        hits = list(response.points)
+        try:
+            response = await self._qdrant_client.query_points(
+                collection=COLLECTION_COACH_BRAIN,
+                query=vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=False,
+            )
+            hits = list(response.points)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "get_similar_entries: qdrant query_points failed (%s) — returning empty list",
+                exc,
+            )
+            hits = []
 
         results: list[SimilarEntry] = []
         for hit in hits:
