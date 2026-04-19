@@ -32,6 +32,27 @@ logger = logging.getLogger(__name__)
 _NOOP_THRESHOLD = 0.92
 _UPDATE_FLOOR = 0.75
 
+_QDRANT_4XX_STATUS_CODES = frozenset({401, 403, 404, 429})
+
+
+def _is_qdrant_4xx(exc: BaseException) -> bool:
+    """Return True if the exception is a Qdrant HTTP 4xx (auth/missing).
+
+    D-054: 4xx indicates sustained operator-action-required failure
+    (revoked API key, deleted collection, rate-limit ceiling) and should
+    page. Transient network errors (ConnectionError, timeout) stay at
+    WARNING per the surrounding caller.
+
+    The qdrant-client surface exposes HTTP errors via UnexpectedResponse;
+    its `status_code` attribute is an int. We match defensively: duck-type
+    the attribute rather than `isinstance` on UnexpectedResponse, so the
+    helper stays correct if qdrant-client moves the exception class.
+    """
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and status_code in _QDRANT_4XX_STATUS_CODES:
+        return True
+    return False
+
 
 def _build_proxy_entry(candidate: CandidateInsight) -> CoachBrainEntryCreate:
     """Build a throwaway CoachBrainEntryCreate purely to reuse BrainEmbeddingService.build_contextual_text."""
@@ -94,10 +115,24 @@ async def lifecycle_decision(
             )
             hits = list(response.points)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "lifecycle_decision: qdrant query_points failed (%s) — treating as ADD",
-                exc,
-            )
+            # D-054: distinguish auth/availability (4xx) from transient
+            # (network, timeout) failures. A sustained 401/403 — e.g.
+            # Qdrant API-key rotation or revocation — would be
+            # operationally invisible at WARNING level if ops pages on
+            # ERROR-and-above. Surface 4xx loudly; keep the broad
+            # ADD-fallback behaviour intact so distillation never
+            # crashes on transient errors.
+            if _is_qdrant_4xx(exc):
+                logger.error(
+                    "lifecycle_decision: qdrant query_points 4xx (%s) — "
+                    "treating as ADD; investigate auth / collection state",
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "lifecycle_decision: qdrant query_points failed (%s) — treating as ADD",
+                    exc,
+                )
             hits = []
 
         if not hits:
