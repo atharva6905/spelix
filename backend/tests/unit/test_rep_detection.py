@@ -9,7 +9,21 @@ from __future__ import annotations
 
 import numpy as np
 
+import pytest
+
+from app.config import ThresholdConfig
 from app.cv.rep_detection import detect_reps
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def cfg() -> ThresholdConfig:
+    """Shared ThresholdConfig for rep-detection tests (D-042)."""
+    return ThresholdConfig()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,42 +113,42 @@ def _deadlift_rep_angles(
 
 
 class TestSquatStateCycle:
-    def test_single_rep_detected(self):
+    def test_single_rep_detected(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=1)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1
 
-    def test_rep_index_zero_based(self):
+    def test_rep_index_zero_based(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=1)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps[0].rep_index == 0
 
-    def test_min_angle_captured(self):
+    def test_min_angle_captured(self, cfg: ThresholdConfig):
         bottom_angle = 75.0
         angles = _squat_rep_angles(n_reps=1, bottom_angle=bottom_angle)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps[0].min_angle <= bottom_angle + 1.0  # within 1°
 
-    def test_start_before_end_frame(self):
+    def test_start_before_end_frame(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=1)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps[0].start_frame < reps[0].end_frame
 
-    def test_multiple_reps_correct_count(self):
+    def test_multiple_reps_correct_count(self, cfg: ThresholdConfig):
         for n in [2, 3, 5]:
             angles = _squat_rep_angles(n_reps=n)
             landmarks = _make_landmarks(len(angles))
-            reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+            reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
             assert len(reps) == n, f"expected {n} reps, got {len(reps)}"
 
-    def test_rep_indices_sequential(self):
+    def test_rep_indices_sequential(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=3)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         for i, rep in enumerate(reps):
             assert rep.rep_index == i
 
@@ -145,23 +159,23 @@ class TestSquatStateCycle:
 
 
 class TestBenchStateCycle:
-    def test_single_rep_detected(self):
+    def test_single_rep_detected(self, cfg: ThresholdConfig):
         angles = _bench_rep_angles(n_reps=1)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "bench", "standard", FPS, cfg)
         assert len(reps) == 1
 
-    def test_multiple_reps(self):
+    def test_multiple_reps(self, cfg: ThresholdConfig):
         angles = _bench_rep_angles(n_reps=3)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "bench", "standard", FPS, cfg)
         assert len(reps) == 3
 
-    def test_min_angle_below_bottom_threshold(self):
+    def test_min_angle_below_bottom_threshold(self, cfg: ThresholdConfig):
         """Bench bottom threshold is <90°; bottom_angle=75° should pass."""
         angles = _bench_rep_angles(n_reps=1, bottom_angle=75.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "bench", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "bench", "standard", FPS, cfg)
         assert len(reps) == 1
 
 
@@ -172,24 +186,24 @@ class TestBenchStateCycle:
 
 
 class TestDeadliftStateCycle:
-    def test_conventional_single_rep(self):
+    def test_conventional_single_rep(self, cfg: ThresholdConfig):
         """Conventional deadlift: bottom <70°; use 55°."""
         angles = _deadlift_rep_angles(n_reps=1, bottom_angle=55.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "deadlift", "conventional", FPS)
+        reps = detect_reps(angles, landmarks, "deadlift", "conventional", FPS, cfg)
         assert len(reps) == 1
 
-    def test_sumo_single_rep(self):
+    def test_sumo_single_rep(self, cfg: ThresholdConfig):
         angles = _deadlift_rep_angles(n_reps=1, bottom_angle=55.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "deadlift", "sumo", FPS)
+        reps = detect_reps(angles, landmarks, "deadlift", "sumo", FPS, cfg)
         assert len(reps) == 1
 
-    def test_rdl_variant_threshold_90(self):
+    def test_rdl_variant_threshold_90(self, cfg: ThresholdConfig):
         """RDL bottom threshold is <90°; an angle of 80° should be detected."""
         angles = _squat_rep_angles(n_reps=1, bottom_angle=80.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "deadlift", "rdl", FPS)
+        reps = detect_reps(angles, landmarks, "deadlift", "rdl", FPS, cfg)
         assert len(reps) == 1
 
 
@@ -213,7 +227,7 @@ class TestHysteresis:
         t = np.arange(n_frames)
         return base + amplitude * np.sin(2 * np.pi * t / 10)
 
-    def test_low_amplitude_noise_no_reps(self):
+    def test_low_amplitude_noise_no_reps(self, cfg: ThresholdConfig):
         """
         ±6° sinusoidal noise (total peak-to-trough 12°) around an arbitrary
         mid-range base is below the 20° prominence knob → 0 reps. Replaces
@@ -222,10 +236,10 @@ class TestHysteresis:
         """
         angles = self._chattering_signal(base=120.0, amplitude=6.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 0
 
-    def test_clear_depth_after_hysteresis_band(self):
+    def test_clear_depth_after_hysteresis_band(self, cfg: ThresholdConfig):
         """
         A signal that dips clearly below (90° - 5°) = 85° must be detected
         even after hovering near the threshold.
@@ -236,7 +250,7 @@ class TestHysteresis:
         stand2 = np.full(15, 170.0)
         angles = np.concatenate([stand, descend, ascend, stand2])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1
 
 
@@ -246,7 +260,7 @@ class TestHysteresis:
 
 
 class TestMinRepDuration:
-    def test_too_short_rep_not_counted(self):
+    def test_too_short_rep_not_counted(self, cfg: ThresholdConfig):
         """
         A rep that takes only 5 frames at 30 fps = 0.17 s (< 0.5 s) must be
         ignored.
@@ -257,10 +271,10 @@ class TestMinRepDuration:
         ascend = np.array([75.0, 170.0])
         angles = np.concatenate([stand, descend, ascend, stand])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 0
 
-    def test_long_enough_rep_counted(self):
+    def test_long_enough_rep_counted(self, cfg: ThresholdConfig):
         """
         A rep spanning well over 0.5 s must count.
         Use frames_per_phase=10: 4 phases × 10 frames = 40 frames → 1.3 s at
@@ -270,7 +284,7 @@ class TestMinRepDuration:
         """
         angles = _squat_rep_angles(n_reps=1, frames_per_phase=10)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1
 
 
@@ -280,27 +294,27 @@ class TestMinRepDuration:
 
 
 class TestEdgeCases:
-    def test_empty_signal_returns_empty(self):
-        reps = detect_reps(np.array([]), [], "squat", "standard", FPS)
+    def test_empty_signal_returns_empty(self, cfg: ThresholdConfig):
+        reps = detect_reps(np.array([]), [], "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_flat_standing_signal_no_reps(self):
+    def test_flat_standing_signal_no_reps(self, cfg: ThresholdConfig):
         angles = np.full(60, 170.0)
         landmarks = _make_landmarks(60)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_flat_bottom_signal_no_reps(self):
+    def test_flat_bottom_signal_no_reps(self, cfg: ThresholdConfig):
         """Signal stuck at 70° — never returns to standing."""
         angles = np.full(60, 70.0)
         landmarks = _make_landmarks(60)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_single_frame_returns_empty(self):
+    def test_single_frame_returns_empty(self, cfg: ThresholdConfig):
         angles = np.array([170.0])
         landmarks = _make_landmarks(1)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
 
@@ -312,22 +326,22 @@ class TestEdgeCases:
 class TestConfidenceScore:
     """Confidence is a 0.0 placeholder — pipeline Step 7 backfills with Tier 5."""
 
-    def test_confidence_is_placeholder_zero(self):
+    def test_confidence_is_placeholder_zero(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=2)
         landmarks = _make_landmarks(len(angles), visibility=0.8)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         for rep in reps:
             assert rep.confidence_score == 0.0
 
-    def test_confidence_same_regardless_of_visibility(self):
+    def test_confidence_same_regardless_of_visibility(self, cfg: ThresholdConfig):
         """detect_reps no longer computes confidence — all reps get 0.0."""
         angles = _squat_rep_angles(n_reps=1)
         n = len(angles)
         high_vis_landmarks = _make_landmarks(n, visibility=2.0)
         low_vis_landmarks = _make_landmarks(n, visibility=-2.0)
 
-        high_reps = detect_reps(angles, high_vis_landmarks, "squat", "standard", FPS)
-        low_reps = detect_reps(angles, low_vis_landmarks, "squat", "standard", FPS)
+        high_reps = detect_reps(angles, high_vis_landmarks, "squat", "standard", FPS, cfg)
+        low_reps = detect_reps(angles, low_vis_landmarks, "squat", "standard", FPS, cfg)
 
         assert high_reps[0].confidence_score == 0.0
         assert low_reps[0].confidence_score == 0.0
@@ -339,10 +353,10 @@ class TestConfidenceScore:
 
 
 class TestDetectedRepFields:
-    def test_all_fields_present(self):
+    def test_all_fields_present(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=1)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         rep = reps[0]
         assert hasattr(rep, "rep_index")
         assert hasattr(rep, "start_frame")
@@ -350,10 +364,10 @@ class TestDetectedRepFields:
         assert hasattr(rep, "confidence_score")
         assert hasattr(rep, "min_angle")
 
-    def test_frames_within_bounds(self):
+    def test_frames_within_bounds(self, cfg: ThresholdConfig):
         angles = _squat_rep_angles(n_reps=2)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         n = len(angles)
         for rep in reps:
             assert 0 <= rep.start_frame < n
@@ -370,34 +384,34 @@ class TestZeroRepAndPartialRep:
 
     # --- Zero-rep scenarios ---
 
-    def test_zero_rep_constant_standing_angle(self):
+    def test_zero_rep_constant_standing_angle(self, cfg: ThresholdConfig):
         """A flat signal at 170° (never descending) yields zero reps."""
         angles = np.full(90, 170.0)
         landmarks = _make_landmarks(90)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
 
-    def test_zero_rep_single_frame_at_standing(self):
+    def test_zero_rep_single_frame_at_standing(self, cfg: ThresholdConfig):
         """A single-frame signal at standing angle returns zero reps."""
         angles = np.array([170.0])
         landmarks = _make_landmarks(1)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_zero_rep_two_frames(self):
+    def test_zero_rep_two_frames(self, cfg: ThresholdConfig):
         """Two frames — insufficient for any state transitions."""
         angles = np.array([170.0, 165.0])
         landmarks = _make_landmarks(2)
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_zero_rep_empty_signal(self):
+    def test_zero_rep_empty_signal(self, cfg: ThresholdConfig):
         """Empty numpy array yields empty result (no crash)."""
-        reps = detect_reps(np.array([]), [], "squat", "standard", FPS)
+        reps = detect_reps(np.array([]), [], "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_zero_rep_all_exercises_no_movement(self):
+    def test_zero_rep_all_exercises_no_movement(self, cfg: ThresholdConfig):
         """Flat standing-angle signal returns zero reps across all exercises."""
         for exercise, variant, standing in [
             ("squat", "high_bar", 170.0),
@@ -406,12 +420,12 @@ class TestZeroRepAndPartialRep:
         ]:
             angles = np.full(60, standing)
             landmarks = _make_landmarks(60)
-            reps = detect_reps(angles, landmarks, exercise, variant, FPS)
+            reps = detect_reps(angles, landmarks, exercise, variant, FPS, cfg)
             assert reps == [], f"{exercise}/{variant} should yield 0 reps"
 
     # --- Partial-rep scenarios ---
 
-    def test_partial_rep_descent_only_no_return(self):
+    def test_partial_rep_descent_only_no_return(self, cfg: ThresholdConfig):
         """
         Signal 170°→70°→100° (video ends mid-ascent) produces a valley
         with ≥20° prominence on both sides, so peak/valley detection
@@ -427,10 +441,10 @@ class TestZeroRepAndPartialRep:
         partial_up = np.linspace(70.0, 100.0, 10)
         angles = np.concatenate([stand, descend, partial_up])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1
 
-    def test_partial_rep_reaches_bottom_but_signal_ends(self):
+    def test_partial_rep_reaches_bottom_but_signal_ends(self, cfg: ThresholdConfig):
         """
         Signal descends through depth and stays at bottom — video ends at
         bottom position. No rep completes.
@@ -440,10 +454,10 @@ class TestZeroRepAndPartialRep:
         hold_bottom = np.full(10, 70.0)
         angles = np.concatenate([stand, descend, hold_bottom])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
-    def test_partial_rep_does_not_corrupt_subsequent_full_rep(self):
+    def test_partial_rep_does_not_corrupt_subsequent_full_rep(self, cfg: ThresholdConfig):
         """
         Partial attempt (170°→130°→175°) followed by a full rep.
 
@@ -466,12 +480,12 @@ class TestZeroRepAndPartialRep:
         full_rep = _squat_rep_angles(n_reps=1, frames_per_phase=10, standing_angle=175.0)
         angles = np.concatenate([stand, partial_down, abort_up, stand2, full_rep])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         # Hybrid: state machine counts only the full rep (partial is aborted),
         # and SM >= 1 wins over peak/valley. Expected: 1.
         assert len(reps) == 1
 
-    def test_partial_rep_too_short_duration_not_counted(self):
+    def test_partial_rep_too_short_duration_not_counted(self, cfg: ThresholdConfig):
         """
         A rep that achieves the required depth but spans only 2 frames
         at 30 fps (< 0.5 s minimum) must NOT be counted.
@@ -482,7 +496,7 @@ class TestZeroRepAndPartialRep:
         stand2 = np.full(5, 170.0)
         angles = np.concatenate([stand, instant, stand2])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert reps == []
 
 
@@ -504,7 +518,7 @@ class TestSquatThresholdFix:
     who do not fully hyperextend at the top.
     """
 
-    def test_parallel_depth_squat_detected(self):
+    def test_parallel_depth_squat_detected(self, cfg: ThresholdConfig):
         """
         Hip angle reaching 95° (parallel depth) must be counted as one rep.
         Old threshold (depth=90°, effective=85°) would miss this.
@@ -517,26 +531,26 @@ class TestSquatThresholdFix:
         stand2 = np.full(15, 165.0)
         angles = np.concatenate([stand, descend, bottom_hold, ascend, stand2])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1, (
             f"Expected 1 rep for parallel-depth squat (95°), got {len(reps)}. "
             "Squat depth threshold must be 110° (effective 105°)."
         )
 
-    def test_six_parallel_depth_reps_all_detected(self):
+    def test_six_parallel_depth_reps_all_detected(self, cfg: ThresholdConfig):
         """
         Six reps where hip reaches 95° must all be counted — this was the
         original undercounting scenario (6-7 reps → 2 detected).
         """
         angles = _squat_rep_angles(n_reps=6, bottom_angle=95.0, standing_angle=165.0)
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 6, (
             f"Expected 6 reps, got {len(reps)}. "
             "Parallel-depth reps at 95° must not be silently skipped."
         )
 
-    def test_incomplete_lockout_rep_still_counted(self):
+    def test_incomplete_lockout_rep_still_counted(self, cfg: ThresholdConfig):
         """
         An athlete who only returns to 147° between reps (not full 160°+
         lockout) must still have the rep counted.
@@ -551,7 +565,7 @@ class TestSquatThresholdFix:
         partial_stand = np.full(15, 147.0)
         angles = np.concatenate([stand, descend, bottom_hold, ascend, partial_stand])
         landmarks = _make_landmarks(len(angles))
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 1, (
             f"Incomplete lockout rep (returns to 147°) must be counted, "
             f"got {len(reps)} reps. Standing threshold must be 150°."
@@ -566,7 +580,7 @@ class TestSquatThresholdFix:
 class TestPeakValleyDetection:
     """New tests for signal-relative rep detection (D-040, ADR-REPDET-01)."""
 
-    def test_partial_lockout_bench_rep_detected(self):
+    def test_partial_lockout_bench_rep_detected(self, cfg: ThresholdConfig):
         """
         Bench signal where elbow peaks at 153° (not full 170°+ lockout)
         and descends to 37° must count as a rep — this is the session 44
@@ -581,7 +595,7 @@ class TestPeakValleyDetection:
         angles = np.concatenate([stand1, descend, ascend, stand2])
         landmarks = _make_landmarks(len(angles))
 
-        reps = detect_reps(angles, landmarks, "bench", "flat", FPS)
+        reps = detect_reps(angles, landmarks, "bench", "flat", FPS, cfg)
 
         assert len(reps) == 1, (
             f"Partial-lockout bench rep (peak 153°, valley 37°) must be "
@@ -589,7 +603,7 @@ class TestPeakValleyDetection:
         )
         assert reps[0].min_angle < 40.0
 
-    def test_prominence_filters_low_amplitude_noise(self):
+    def test_prominence_filters_low_amplitude_noise(self, cfg: ThresholdConfig):
         """
         A baseline-90° signal with ±8° sinusoidal noise (total amplitude
         16°) must yield 0 reps — below the 20° prominence knob.
@@ -598,14 +612,14 @@ class TestPeakValleyDetection:
         angles = 90.0 + 8.0 * np.sin(2 * np.pi * t / 20)
         landmarks = _make_landmarks(len(angles))
 
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
 
         assert reps == [], (
             f"Low-amplitude noise (±8°) must not produce reps. "
             f"Got {len(reps)}."
         )
 
-    def test_min_distance_merges_adjacent_valleys(self):
+    def test_min_distance_merges_adjacent_valleys(self, cfg: ThresholdConfig):
         """
         Two valleys 10 frames apart at 30 fps (= 0.33 s, below the
         0.5 s / 15-frame minimum) must be treated as at most one rep.
@@ -617,14 +631,14 @@ class TestPeakValleyDetection:
         angles[29:32] = [140.0, 80.0, 140.0]
         landmarks = _make_landmarks(len(angles))
 
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
 
         assert len(reps) <= 1, (
             f"Two valleys 10 frames apart must not yield 2 reps "
             f"(distance filter = 15 frames at 30 fps). Got {len(reps)}."
         )
 
-    def test_start_end_frames_bracket_valley(self):
+    def test_start_end_frames_bracket_valley(self, cfg: ThresholdConfig):
         """
         For any detected rep, start_frame and end_frame must bracket a
         local maximum surrounding the valley — angle at start and end
@@ -633,7 +647,7 @@ class TestPeakValleyDetection:
         angles = _squat_rep_angles(n_reps=2)
         landmarks = _make_landmarks(len(angles))
 
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
         assert len(reps) == 2
 
         for rep in reps:
@@ -651,7 +665,7 @@ class TestPeakValleyDetection:
 class TestHybridStateMachineWins:
     """Verifies hybrid prefers state machine when SM returns >=1 rep."""
 
-    def test_hybrid_prefers_state_machine_over_peak_valley(self):
+    def test_hybrid_prefers_state_machine_over_peak_valley(self, cfg: ThresholdConfig):
         """
         Signal with 2 clean reps (state machine counts these) followed by
         a mid-range jitter dip that peak/valley ALONE would count as a 3rd
@@ -672,11 +686,95 @@ class TestHybridStateMachineWins:
         angles = np.concatenate([clean, mid_dip])
         landmarks = _make_landmarks(len(angles))
 
-        reps = detect_reps(angles, landmarks, "squat", "standard", FPS)
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
 
         # Hybrid prefers state machine when it produces >=1 rep.
         # State machine: 2 clean reps. Peak/valley would see 3.
         assert len(reps) == 2, (
             f"Hybrid must return state-machine result (2) when SM >= 1, "
             f"not peak/valley result. Got {len(reps)}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13. D-043 — partial descent below prominence rejected by BOTH paths
+# ---------------------------------------------------------------------------
+
+
+class TestPartialDescentBelowProminence:
+    """
+    D-043 (follow-up from spelix-auditor M-2 on PR #84).
+
+    A unidirectional partial descent with <20° amplitude must return 0 reps
+    from BOTH the state-machine and the peak/valley detectors. The existing
+    `test_prominence_filters_low_amplitude_noise` test in §11 covered
+    oscillating noise; this covers a single-dip signal, which exercises
+    different code paths in find_peaks and the SM STANDING → DESCENDING
+    transition check.
+    """
+
+    def test_partial_descent_fifteen_deg_rejected_by_state_machine(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        State-machine rejection: signal never crosses STANDING-hysteresis
+        (150° - 5° = 145°). Signal stays above 155° throughout the dip,
+        so state remains STANDING → 0 reps.
+        """
+        from app.cv.rep_detection import _detect_reps_state_machine
+
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+
+        reps = _detect_reps_state_machine(
+            angles, "squat", "standard", FPS, cfg
+        )
+
+        assert reps == [], (
+            f"State machine must reject 15° partial descent "
+            f"(valley 155°, standing-hysteresis 145°). Got {len(reps)} reps."
+        )
+
+    def test_partial_descent_fifteen_deg_rejected_by_peak_valley(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        Peak/valley rejection: valley prominence 15° < 20° knob → find_peaks
+        excludes the dip. 0 reps.
+        """
+        from app.cv.rep_detection import _detect_reps_peak_valley
+
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+
+        reps = _detect_reps_peak_valley(angles, "squat", FPS, cfg)
+
+        assert reps == [], (
+            f"Peak/valley must reject 15° partial descent "
+            f"(prominence knob 20°). Got {len(reps)} reps."
+        )
+
+    def test_partial_descent_fifteen_deg_rejected_by_public_hybrid(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        End-to-end via the public hybrid entry point. Verifies neither path
+        catches it after the hybrid dispatch (SM returns 0 → falls through
+        to peak/valley → also 0).
+        """
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
+
+        assert reps == [], (
+            f"Hybrid detect_reps must reject 15° partial descent via "
+            f"both paths. Got {len(reps)} reps."
         )

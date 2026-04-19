@@ -73,6 +73,12 @@
       "unit": "degrees",
       "provenance_citation": "FR-CVPL-07 — hip angle above which STANDING state is re-entered (with 5° hysteresis = effective 145°). Lowered from 160° to tolerate incomplete lockout between reps.",
       "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_prominence_deg": {
+      "value": 20.0,
+      "unit": "degrees",
+      "provenance_citation": "ADR-REPDET-02 — peak/valley fallback prominence threshold; conservative enough for state-machine fallback path",
+      "last_modified_by": "cv_engineer"
     }
   },
 
@@ -118,6 +124,24 @@
       "unit": "degrees",
       "provenance_citation": "Green & Comfort 2007",
       "last_modified_by": "expert_reviewer"
+    },
+    "rep_detection_standing_angle_deg": {
+      "value": 160.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — elbow angle above which STANDING state is re-entered (with 5° hysteresis = effective 155°).",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_depth_angle_deg": {
+      "value": 90.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — elbow angle below which BOTTOM state is entered (with 5° hysteresis = effective 85°).",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_prominence_deg": {
+      "value": 20.0,
+      "unit": "degrees",
+      "provenance_citation": "ADR-REPDET-02 — peak/valley fallback prominence threshold; conservative enough for state-machine fallback path",
+      "last_modified_by": "cv_engineer"
     }
   },
 
@@ -181,6 +205,36 @@
       "unit": "degrees",
       "provenance_citation": "IPF rulebook — full lockout standard",
       "last_modified_by": "expert_reviewer"
+    },
+    "rep_detection_standing_angle_deg": {
+      "value": 160.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — hip angle above which STANDING state is re-entered (with 5° hysteresis = effective 155°).",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_depth_angle_deg": {
+      "value": 70.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — conventional/sumo hip angle below which BOTTOM state is entered (with 5° hysteresis = effective 65°). Default used when no variant-specific key matches.",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_depth_angle_romanian_deg": {
+      "value": 90.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — RDL/romanian depth threshold (hip flexion shallower than conventional).",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_depth_angle_rdl_deg": {
+      "value": 90.0,
+      "unit": "degrees",
+      "provenance_citation": "FR-CVPL-07 — RDL/romanian depth threshold (hip flexion shallower than conventional).",
+      "last_modified_by": "cv_engineer"
+    },
+    "rep_detection_prominence_deg": {
+      "value": 20.0,
+      "unit": "degrees",
+      "provenance_citation": "ADR-REPDET-02 — peak/valley fallback prominence threshold; conservative enough for state-machine fallback path",
+      "last_modified_by": "cv_engineer"
     }
   },
 
@@ -272,6 +326,16 @@
       "squat_deep_hip_fold": 0.75,
       "sumo_stance": 0.75,
       "bench_supine": 0.80
+    }
+  },
+
+  "rep_detection": {
+    "_comment": "Global (exercise-agnostic) rep-detection knobs",
+    "min_rep_duration_s": {
+      "value": 0.5,
+      "unit": "seconds",
+      "provenance_citation": "FR-REPM-01 — minimum rep duration to filter sub-threshold chatter and instantaneous spikes",
+      "last_modified_by": "cv_engineer"
     }
   }
 }
