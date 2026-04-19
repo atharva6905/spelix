@@ -37,6 +37,7 @@ pytestmark = [
 
 @pytest_asyncio.fixture
 async def db_session():
+    """Fresh async session against the live Supabase DB, rolls back after each test."""
     raw_url = TEST_DB_URL
     if raw_url.startswith("postgresql://"):
         raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -54,6 +55,7 @@ async def db_session():
 @pytest.mark.asyncio
 async def test_candidates_accept_compensation_entry_type(db_session: AsyncSession) -> None:
     # After migration 012 the CHECK constraint permits 'compensation'.
+    row_id = uuid.uuid4()
     await db_session.execute(
         text(
             """
@@ -68,13 +70,22 @@ async def test_candidates_accept_compensation_entry_type(db_session: AsyncSessio
              'ADD', false, 'pending')
             """
         ),
-        {"id": uuid.uuid4()},
+        {"id": row_id},
     )
     await db_session.flush()
+    result = await db_session.execute(
+        text(
+            "SELECT entry_type FROM coach_brain_candidates WHERE id = :id"
+        ),
+        {"id": row_id},
+    )
+    assert result.scalar() == "compensation"
 
 
 @pytest.mark.asyncio
 async def test_entries_accept_compensation_entry_type(db_session: AsyncSession) -> None:
+    # After migration 012 the CHECK constraint permits 'compensation'.
+    row_id = uuid.uuid4()
     await db_session.execute(
         text(
             """
@@ -87,6 +98,13 @@ async def test_entries_accept_compensation_entry_type(db_session: AsyncSession) 
              0, '{}', '{}', '{}'::jsonb)
             """
         ),
-        {"id": uuid.uuid4()},
+        {"id": row_id},
     )
     await db_session.flush()
+    result = await db_session.execute(
+        text(
+            "SELECT entry_type FROM coach_brain_entries WHERE id = :id"
+        ),
+        {"id": row_id},
+    )
+    assert result.scalar() == "compensation"

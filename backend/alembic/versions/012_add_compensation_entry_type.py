@@ -15,13 +15,15 @@ No backfill — the constraint is a pure widening; existing rows all match
 the original four values.
 """
 
+from __future__ import annotations
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "012_compensation_entry_type"
-down_revision = "011_coach_brain_candidates"
-branch_labels = None
-depends_on = None
+revision: str = "012_compensation_entry_type"
+down_revision: str | None = "011_coach_brain_candidates"
+branch_labels: tuple[str, ...] | None = None
+depends_on: tuple[str, ...] | None = None
 
 
 _NEW_VALUES = "('cue','correction','principle','drill','compensation')"
