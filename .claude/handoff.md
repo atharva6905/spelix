@@ -1,119 +1,67 @@
-# Session 50 addendum #2: D-053 lifecycle_decision Qdrant API migration shipped (PR #94)
+# Session 51 Handoff → Session 52: D-044 investigation closed out as deferred-post-L2 (PR #98)
 
-**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12, second PR of the day):** D-053 closed — the Qdrant API drift surfaced in session 49 worker logs (`'AsyncQdrantClient' object has no attribute 'search'`) is gone. 5-commit PR via subagent-driven-development (spelix-tdd + spec-reviewer + one review fix-up). `spelix-auditor` PASS (0 CRITICAL / 0 HIGH / 0 MEDIUM, 10/10 checks verified); `spelix-security-reviewer` PASS (0 findings, 10 checks clean; non-blocking monitoring gap noted for future 4xx-specific logging). Prod verification via fresh bench upload `0e5d755b`: **zero `.search` warnings in worker logs**, new `coach_brain_candidates` rows carry **real non-zero `nearest_cosine_sim`** (0.72 / 0.74 / 0.72 / 0.84 UPDATE / 0.88 UPDATE — was uniformly `0.0 ADD` pre-fix). FR-BRAIN-17 cosine routing + FR-BRAIN-18 UPDATE semantics working on prod. Backend: 1702 → 1703 tests (+1 regression guard; 5 lifecycle tests migrated in place). Class-of-bug lesson captured in ADR-DISTILL-07: use `MagicMock(spec=...)` when mocking external clients so SDK API drift fails in CI, not only in prod. See `backlog.md` "## Completed — L2 Sprint Day 12 — D-053" for full detail.
-
-See "Worker Log Findings — D-053 verification" at the bottom of this file.
-
----
-
-# Session 50 addendum: D-052 CoVe inversion + extrapolation guards shipped (PR #92)
-
-**Context refresh (session 50, 2026-04-18, L2 Sprint Day 12):** D-052 closed — the prompt-level inversion-guard + extrapolation-guard follow-up surfaced by D-050's residual hallucination pattern on `c46023c9`. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). `spelix-auditor` PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH / 2 MEDIUM pre-existing hygiene); `spelix-security-reviewer` PASS. Prod E2E on the same bench fixture sessions 46–49 used — **`cove_verified` flipped false → true**, **`faithfulness` improved 0.82 → 0.88** (not the predicted regression). See E2E Findings — D-052 verification at bottom of this file. Backend: 1701 → 1704 tests (+3 D-052 structural-assertion tests). See `backlog.md` "## Completed — L2 Sprint Day 12 — D-052" for full commit detail and gate verdicts.
-
-# Session 49 Handoff → Session 50: D-050 CoVe claim-extraction refinement shipped to prod (PR #90)
-
-**Context refresh:** Session 49 (2026-04-18, L2 Sprint Day 11, same calendar day as sessions 46 + 47 + 48) closed D-050 — the claim-extraction prompt refinement follow-up surfaced by session 48's D-048 fix working correctly. 4-commit PR via subagent-driven-development (spelix-coaching-engineer + spec-reviewer + code-quality-reviewer + one review fix-up). Auditor PASS_WITH_FINDINGS (0 CRITICAL / 0 HIGH), security-reviewer PASS, E2E on prod with the same bench fixture sessions 46–48 used. **Core D-050 goal achieved — all extracted claims are now principle-shaped**, zero lifter-specific measurements. `faithfulness` dropped 0.92 → 0.82 (still above 0.8 gate). `cove_verified=false` persists for a NEW reason — filed as D-052.
+**Context refresh (session 51, 2026-04-19, L2 Sprint Day 13):** D-044 investigated and deferred. 4-commit PR (3 investigation scripts + ADR-REPDET-03 + backlog-deferral). No production code changed. Merged at `fbb7611`; deploy-to-production green. Revised root-cause interpretation captured in ADR-REPDET-03: the 13 detected motions on `atharva-bench.mov` correspond to 5 working reps + ~8 setup/re-grip/rack motions; detector is faithful, not broken. Re-scoped as new backlog row D-056 (post-L2: distinguish working-reps from non-working bar motions via velocity/dwell/ROM-consistency features). Parameter-tuning path and Tier-1 visibility-gating path both empirically rejected with data.
 
 ## 1. Completed
 
-### PR #90 (`6c41953`) — D-050 refine CoveVerificationService claim-extraction prompt to principle-level only
+### PR #98 (`fbb7611`) — D-044 investigation closeout
 
 Merged via `mcp__github__merge_pull_request` with `merge_method="merge"` (NOT squash). 4 commits preserved.
 
 | Ref | What | Commit |
 |---|---|---|
-| L2-D050-01 | TDD failing tests: 3 new tests appended to `backend/tests/unit/test_cove.py` — `test_claim_extraction_prompt_emphasises_principle_level` (asserts "principle" + "measurement" + SKIP markers), `test_claim_extraction_prompt_includes_worked_examples` (asserts ≥2 example markers + "extract"), `test_claim_extraction_prompt_still_references_falsifiability` (regression guard on "falsifiable"/"testable"/"research" vocabulary). | `e2d74e6` |
-| L2-D050-02 | Impl: rewrite `_build_claim_extraction_prompt` body in `backend/app/services/cove.py` (lines 109-166) with the refined prompt — explicit PRINCIPLE-vs-MEASUREMENT distinction, SKIP directive for measurements, translate-not-invent rule with elbow-38° example, 4 worked `Coaching says / Extract:` example blocks. Signature, call sites, max_tokens, model, and response schema UNCHANGED. | `647450a` |
-| L2-D050-03 | Live-API smoke script `backend/scripts/oneoff/smoke_cove_claim_extraction_d050.py` — operator qualitative-gate tool, calls real Haiku 4.5 against a synthetic `CoachingOutput` matching session 48 bench shape. Not run in CI. | `7cab235` |
-| L2-D050-04 | Code-review fix-up: tighten the `Extract:` label assertion from `assert "extract" in lowered` (too weak — passes on the prompt's opening "extracting" word) to `assert lowered.count("extract:") >= 2` (requires the worked-example labels). | `9d6a447` |
-| L2-D050-PR | PR #90 → CI 6/6 green on `9d6a447` (Backend Lint 35s, Backend Tests 2m14s, Frontend Lint 24s, Frontend Tests 1m23s, Secret Scanning 10s, Vercel pass) → spelix-auditor PASS_WITH_FINDINGS (0 CRITICAL, 0 HIGH, 3 MEDIUM all non-blocking — M-01/M-02 deferred ADR+backlog to this docs commit, M-03 SaMD-exclusion test suggestion) → spelix-security-reviewer PASS clean on all 8 checks → merge → Deploy to Production 37s on `6c41953` → droplet HEAD `/home/deploy/spelix` at `6c41953` + containers healthy (backend + redis healthy, worker up) → Playwright E2E on prod bench fixture. | `6c41953` (merge) |
+| L2-D044-INV-01 | `backend/scripts/oneoff/diagnose_rep_detection_d044.py` — per-fixture pose extract + raw/smoothed angle stats + SM-vs-PV split + matplotlib plot to `/tmp/d044-<stem>.png`. Operator-run. (Subagent: spelix-cv-engineer.) | `95be9ba` |
+| L2-D044-INV-02 | `backend/scripts/oneoff/sweep_rep_detection_d044.py` — 640-combo grid over `(savgol_window ∈ {7,11,15,21}, polyorder ∈ {2,3}, prominence ∈ {20,25,30,35,40}, min_rep_s ∈ {0.5,0.75,1.0,1.5})`. Writes `/tmp/d044-sweep.csv`. Operator-run. | `f402e97` |
+| L2-D044-INV-03 | `backend/scripts/oneoff/prototype_visibility_gate.py` — Tier-1 `sigmoid(visibility) * sigmoid(presence)` masking + linear-interp prototype at thresholds {0.25, 0.30, 0.35, 0.40}. Caches MediaPipe extraction per fixture. Operator-run. | `5b92e3e` |
+| L2-D044-INV-04 | ADR-REPDET-03 appended to `decisions.md` (findings, 7 rejected alternatives, consequences). `backlog.md` D-044 row flipped `open → deferred-post-L2`; new D-056 successor row added (post-L2 design work: velocity/dwell/ROM-consistency rep classifier). | `c3007bc` |
+| L2-D044-PR | PR #98 → CI 6/6 green (Backend Lint 36s, Backend Tests 1m51s, Frontend Lint 28s, Frontend Tests 1m26s, Secret Scanning 13s, Vercel pass) → merge → Deploy to Production green on `fbb7611` → worktree `../spelix-d044` removed → remote branch `fix/d044-bench-over-count` deleted. No prod E2E run (docs-only, no behavioural change). | `fbb7611` (merge) |
 
-### Prod E2E (2026-04-18 20:03–20:12 UTC) — D-050 fix verified
+### Investigation data points captured in ADR-REPDET-03
 
-Fresh upload of `atharva-bench-nw-10s-720p.mp4` (same fixture sessions 46 + 47 + 48 used) on `spelix.app` under admin test account. Analysis `c46023c9-b098-4083-9c19-dad174b14a04`. Screenshot: `e2e/screenshots/d050-post-fix-results-c46023c9.png`.
+- atharva-bench.mov baseline: SM=13, PV=21, hybrid=13. GT=5. 4 of 13 rep detections have invalid negative `min_angle` (Savgol polynomial overshoot below [0°, 180°]).
+- atharva-bench-nw-10s-720p.mp4: SM=0, PV=1, hybrid=1. GT=1. Clean signal (raw elbow [37.7, 153.0]).
+- atharva-squat.mov: SM-path 5, hybrid=5. GT=5. (Earlier "squat=12" was my diagnostic-script bug — hardcoded elbow angle instead of hip.)
+- atharva-deadlift.mov: SM=0 (elbow stays above 160° standing threshold — expected for deadlift where arms don't flex), PV=4 via elbow-angle-computed-on-deadlift (wrong angle but shows stable signal). Sweep script used correct hip angle → hybrid=5 ✓.
+- Sweep result: 0/640 combos land 5/1/5/5 exactly. 0/640 get bench ≤ 7 with squat=5 AND deadlift=5 exactly.
+- Visibility prototype: Tier-1 confidence on bench.mov ranges 0.25–0.49 (mean 0.37). Low-angle frames mean 0.258 vs mid-range 0.373 — weak correlation. Thresholds 0.30/0.35 leave bench at 13; 0.40 drops bench to 8 but regresses squat to 4.
 
-| Metric | Session 46 (`6aa7b42b`, pre-M04/M05) | Session 48 (`bfbed270`, post-D-048) | Session 49 (`c46023c9`, post-D-050) |
-|---|---|---|---|
-| analysis status | completed | completed | completed |
-| `retrieval_source` | `papers_only_fallback` ❌ | `coach_brain_primary` ✅ | `coach_brain_primary` ✅ |
-| `degraded_mode` | false | false | false |
-| `eval_scores.faithfulness` | **`0.0`** ❌ | **`0.92`** ✅ | **`0.82`** (above 0.8 gate) |
-| `eval_scores.cove_verified` | `false` (silent crash) | `false` (measurement Uncertains) | `false` (hallucinated-inversion No) |
-| `cove_iterations` count | 0 / empty | 2 | 2 |
-| iter1 / iter2 claim count | n/a | 11 / 15 | **9 / 8** (tighter) |
-| Claim-shape (Gate C) | n/a | 9/15 measurements → Uncertain | **0/8 measurements, 7/8 principles → Yes** ✅ |
-| console errors / 4xx-5xx | 0 | 0 | 0 |
+### Plan file on main
 
-**Gate A (cove_verified=true): FAIL** — still false. But not for the pre-D-050 reason (measurement-Uncertain) — for a NEW reason (extractor inverts/invents principles). See D-052 below.
-
-**Gate B (faithfulness≥0.85): MARGINAL** — 0.82. Still above the 0.80 RAGAS gate (`faithfulness_passed=true`). Plan's "acceptable 0.5–0.85" band — the drop reflects a denominator-shift (fewer measurement-Uncertain claims to average over), not a quality loss.
-
-**Gate C (principle-shaped claims): PASS** ✅ — all 17 claims across both iterations are principle-level statements about biomechanics (not about THIS lifter's measured values). Representative examples:
-- iter 1: "The optimal elbow angle from the torso during the descent of the bench press is 45–75°." → **Yes**, "Source 1 explicitly states..."
-- iter 2: "The recommended eccentric phase duration for bench press is approximately 2 seconds." → **Yes**, "Source 2 states 'Control the eccentric at a consistent tempo — aim for a 2-second descent.'"
-- iter 2: "At lockout, the bar should be directly over the shoulder joint with elbows fully extended and scapular retraction maintained." → **Yes**, "Source 3 explicitly states..."
-
-Compare to session 48 `bfbed270` which had claims like "Did the eccentric phase duration measure 5.16 seconds?" (measurement, Uncertain) — these are gone. **Core D-050 goal accomplished.**
-
-### Why `cove_verified=false` persists — new root cause for D-052
-
-Iteration 2 on `c46023c9` reached **7/8 Yes** but the single No blocked convergence:
-
-- Q: "Does an excessively slow eccentric phase make it harder to maintain consistent bar path control and hit the correct touch point on the chest?"
-- A: **No** — "Source 2 states that a rushed (FAST) descent reduces time under tension and makes it harder to hit the correct touch point, not a SLOW descent."
-
-The extractor INVERTED the source's direction (fast-descent is bad → extracted as "slow-descent is bad"). Iteration 1 additionally invented three principles not in the coaching output:
-- "minimum of 60°" (coaching never stated a minimum)
-- "60–100° reference range" (not in coaching or sources)
-- "stretch-shortening cycle disruption from extreme eccentric" (not in sources)
-
-The refined prompt's `"do not invent a principle that was not written"` rule is too soft — it catches bare-measurement-to-invented-principle but does NOT catch inversions or extrapolations of stated principles. **D-052** will add an explicit inversion-guard + a before/after worked example for inverted-principle hallucination.
-
-### Audit verdicts (pre-merge)
-
-- **spelix-auditor** (PR #90) — PASS_WITH_FINDINGS. 0 CRITICAL / 0 HIGH. 3 MEDIUM:
-  - M-01: ADR-COVE-02 not yet in `decisions.md` at PR time. Landed in this docs close-out commit per plan (matches session-48 D-048 precedent). Closed.
-  - M-02: D-050 backlog row still `open` at PR time. Flipped to `done` in this docs close-out commit. Closed.
-  - M-03: Optional test hardening — add `test_claim_extraction_prompt_excludes_samd_vocabulary` asserting the prompt excludes "injury risk" / "injury prevention" (user-facing forbidden forms). Non-blocking suggestion. Not filed as its own D-### — low value given the CLAUDE.md-level constraint declaration already in `cove.py` line 9, and the existing code-review process would catch any drift.
-- **spelix-security-reviewer** (PR #90) — PASS clean. 0 CRITICAL / 0 HIGH. All 8 checks passed: no user-facing string additions (the prompt is internal), no SaMD/FTC drift, error-handling invariants preserved (`verify()` top-level try/except byte-identical to pre-PR), no new logging that could leak coaching content, no secret exposure (`ANTHROPIC_API_KEY` read via `os.getenv` in smoke script), no JWT/RLS/auth touch, no new prompt-injection surface (f-string surface unchanged from pre-PR), test mocking safe (pure string assertions, no API calls), ADR-COVE-01 style preserved.
-
-### Worker log observations (non-blocking, D-049 + new D-053)
-
-- **D-049** Pydantic `Citation` serializer warnings still present on every coaching call with citations (visible on `c46023c9` run). Non-functional — coaching still completes. D-049 row remains `open`.
-- **D-053** (new): distillation lifecycle_decision logs show `qdrant search failed ('AsyncQdrantClient' object has no attribute 'search') — treating as ADD` warnings for every candidate promotion check. Known gotcha per `backend/CLAUDE.md` — the `qdrant-client` API has shifted, `AsyncQdrantClient.search` is deprecated/removed. Currently silent-fallback to `ADD` means every candidate passes the "no similar existing" check, over-admitting duplicates to the review queue. Migrate to `query_points` or the new API. Filed as D-053 in backlog.
+`docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md` — the investigation plan written earlier today. UNCOMMITTED on main (plan was superseded by ADR-REPDET-03 as the canonical record). Untracked; safe to delete or leave — harmless either way. Not committed to keep the PR history clean.
 
 ## 2. Remaining
 
-### Session 50 Priority 1 — non-code blockers (unchanged)
+### Session 52 Priority 1 — non-code blockers (unchanged, critical path for L2)
 
 | ID | Title | Status |
 |---|---|---|
-| — | Kin expert onboarding call (still pending since session 30) — target 10+ papers by 2026-05-03 | open, blocks expert corpus push, **14 days to L2 deadline** |
+| — | Kin expert onboarding call (pending since session 30) — target 10+ papers by 2026-05-03 | open, blocks expert corpus push, **13 days to L2 deadline** |
 | — | Expert corpus push — first 10 papers via expert portal | blocked on expert call |
 | — | Landing page V1 status verification on prod | unclear, needs re-check |
 
-### Session 51 Priority 2 — D-### maintenance bundle (candidate)
+### Session 52 Priority 2 — D-### maintenance bundle (all S, zero-risk, ~2h single PR)
 
-All six items below are Size S, zero-risk (no migrations, no prod verification needed). Could land as one bundled PR in ~2h of work. Replaces the old Session 50 Priority 2 bundle (D-052 ✅ and D-053 ✅ both shipped end of session 50).
+Replaces old Session 50/51 P2 scope (D-052 ✅ + D-053 ✅ already shipped). Six items below could land as one bundled PR.
 
-| ID | Title | Size | Source |
-|---|---|---|---|
-| D-046 | Hoist `_HAIKU_MODEL` to shared `app/constants.py`. | S | auditor M-03 on PR #85 |
-| D-047 | Additive test in `test_distillation_cove_brain.py` for pre-fix M-05 failure mode via stubbed `ValidationError`. | S | code-reviewer on PR #85 |
-| D-049 | `Citation` Pydantic serializer warning spam in worker logs on every coaching call (still present on session 50 runs). Non-functional. | S | sessions 46 + 48 + 49 + 50 worker logs |
-| D-051 | Additive regression test for `_run_cove_loop` else-branch (`iteration == max_iterations`) via `max_iterations=1` + "No" answer. The `if` branch is covered; the structurally-identical `else` branch at `cove.py:389` is not. | S | auditor M-02 on PR #88 |
-| D-054 | Narrow the `except Exception` catch in `lifecycle_decision` to emit `logger.error` for Qdrant 4xx auth failures (sustained 401/403 currently invisible at WARNING-only severity). Non-blocking, keep broad fallback intact. | S | security-reviewer on PR #94 |
-| D-055 | Add `testpaths = ["tests"]` under `[tool.pytest.ini_options]` in `backend/pyproject.toml` so `scripts/oneoff/` smoke scripts can't be accidentally collected. | S | auditor M-01 on PR #92 |
+| ID | Title | Size | Deps | Source |
+|---|---|---|---|---|
+| D-046 | Hoist `_HAIKU_MODEL = "claude-haiku-4-5-20251001"` into shared constant (currently duplicated in `app/distillation/cove_brain.py` + `extract.py`; `app/services/cove.py` has its own) | S | — | auditor M-03 on PR #85 |
+| D-047 | Additive coverage test in `test_distillation_cove_brain.py` for pre-fix M-05 failure mode via stubbed `ValidationError` → `BrainCoveResult.explanation == "evaluation_failed: ValidationError"` | S | — | code-reviewer on PR #85 |
+| D-049 | `Citation` Pydantic serializer warning spam in worker logs on every coaching call with citations. Non-functional. | S | — | sessions 46 + 48 + 49 + 50 worker logs |
+| D-051 | Additive regression test for `_run_cove_loop` else-branch (`iteration == max_iterations`) via `max_iterations=1` + "No" answer. Structural coverage of `cove.py:389`. | S | — | auditor M-02 on PR #88 |
+| D-054 | Narrow the `except Exception` catch in `lifecycle_decision` to emit `logger.error` for Qdrant 4xx auth failures (sustained 401/403 currently invisible at WARNING-only severity). Keep broad fallback intact. | S | — | security-reviewer on PR #94 |
+| D-055 | Add `testpaths = ["tests"]` under `[tool.pytest.ini_options]` in `backend/pyproject.toml` so `scripts/oneoff/` smoke/diagnostic scripts can't be accidentally collected. | S | — | auditor M-01 on PR #92 |
 
-### Session 50 Priority 3 — PR #84 D-### follow-ups (carry-over unchanged)
+### Session 52 Priority 3 — PR #84 D-### follow-ups (D-044 closed via deferral this session)
 
-| ID | Title | Size | Source |
-|---|---|---|---|
-| D-042 | Wire `_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` through `ThresholdConfig` (FR-SCOR-11) | S | auditor H-1 |
-| D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` | S | auditor M-2 |
-| D-044 | Investigate `atharva-bench.mov` 13-rep over-count (MediaPipe flicker / Savgol over-smoothing) | M | session 45 |
+| ID | Title | Size | Deps | Status |
+|---|---|---|---|---|
+| D-042 | Wire `_PROMINENCE_DEG` + `_STANDING_THRESHOLD` + `_DEPTH_THRESHOLD` + `_MIN_REP_DURATION_S` through `ThresholdConfig` (FR-SCOR-11) | S | — | open |
+| D-043 | Additive test: partial descent with <20° prominence in `test_rep_detection.py` must return 0 reps | S | — | open |
+| D-044 | `atharva-bench.mov` 13-rep over-count investigation | M | — | **deferred-post-L2** (session 51, ADR-REPDET-03) |
+| D-056 | **Post-L2 successor to D-044** — distinguish working reps from non-working bar motions (velocity/dwell-time/ROM-consistency features, possibly ML classifier) | L | — | open-post-L2 |
 
-### Session 50 Priority 4 — P3-007 D-### bundle (carry-over unchanged)
+### Session 52 Priority 4 — P3-007 D-### bundle (carry-over unchanged)
 
 | ID | Title | Size |
 |---|---|---|
@@ -129,7 +77,7 @@ All six items below are Size S, zero-risk (no migrations, no prod verification n
 |---|---|---|
 | D-037 | Surface top-2 similar existing approved entries on P3-006 review card | open |
 | D-038 | Add `compensation` to `coach_brain_candidates.entry_type` CHECK constraint | open |
-| D-039 | Re-run CoVe after admin content edit on approve | D-048 partially addresses (CoVe runs); D-050 improved claim shape; D-052 needed for reliable `cove_verified=true` |
+| D-039 | Re-run CoVe after admin content edit on approve | partially addressed by D-048/D-050/D-052 |
 | P3-008 | FR-BRAIN-08 auto-triage — blocks on ≥50 human-reviewed candidates | deferred post-L2 |
 | D-029 | SaMD rename `injury_advice_accurate` → `movement_advice_accurate` | LOW |
 | D-030 | Orphan `rag_documents` cleanup cron | LOW |
@@ -139,57 +87,51 @@ All six items below are Size S, zero-risk (no migrations, no prod verification n
 
 ## 3. Test counts
 
-**Backend** (post-merge local):
-- Baseline pre-session-49: 1698 passed, 25 skipped.
-- Post-D-050: **1701 passed, 25 skipped, 0 failed** (+3 D-050 prompt-structure tests).
+**Backend** (post-merge local; no production code changed this session):
+- **1704 passed, 27 skipped, 0 failed** (unchanged from post-D-053 baseline session 50).
 - `uv run ruff check .` — clean.
-- `uv run pyright app/` — **0 errors, 0 warnings, 0 informations**.
-- New/updated test file: `backend/tests/unit/test_cove.py` (+107 lines, 3 new tests, 1 assertion tightened in fix-up).
+- `uv run pyright app/` — 0 errors, 0 warnings, 0 informations.
+- **No new tests.** Investigation scripts are operator-run; no CI collection.
 - **Known failures:** none.
 
-**Frontend**: `npx tsc --noEmit` — 0 errors. vitest passed on PR head in 1m23s.
+**Frontend:**
+- `npx tsc --noEmit` — 0 errors (unchanged).
+- vitest — passed on PR head in 1m26s (unchanged).
+- **Known failures:** none.
 
-**CI on PR #90**:
-- `9d6a447` (final head): all 6 gates pass on run `24602908124` (Backend Lint 35s, Backend Tests 2m14s, Frontend Lint 24s, Frontend Tests 1m23s, Secret Scanning 10s, Vercel pass).
-- Merge commit `6c41953` Deploy to Production green in 37s on run `24612712882`.
+**CI on PR #98:**
+- `c3007bc` (PR head): 6/6 gates pass.
+- Merge commit `fbb7611` Deploy to Production green.
 
-## 4. Key learnings captured in this session
+## 4. E2E verification
 
-1. **Fixing the claim-shape surfaces the next failure mode.** Sessions 46–48 observed `faithfulness=0.0` (crash), then `faithfulness=0.92` + `cove_verified=false` (measurement claims → Uncertain). Session 49 (D-050) fixed the measurement-claim problem (all claims now principle-shaped) but immediately exposed a hallucination pattern: the extractor inverts the source's direction and invents principles not in the coaching. This is the typical arc — fix the visible layer, observe the next. The refined prompt's `"do not invent a principle that was not written"` rule turned out to be too soft for inversions; D-052 will tighten it. Worth remembering that each prompt-refinement round may need another round.
-
-2. **Two-stage subagent review caught one genuine Important issue.** The spec-compliance reviewer passed 6/6 checks, but the code-quality reviewer found a test-assertion gap the implementer's self-review missed: `assert "extract" in lowered` passed whether or not the worked-example `Extract:` labels existed (because the prompt's opening "extracting" verb satisfied the substring). Tightened to `assert lowered.count("extract:") >= 2` via a one-line fix-up commit. This justifies the two-stage review loop on prompt-only PRs where unit-test-and-compile gates alone can miss subtle semantic test weakness.
-
-3. **D-050 was a prompt-only diff — still shipped the full 5-gate workflow.** 3 files, +308/-7 lines, no `max_tokens` / model / signature changes. Subagent-driven-development scaled down gracefully for this small change: single implementer dispatch for Tasks 1-4 (branch + TDD + impl + smoke), spec reviewer → APPROVED, code-quality reviewer → APPROVED after fix-up, spelix-auditor + spelix-security-reviewer both PASS. Full workflow took ~40 minutes including CI + deploy + prod E2E.
-
-4. **The `faithfulness` denominator-shift is expected when you filter claim shape.** Session 48 `faithfulness=0.92` covered 11+15 claims (many measurement-Uncertain). Session 49 `faithfulness=0.82` covers 9+8 principle-only claims. Fewer claims in the denominator amplifies the impact of any single low-faith claim — 0.92 → 0.82 is not a quality regression, it's a denominator artifact. The D-050 plan's "acceptable 0.5–0.85 band" correctly anticipated this.
-
-5. **Prod oneoff SSH debugging pattern stayed dormant this session.** Worker log inspection via `ssh spelix-droplet "docker logs spelix-worker-1 --since 10m"` was sufficient to diagnose the stuck-processing symptom (turned out to be just slow CV stage, not actually stuck). The `docker exec spelix-backend-1 /app/.venv/bin/python` path (documented in session 47 handoff) was not needed.
+**SKIPPED — docs-only session.** No user-facing feature merged; no prod behavioural change. `rep_detection.py`, `signal_processing.py`, API endpoints, frontend components all untouched.
 
 ## 5. Blockers
 
-**Code-side:** none — PR #90 shipped, verified on prod, screenshot captured, handoff + ADR-COVE-02 + backlog + D-052/D-053 written. D-046 through D-053 + D-042/D-043/D-044 are bundle-ready for next session.
+**Code-side:** none — PR #98 shipped, deployed, verified via CI.
 
 ### Non-code blockers (carry-over, unchanged)
 
-- **Kin expert onboarding call** still pending since session 30. **14 days to 2026-05-03 L2 deadline.** Each day of slip compounds against landing readiness.
+- **Kin expert onboarding call** still pending since session 30. **13 days to 2026-05-03 L2 deadline.** Each day of slip compounds against landing readiness.
 
 ### Worktree / branch state
 
-- Feature branch `fix/d050-cove-claim-extraction-principles` merged on origin; can be deleted via `git push origin --delete fix/d050-cove-claim-extraction-principles` when cleanup is desired.
-- Docs branch `docs/d050-closeout` for this handoff commit — will be merged shortly.
-- Local `main` at `6c41953` (PR #90 merge commit) — will advance after this docs close-out PR merges.
+- `fix/d044-bench-over-count` branch: merged (`fbb7611`), remote branch deleted, worktree `../spelix-d044` removed.
+- Untracked `docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md` on main — superseded by ADR-REPDET-03; can be deleted or left. Harmless either way.
 - Pre-existing `M frontend/src/api/__tests__/beta.test.ts` modification carried from session 47 is still in the working tree (unrelated, noted since session 47).
 
-## 6. E2E Findings — D-050 verification
+## 6. Key learnings captured in this session
 
-- **Analysis UUID:** `c46023c9-b098-4083-9c19-dad174b14a04` (bench fixture, admin test account, fresh upload post-D-050).
-- **Screenshot:** `e2e/screenshots/d050-post-fix-results-c46023c9.png`.
-- **Pre-fix (`bfbed270`, post-D-048):** `faithfulness=0.92`, `cove_verified=false`, claims mostly measurement-Uncertain.
-- **Post-fix (`c46023c9`, post-D-050):** `faithfulness=0.82` (above 0.8 gate), `cove_verified=false` (new reason — see below), claims 100% principle-shaped, iter 2 reached 7/8 Yes.
-- **Claim-shape comparison (iter 2):**
-  - Pre-fix examples (measurement-Uncertain): "Did the eccentric phase duration measure 5.16 seconds?" → Uncertain.
-  - Post-fix examples (principle-Yes): "Is the recommended eccentric phase duration for bench press approximately 2 seconds?" → **Yes**, "Source 2 states 'Control the eccentric at a consistent tempo — aim for a 2-second descent.'"
-- **Remaining Gate-A blocker (D-052):** iteration 2's single No was "an excessively slow eccentric makes bar path control harder" — extractor INVERTED source 2's fast-descent finding. Iter 1 additionally invented `minimum 60°`, `60–100° range`, `stretch-shortening cycle` principles not present in the coaching output. The translate-not-invent rule needs an inversion-guard.
+1. **The systematic-debugging "Iron Law" saved time.** Plan wrote 4 hypotheses (A prominence, B distance, C fallback trigger, D savgol) BEFORE running any code. First diagnostic on atharva-bench.mov immediately invalidated A/B/C (peak/valley fallback didn't fire — SM produced 13). Then the sweep invalidated D at scale (0/640 combos hit target). Then the visibility-gate prototype invalidated a new Hypothesis F. Total investigation time: ~3 hours of MediaPipe wall time. Total wasted code changes: 0. Compare to "guess-and-check" mode where each hypothesis failure would have required its own PR/revert cycle.
+
+2. **Plan-written-before-evidence-gathered has limits.** The 4 hypotheses in the plan were plausible but all wrong — the real root cause was not in the plan at all. Lesson: when writing investigation plans, the hypothesis section is scaffolding, not prediction. The plan's value is structuring the evidence-gathering pipeline; the actual hypothesis picks only after diagnostics run.
+
+3. **Parameter sweeps are cheap compared to serial hypothesis testing.** 640 combos in one script run vs. 4-10 separate PR cycles. Even at 30 min MediaPipe-extraction-per-fixture cost, the sweep paid off by exhaustively proving NO parameter combo works. Without it, we would likely have shipped `w=11` (13→12) as a "partial fix" and called D-044 done.
+
+4. **Deferred is a valid outcome.** The right framing is not "we failed to fix D-044" but "we re-scoped the problem from 1-hour parameter tweak to a design-level classifier (D-056)". ADR-REPDET-03 captures the 7 rejected alternatives so post-L2 reviewer does not retread any of them.
+
+5. **Tier-1 visibility scores on real video are much lower than CLAUDE.md's UI-label bands imply.** `sigmoid(visibility) × sigmoid(presence)` on atharva-bench.mov ranges 0.25–0.49. The CLAUDE.md thresholds (≥0.80 High, 0.65–0.79 Moderate, 0.50–0.64 Low, <0.50 Very Low) imply real videos should produce mostly High/Moderate confidence. They don't — real videos land uniformly in "Very Low" territory. Either the formula is wrong (maybe visibility/presence are already post-sigmoid in current MediaPipe versions?) or the UI labels need recalibration. Filed as observation in ADR-REPDET-03; not investigated further. **This is worth a look in the post-L2 confidence-calibration pass.**
 
 ## 7. Next session start
 
@@ -197,91 +139,38 @@ All six items below are Size S, zero-risk (no migrations, no prod verification n
 /status
 
 # PRIORITY 1 — Non-code blockers (unchanged — critical path for L2 launch)
-#   - Kin expert onboarding call (target: 10+ papers by 2026-05-03, 14 days left)
+#   - Kin expert onboarding call (target: 10+ papers by 2026-05-03, 13 days left)
 #   - Expert corpus push: first 10 papers via expert portal
 #   - Landing page V1 prod verification
 
-# PRIORITY 2 — D-### maintenance bundle (all S, zero-risk)
-#   Session 50 shipped D-052 ✅ (PR #92) and D-053 ✅ (PR #94) — highest-impact items done.
-#   Remaining candidates below could land as one bundled PR in ~2h:
+# PRIORITY 2 — D-### maintenance bundle (all S, zero-risk, ~2h bundled PR)
 #   - D-046 hoist _HAIKU_MODEL to shared constant
 #   - D-047 additive ValidationError regression test for BrainCoveService
-#   - D-049 Citation serializer warning cleanup (still visible in session 50 worker logs)
+#   - D-049 Citation serializer warning cleanup (still visible in prod worker logs)
 #   - D-051 additive test for cove.py `else` branch Step 4 revision
-#   - D-054 narrow lifecycle_decision except-catch: logger.error for Qdrant 4xx auth (NEW)
-#   - D-055 add testpaths = ["tests"] to backend/pyproject.toml (NEW)
+#   - D-054 narrow lifecycle_decision except-catch: logger.error for Qdrant 4xx auth
+#   - D-055 add testpaths = ["tests"] to backend/pyproject.toml
 
-# PRIORITY 3 — PR #84 D-### follow-ups (unchanged)
-#   - D-042 wire rep-detection knobs through ThresholdConfig
+# PRIORITY 3 — PR #84 D-### follow-ups (D-044 closed via deferral session 51)
+#   - D-042 wire rep-detection knobs through ThresholdConfig (FR-SCOR-11)
 #   - D-043 partial-descent <20° prominence test
-#   - D-044 atharva-bench.mov signal-quality investigation
+#   - D-056 post-L2 design work: working-rep-vs-non-working-motion classifier
 
 # PRIORITY 4 — P3-007 D-### bundle (unchanged)
 
 # ENVIRONMENT NOTES:
-#   - Local main = 701dc77 (PR #96 merge — D-054/D-055 backlog rows filed).
-#     Prior: 5f06ae3 (PR #95 D-053 docs), 88fb0ae (PR #94 D-053 code),
-#     8740388 (PR #92 D-052 code), 09eaa95 (PR #93 D-052 docs).
-#   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42 — now routing correctly
-#     post-D-053 (no longer silent ADD fallback).
-#   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32.
+#   - Local main = fbb7611 (PR #98 merge — D-044 investigation closeout).
+#     Prior: 701dc77 (PR #96 D-054/D-055 backlog rows), 5f06ae3 (PR #95 D-053 docs),
+#     88fb0ae (PR #94 D-053 code).
+#   - No env flag changes in session 51.
+#   - SPELIX_DISTILLATION_ENABLED=1 on prod since session 42 (unchanged).
+#   - SPELIX_PHASE3_AGENT_ENABLED=1 on prod since session 32 (unchanged).
 #   - Test admin account: atharva6905+admin-p3006@gmail.com /
 #     SpelixAdmin-P3006-Test-2026! (UUID cb18c043-5a16-4990-a3d3-02ed4890bf56).
-#     Now owns 9 analyses. Two most relevant session-50 runs:
-#       * 43f25db8 (bench, post-D-052) — cove_verified=true, faithfulness=0.88
-#       * 0e5d755b (bench, post-D-053) — first real FR-BRAIN-17 routing:
-#         2 UPDATE + 3 ADD candidates with non-zero nearest_cosine_sim.
-#   - Qdrant coach_brain: still 26 points (24 seeds + 2 from pre-D-053 runs). Session-50
-#     post-D-053 candidates landed in coach_brain_candidates (pending review), not
-#     coach_brain_entries — separation is load-bearing per ADR-DISTILL-01.
+#     Owns 9 analyses (unchanged from session 50 — no new analyses ingested session 51).
+#   - Qdrant coach_brain: 26 points (24 seeds + 2 from pre-D-053 distillation) (unchanged).
 #   - Droplet deploy dir is /home/deploy/spelix (NOT /srv/spelix).
-#   - Backend test baseline: 1703 passed, 27 skipped, 0 failed (post-D-053).
+#   - Backend test baseline: 1704 passed, 27 skipped, 0 failed (unchanged).
+#   - Untracked on main: docs/superpowers/plans/2026-04-18-d044-atharva-bench-over-count.md
+#     (investigation plan, superseded by ADR-REPDET-03 — delete or keep, both safe).
 ```
-
-## E2E Findings — D-052 verification (session 50)
-
-- **Analysis UUID:** `43f25db8-c922-4211-bb98-5266c8ff6f74` (bench fixture, admin test account, fresh upload post-D-052).
-- **Screenshot:** `e2e/screenshots/d052-post-fix-results-43f25db8.png`.
-- **Pre-fix (`c46023c9`, session 49 post-D-050):** `faithfulness=0.82`, `cove_verified=false`, iter 2 reached 7/8 Yes with one No blocked by inverted eccentric-direction claim.
-- **Post-fix (`43f25db8`, session 50 post-D-052):** `faithfulness=0.88`, `cove_verified=true`, iter 2 converged at 7/7 Yes — all claims principle-shaped, all source-cited.
-- **Gate A (`cove_verified=true`): PASS** ✅ — the headline D-052 metric flipped false → true.
-- **Gate B (`faithfulness ≥ 0.70`): PASS** ✅ — 0.88 (improved vs 0.82 pre-fix; net-positive denominator behavior, not the regression the plan anticipated).
-- **Gate C (no iter-2 inversions or extrapolations): PASS** ✅ — all 7 iter-2 claims principle-shaped, zero inversions, zero invented min/max/alternate-range.
-- **Residual observation** (non-blocker): iteration 1 still surfaced ONE extrapolation — claim 1: "Optimal elbow angle at the bottom of the bench press is 60–100° from the torso" (coaching 45–75° over-read). The Step 3 verification correctly answered No (sources 1+4 specify 45–75°), the Step 4 revision narrowed it, and iter 2 converged cleanly on the correct 45–75° principle. CoVe's self-correction worked as designed — the guard is not a total barrier in iter 1, but the revision loop closes the gap and iter 2 is pristine. No follow-up D-### filed yet; if future prod E2Es show iter-2 convergence failing for inversion/extrapolation reasons, file a new D-### then.
-- **Console / network cleanliness:** zero console errors, zero 4xx/5xx on the analysis flow.
-
-### Session 50 post-D-052 environment notes
-- Local `main` = `8740388` (PR #92 merge) — will advance after this docs close-out PR merges.
-- Test admin account now owns **8 analyses** — newest is `43f25db8` (bench, post-D-052 verification with `cove_verified=true` + `faithfulness=0.88`).
-- Backend test baseline: **1704 passed, 27 skipped, 0 failed**.
-
-## Worker Log Findings — D-053 verification (session 50)
-
-- **Analysis UUID (fresh post-D-053 upload):** `0e5d755b-6506-4f2b-80ca-638eca1f7ccc` (bench fixture, admin test account).
-- **Distillation task log:** `task distill_analysis ■ 0d480aaec3… ← {'status': 'ok', ...}` — graph converged without any `except Exception` branch firing.
-- **Pre-fix warning (sessions 42–49):** `lifecycle_decision: qdrant search failed ('AsyncQdrantClient' object has no attribute 'search') — treating as ADD` on every distillation run.
-- **Post-fix warning check** (`ssh spelix-droplet "docker logs spelix-worker-1 --since 10m | grep -iE 'search|query_points failed'"`): **zero matches**. Both the legacy `.search` warning AND the new `query_points failed` warning are absent (the latter would only fire on a legitimate Qdrant Cloud outage, which did not occur during this verification).
-- **Candidate-routing sanity** (Supabase SQL on `coach_brain_candidates ORDER BY created_at DESC LIMIT 5`):
-
-| Row | Decision | nearest_cosine_sim | review_status |
-|---|---|---|---|
-| 1 | ADD | 0.7258 | pending |
-| 2 | ADD | 0.7420 | pending |
-| 3 | **UPDATE** | **0.8387** | superseded (FR-BRAIN-18 confirmation row) |
-| 4 | **UPDATE** | **0.8757** | superseded (FR-BRAIN-18 confirmation row) |
-| 5 | ADD | 0.7205 | pending |
-
-Pre-D-053 every row had `nearest_cosine_sim=0.0, lifecycle_decision=ADD`. Post-D-053 the FR-BRAIN-17 routing works: UPDATE band (0.75–0.92) correctly matches, triggers FR-BRAIN-18's `confirmation_count` bump, writes an audit-only `superseded` row; ADD band (<0.75) routes novel candidates to the review queue.
-
-- **Gate verdicts:**
-  - **Gate A (zero `.search` warnings in worker logs):** PASS ✅
-  - **Gate B (non-zero `nearest_cosine_sim` on post-D-053 rows):** PASS ✅
-  - **Gate C (routing distribution includes UPDATE + ADD, not uniform ADD):** PASS ✅
-- **Historical residue** (accepted, not backfilled per ADR-DISTILL-07): pre-D-053 `coach_brain_candidates` rows retain `nearest_cosine_sim=0.0, lifecycle_decision=ADD`. Admin reviewers may see some historical `ADD` entries that should have been `UPDATE`. Not revisited.
-
-### Session 50 post-D-053 environment notes
-- Local `main` = `88fb0ae` (PR #94 merge) — will advance after this docs close-out PR merges.
-- Test admin account now owns **9 analyses** — newest is `0e5d755b` (bench, post-D-053 verification with live FR-BRAIN-17 routing).
-- Backend test baseline: **1703 passed, 27 skipped, 0 failed**.
-- Qdrant coach_brain point count: still 26 (24 seeds + 2 from pre-D-053 distillation runs that were silent-fallback `ADD` to `coach_brain_candidates`; the new D-053 candidates from `0e5d755b` also land in `coach_brain_candidates`, not `coach_brain_entries`, and only promote to entries after admin review via the P3-006 queue).
-- Next priority candidates: D-046, D-047, D-049, D-051 (all open). D-053 was the last high-impact Priority 2 item; remaining ones are minor hygiene / LOW severity.
