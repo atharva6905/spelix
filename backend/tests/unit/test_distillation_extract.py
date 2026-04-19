@@ -95,18 +95,18 @@ async def test_extract_accepts_compensation_entry_type() -> None:
     UI banner expects."""
     state = _state_with_coaching_output(
         CoachingOutput(
-            summary="Knee valgus compensates for weak hip abduction on descent.",
+            summary="Excessive forward lean at the squat bottom compensates for limited ankle dorsiflexion.",
             strengths=["Consistent bar path"],
             issues=[
                 Issue(
                     rep_number=1,
-                    joint="knee",
-                    description="knee valgus driven by weak hip abduction",
+                    joint="ankle",
+                    description="limited dorsiflexion range forces forward torso lean at bottom",
                     severity="Medium",
                 ),
             ],
-            correction_plan=["Strengthen hip abductors to resolve knee valgus."],
-            recommended_cues=["Push knees out"],
+            correction_plan=["Improve ankle dorsiflexion mobility to reduce forward lean."],
+            recommended_cues=["Heels down, chest up"],
             citations=[],
             safety_warnings=[],
             confidence_level="Moderate",
@@ -122,11 +122,11 @@ async def test_extract_accepts_compensation_entry_type() -> None:
         return_value=ExtractedInsights(
             candidates=[
                 CandidateInsight(
-                    content="Knee valgus compensates for weak hip abduction.",
+                    content="Excessive forward lean at the squat bottom compensates for limited ankle dorsiflexion.",
                     exercise="squat",
-                    phase="descent",
+                    phase="bottom",
                     entry_type="compensation",
-                    trigger_tags=["knee_cave", "hip_weakness"],
+                    trigger_tags=["forward_lean", "ankle_mobility"],
                     confidence_score=0.85,
                 ),
             ]

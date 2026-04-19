@@ -45,10 +45,10 @@ def _build_extraction_prompt(coaching_output: CoachingOutput, exercise_type: str
         "(setup|descent|bottom|ascent|lockout|general|null), entry_type "
         "(cue|correction|principle|drill|compensation), trigger_tags (e.g. knee_cave, "
         "forward_lean).",
-        "- When the insight describes a multi-step causal chain where one weakness "
-        "drives a secondary error (e.g. 'knee valgus compensates for weak hip "
-        "abduction'), tag entry_type=\"compensation\". Biomechanics reviewers "
-        "will gate these separately (FR-ADMN-12).",
+        "- When the insight describes a root-cause chain — a primary weakness that "
+        "mechanically drives a downstream error — tag entry_type=\"compensation\". "
+        "Example: weak hip abductors driving knee valgus. Do NOT tag compensation "
+        "for simple technique errors that have no root-cause explanation in the text.",
         "- If there is nothing worth distilling, return an empty list.",
         "",
         f"Coaching summary: {coaching_output.summary}",
