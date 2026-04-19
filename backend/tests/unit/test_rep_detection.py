@@ -694,3 +694,87 @@ class TestHybridStateMachineWins:
             f"Hybrid must return state-machine result (2) when SM >= 1, "
             f"not peak/valley result. Got {len(reps)}."
         )
+
+
+# ---------------------------------------------------------------------------
+# 13. D-043 — partial descent below prominence rejected by BOTH paths
+# ---------------------------------------------------------------------------
+
+
+class TestPartialDescentBelowProminence:
+    """
+    D-043 (follow-up from spelix-auditor M-2 on PR #84).
+
+    A unidirectional partial descent with <20° amplitude must return 0 reps
+    from BOTH the state-machine and the peak/valley detectors. The existing
+    `test_prominence_filters_low_amplitude_noise` test in §11 covered
+    oscillating noise; this covers a single-dip signal, which exercises
+    different code paths in find_peaks and the SM STANDING → DESCENDING
+    transition check.
+    """
+
+    def test_partial_descent_fifteen_deg_rejected_by_state_machine(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        State-machine rejection: signal never crosses STANDING-hysteresis
+        (150° - 5° = 145°). Signal stays above 155° throughout the dip,
+        so state remains STANDING → 0 reps.
+        """
+        from app.cv.rep_detection import _detect_reps_state_machine
+
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+
+        reps = _detect_reps_state_machine(
+            angles, "squat", "standard", FPS, cfg
+        )
+
+        assert reps == [], (
+            f"State machine must reject 15° partial descent "
+            f"(valley 155°, standing-hysteresis 145°). Got {len(reps)} reps."
+        )
+
+    def test_partial_descent_fifteen_deg_rejected_by_peak_valley(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        Peak/valley rejection: valley prominence 15° < 20° knob → find_peaks
+        excludes the dip. 0 reps.
+        """
+        from app.cv.rep_detection import _detect_reps_peak_valley
+
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+
+        reps = _detect_reps_peak_valley(angles, "squat", FPS, cfg)
+
+        assert reps == [], (
+            f"Peak/valley must reject 15° partial descent "
+            f"(prominence knob 20°). Got {len(reps)} reps."
+        )
+
+    def test_partial_descent_fifteen_deg_rejected_by_public_hybrid(
+        self, cfg: ThresholdConfig
+    ) -> None:
+        """
+        End-to-end via the public hybrid entry point. Verifies neither path
+        catches it after the hybrid dispatch (SM returns 0 → falls through
+        to peak/valley → also 0).
+        """
+        stand_pre = np.full(30, 170.0)
+        partial_dip = np.array([170.0, 165.0, 160.0, 155.0, 160.0, 165.0, 170.0])
+        stand_post = np.full(30, 170.0)
+        angles = np.concatenate([stand_pre, partial_dip, stand_post])
+        landmarks = _make_landmarks(len(angles))
+
+        reps = detect_reps(angles, landmarks, "squat", "standard", FPS, cfg)
+
+        assert reps == [], (
+            f"Hybrid detect_reps must reject 15° partial descent via "
+            f"both paths. Got {len(reps)} reps."
+        )
