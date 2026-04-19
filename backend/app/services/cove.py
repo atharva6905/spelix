@@ -11,9 +11,9 @@ SaMD-triggering language in prompts or output strings.
 
 Models:
     Steps 1-3 (claim extraction, question generation, verification):
-        claude-haiku-4-5-20251001
+        ``HAIKU_MODEL`` (imported from ``app.constants``; D-046).
     Step 4 (revision):
-        claude-sonnet-4-6
+        ``SONNET_MODEL`` (defined below).
 
 Error handling:
     The verify() method never raises. All exceptions are caught and returned
