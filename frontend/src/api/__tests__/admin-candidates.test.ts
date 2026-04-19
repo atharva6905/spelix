@@ -3,6 +3,7 @@ import {
   listCoachBrainCandidates,
   approveCoachBrainCandidate,
   rejectCoachBrainCandidate,
+  getCoachBrainCandidateSimilar,
   type CoachBrainCandidate,
 } from "@/api/admin";
 
@@ -110,5 +111,46 @@ describe("rejectCoachBrainCandidate", () => {
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ reason: "off-topic" }));
+  });
+});
+
+describe("getCoachBrainCandidateSimilar", () => {
+  it("fetches top 2 similar entries", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "aaa",
+              content: "knees out",
+              exercise: "squat",
+              phase: "descent",
+              entry_type: "cue",
+              cosine_sim: 0.88,
+            },
+            {
+              id: "bbb",
+              content: "push floor apart",
+              exercise: "squat",
+              phase: "ascent",
+              entry_type: "cue",
+              cosine_sim: 0.81,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const resp = await getCoachBrainCandidateSimilar("c1");
+    expect(resp.items).toHaveLength(2);
+    expect(resp.items[0]!.cosine_sim).toBe(0.88);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/admin/coach-brain/candidates/c1/similar"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token",
+        }),
+      }),
+    );
   });
 });

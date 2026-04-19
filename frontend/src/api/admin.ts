@@ -327,3 +327,37 @@ export async function rejectCoachBrainCandidate(
     },
   );
 }
+
+export interface SimilarEntry {
+  id: string;
+  content: string;
+  exercise: "squat" | "bench" | "deadlift";
+  phase:
+    | "setup"
+    | "descent"
+    | "bottom"
+    | "ascent"
+    | "lockout"
+    | "general"
+    | null;
+  entry_type:
+    | "cue"
+    | "correction"
+    | "principle"
+    | "drill"
+    | "compensation";
+  cosine_sim: number;
+}
+
+export interface SimilarEntriesResponse {
+  items: SimilarEntry[];
+}
+
+export async function getCoachBrainCandidateSimilar(
+  id: string,
+  limit = 2,
+): Promise<SimilarEntriesResponse> {
+  return adminFetch<SimilarEntriesResponse>(
+    `/api/v1/admin/coach-brain/candidates/${id}/similar?limit=${limit}`,
+  );
+}
