@@ -61,6 +61,7 @@ EntryTypeLiteral = Literal[
     "correction",
     "principle",
     "drill",
+    "compensation",
 ]
 
 StatusLiteral = Literal["seed", "active", "deprecated"]

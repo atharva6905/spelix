@@ -28,7 +28,7 @@ class CoachBrainCandidate(TimestampMixin, Base):
             name="ck_coach_brain_candidates_phase",
         ),
         CheckConstraint(
-            "entry_type IN ('cue','correction','principle','drill')",
+            "entry_type IN ('cue','correction','principle','drill','compensation')",
             name="ck_coach_brain_candidates_entry_type",
         ),
         CheckConstraint(
