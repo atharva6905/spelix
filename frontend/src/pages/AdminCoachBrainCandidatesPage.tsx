@@ -187,7 +187,7 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
 
   return (
     <article className="rounded-lg bg-white p-6 shadow">
-      {(candidate.entry_type as string) === "compensation" && (
+      {candidate.entry_type === "compensation" && (
         <div className="mb-4 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-900">
           <p className="font-semibold">
             Compensation entry - biomechanics reviewer required

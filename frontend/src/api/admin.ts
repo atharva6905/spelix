@@ -248,7 +248,7 @@ export interface CoachBrainCandidate {
   id: string;
   exercise: "squat" | "bench" | "deadlift";
   phase: "setup" | "descent" | "bottom" | "ascent" | "lockout" | "general" | null;
-  entry_type: "cue" | "correction" | "principle" | "drill";
+  entry_type: "cue" | "correction" | "principle" | "drill" | "compensation";
   content: string;
   trigger_tags: string[];
   source_analysis_ids: string[];

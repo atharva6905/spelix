@@ -136,7 +136,7 @@ describe("AdminCoachBrainCandidatesPage - loading + list", () => {
 
   it("shows compensation banner when entry_type is compensation", async () => {
     apiMock.listCoachBrainCandidates.mockResolvedValue([
-      { ...candidate, entry_type: "compensation" as unknown as typeof candidate.entry_type },
+      { ...candidate, entry_type: "compensation" },
     ]);
     apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
 
