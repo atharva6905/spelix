@@ -886,3 +886,41 @@ This **falsified** all four backlog hypotheses (a Cohere SEARCH_QUERY/SEARCH_DOC
 
 **Related:** FR-BRAIN-06 (distillation pipeline), FR-BRAIN-17 (cosine routing thresholds), FR-BRAIN-18 (UPDATE semantics: confirmation_count + source_analysis_ids append), ADR-DISTILL-01 (candidate table separation), ADR-DISTILL-03 (coaching-path vs distillation-path CoVe scope), ADR-RAG-03 (1024-dim dense vectors). `backend/app/distillation/lifecycle.py` (migrated call + docstring), `backend/app/workers/deps.py` (wrapper pass-through), `backend/CLAUDE.md` (updated gotcha), `backend/tests/unit/test_distillation_lifecycle.py::test_lifecycle_decision_never_calls_legacy_search`, `backend/tests/unit/test_distillation_worker_body.py:276` (review fix-up). PR #94 (`88fb0ae`), session 50.
 
+## ADR-REPDET-03: D-044 atharva-bench.mov over-count — defer fix post-L2 after investigation rejects parameter-tuning and visibility-gating paths (Session 51, 2026-04-19)
+
+**Context:** Session 45 ADR-REPDET-02 shipped the hybrid state-machine + peak/valley detector. On the `atharva-bench.mov` fixture (23s @ 59fps, hand-counted ground truth = 5 working reps), the hybrid reports 13 reps — a 2.6× over-count. Session 51 investigated whether a surgical parameter change or a structural signal filter could fix this without regressing the three other in-repo fixtures (`atharva-bench-nw-10s-720p.mp4` GT=1, `atharva-squat.mov` GT=5, `atharva-deadlift.mov` GT=5).
+
+**Investigation** (tools preserved under `backend/scripts/oneoff/`):
+- `diagnose_rep_detection_d044.py` — per-fixture pose extract + raw/smoothed elbow stats + SM vs PV split + matplotlib plot.
+- `sweep_rep_detection_d044.py` — 640-combo grid over `(savgol_window ∈ {7,11,15,21}, polyorder ∈ {2,3}, prominence ∈ {20,25,30,35,40}, min_rep_s ∈ {0.5,0.75,1.0,1.5})`.
+- `prototype_visibility_gate.py` — Tier-1 `sigmoid(visibility) * sigmoid(presence)` masking + linear interpolation at thresholds {0.25, 0.30, 0.35, 0.40}.
+
+**Findings:**
+1. The over-count on `atharva-bench.mov` comes from the **state machine, not the peak/valley fallback**. All 13 reps have `min_angle` below the 85° BOTTOM threshold; 4 have negative `min_angle` (Savgol polynomial overshoot below the [0°, 180°] valid range).
+2. Raw elbow angle on `atharva-bench.mov` hits both 0° and 179.8° extremes — MediaPipe loses tracking during bar/elbow occlusion. Clean fixtures (`bench-nw-10s-720p`, `deadlift.mov`) stay well inside the valid range.
+3. **Zero combos in the 640-combo sweep** land all four fixtures at exact ground truth (5/1/5/5). **Zero combos** get bench ≤ 7 while preserving squat=5 AND deadlift=5 exactly. The tightest preserving knob is `savgol_window: 7 → 11` which only moves bench 13 → 12 (marginal).
+4. Tier-1 visibility gating is **ineffective**: raw `sigmoid(visibility) * sigmoid(presence)` on bench.mov ranges 0.25–0.49 (mean 0.37). Low-angle outlier frames (vis_min 0.26) correlate weakly with normal frames (vis_min 0.37). Thresholds 0.30 / 0.35 mask 16% / 24% of frames but bench still returns **13** reps. Threshold 0.40 masks 78% and drops bench to 8 but regresses squat to 4.
+
+**Revised root-cause interpretation:** the 13 detected state-machine rep cycles on `atharva-bench.mov` correspond to **5 working reps + ~8 setup / re-grip / rack motions** the lifter actually performed in the 23s clip. The detector is NOT hallucinating — it faithfully counts every full `STANDING → BOTTOM → STANDING` traversal. Distinguishing "working reps" from "non-working bar motions" requires signal features (velocity profile, dwell time, ROM consistency) that are beyond both threshold tuning and single-frame visibility gating.
+
+**Decision:**
+- **Defer D-044 code fix to post-L2.** Ship ONLY the investigation artifacts (diagnostic + sweep + prototype scripts) and this ADR. No change to `rep_detection.py` or `signal_processing.py`.
+- The L2 beta deadline (2026-05-03) is 14 days out. The maintenance bundle (D-046 / D-047 / D-049 / D-051 / D-054 / D-055) offers higher impact per hour than any of the three rejected D-044 paths.
+- Re-scope the problem post-L2 from "fix a parameter" to "distinguish working reps from non-working bar motions" — likely via velocity/dwell-time gating, possibly a secondary ML classifier. Needs design work, not a one-line change. Tracked as new backlog row D-056.
+
+**Consequences:**
+- `atharva-bench.mov` continues to report 13 reps on prod. Users uploading multi-motion bench clips will see inflated rep counts. Mitigation: the UI already clamps rep detail to the first N reps; downstream form scoring is per-rep so scores don't inflate, only the count display does.
+- No test-suite regression — no production code changed. Backend remains at 1704 passed / 27 skipped / 0 failed (post-D-053).
+- Session 51 subagent-driven-development + main-agent investigation spent ~3 hours of MediaPipe-extraction + parameter-sweep time. This is captured in the three scripts for future re-use when D-044 is reopened.
+
+**Rejected alternatives (documented so post-L2 reviewer does not retread):**
+- **Widen Savgol window (Hypothesis D):** rejected — w=11 moves bench 13 → 12 only, insufficient gain; w=15/21 breaks squat.
+- **Raise peak/valley prominence (Hypothesis A):** irrelevant — peak/valley fallback did not fire for bench.mov (SM returned 13).
+- **Raise peak/valley distance (Hypothesis B):** same irrelevance.
+- **Narrow fallback trigger (Hypothesis C):** same irrelevance.
+- **Tier-1 visibility gating (Hypothesis F):** rejected — `sigmoid(visibility) × sigmoid(presence)` correlates weakly with landmark-position error; thresholds that catch tracking-loss frames also mask many good frames (78% at t=0.40) and break squat.
+- **Post-hoc `min_angle` filter per exercise:** not implemented — would require per-exercise bounds tuning, fragile against future fixture variation, treats the symptom not the cause.
+- **Parameter-tweak quick win (ship w=11):** rejected on cost/benefit — one full PR/CI/deploy cycle for a 13→12 improvement is not the best use of sprint time.
+
+**Related:** ADR-REPDET-01, ADR-REPDET-02, FR-CVPL-15, FR-REPM-01, FR-REPM-05. Session 51, branch `fix/d044-bench-over-count`. Backlog: D-044 (deferred-post-L2), D-056 (post-L2 successor).
+
