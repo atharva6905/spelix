@@ -208,7 +208,7 @@ async def _run_coaching_imperative(
 
         openai_client = openai_mod.AsyncOpenAI()
     except Exception:
-        pass
+        logger.warning("OpenAI client init failed (imperative path); GPT-4o features disabled", exc_info=True)
 
     langfuse_client = await get_langfuse_client()
 
@@ -374,7 +374,7 @@ async def _run_coaching_imperative(
                             },
                         )
                     except Exception:
-                        pass  # observability is best-effort
+                        logger.warning("Langfuse trace failed (Qdrant-unavailable branch)", exc_info=True)
                 await pubsub_redis.publish(
                     f"coaching:{analysis_id}",
                     _json.dumps({"type": "phase", "phase": "degraded"}),
@@ -396,14 +396,14 @@ async def _run_coaching_imperative(
                         },
                     )
                 except Exception:
-                    pass  # observability is best-effort
+                    logger.warning("Langfuse trace failed (retrieval exception branch)", exc_info=True)
             try:
                 await pubsub_redis.publish(
                     f"coaching:{analysis_id}",
                     _json.dumps({"type": "phase", "phase": "degraded"}),
                 )
             except Exception:
-                pass  # pub/sub best-effort
+                logger.warning("Redis pub/sub publish failed (best-effort)", exc_info=True)
 
         await _write_heartbeat(redis)
 
@@ -572,7 +572,7 @@ async def _run_coaching_imperative(
                             value=1.0 if cove_verified else 0.0,
                         )
                     except Exception:
-                        pass  # observability is best-effort
+                        logger.warning("Langfuse score failed (faithfulness gate)", exc_info=True)
             except Exception:
                 logger.warning(
                     "Faithfulness gate failed for %s — continuing",
@@ -677,7 +677,7 @@ async def _run_coaching_graph(
 
                 openai_client = _openai.AsyncOpenAI()
             except Exception:
-                pass
+                logger.warning("OpenAI client init failed (graph path); GPT-4o features disabled", exc_info=True)
 
             kf_svc = KeyframeAnalysisService(openai_client)
             rep_metric_repo_kf = _RepMetricRepo(repo.db)
