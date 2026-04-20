@@ -117,6 +117,9 @@ class CandidateReviewService:
         from app.schemas.rag import RetrievedContext
         from app.services.qdrant import COLLECTION_PAPERS_RAG
 
+        assert self._retrieval_service is not None  # guarded by caller
+        assert self._cove_service is not None  # guarded by caller
+
         try:
             contexts: list[RetrievedContext] = (
                 await self._retrieval_service.hybrid_search(
