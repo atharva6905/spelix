@@ -333,6 +333,30 @@ class TestAdminRagCorpus:
         resp = admin_client.post(f"/api/v1/admin/rag/documents/{TEST_DOC_ID}/re-embed")
         assert resp.status_code == 400
 
+    @patch("app.api.v1.admin.RagDocumentRepository")
+    def test_list_rag_documents_invalid_review_status_422(self, MockRepo, admin_client):
+        instance = MockRepo.return_value
+        instance.list_all = AsyncMock(return_value=[])
+
+        resp = admin_client.get(
+            "/api/v1/admin/rag/documents",
+            params={"review_status": "bogus_value"},
+        )
+        assert resp.status_code == 422
+
+    @patch("app.api.v1.admin.RagDocumentRepository")
+    def test_list_rag_documents_excludes_uploading_by_default(
+        self, MockRepo, admin_client
+    ):
+        instance = MockRepo.return_value
+        instance.list_all = AsyncMock(return_value=[])
+
+        admin_client.get("/api/v1/admin/rag/documents")
+
+        instance.list_all.assert_called_once()
+        call_kwargs = instance.list_all.call_args.kwargs
+        assert call_kwargs.get("exclude_uploading") is True
+
 
 # ---------------------------------------------------------------------------
 # Admin Expert Queue (P2-036, FR-ADMN-07)
