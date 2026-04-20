@@ -7,11 +7,12 @@ afterEach(() => {
 
 describe("requestBetaAccess", () => {
   test("POSTs email + source + consent and returns response body on 201", async () => {
+    // Mirror the production API: the 201 body does NOT include email
+    // (PII-in-response was removed per security review).
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
           id: "00000000-0000-0000-0000-000000000000",
-          email: "a@b.com",
           status: "pending",
           created_at: "2026-04-15T00:00:00Z",
         }),
