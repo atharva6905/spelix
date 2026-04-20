@@ -180,8 +180,13 @@ async def run_distillation_graph(
         db_session=db_session,
     )
     from app.config_constants import DISTILLATION_RECURSION_LIMIT, DISTILLATION_TIMEOUT_SECONDS
+    from langchain_core.runnables import RunnableConfig
 
-    config: dict[str, Any] = {"recursion_limit": DISTILLATION_RECURSION_LIMIT}
+    config: RunnableConfig = {
+        "recursion_limit": DISTILLATION_RECURSION_LIMIT,
+        "run_name": "spelix-distillation",
+        "tags": ["distillation", f"analysis:{analysis_id}"],
+    }
     final_state = await asyncio.wait_for(
         graph.ainvoke(initial, config), timeout=DISTILLATION_TIMEOUT_SECONDS
     )
