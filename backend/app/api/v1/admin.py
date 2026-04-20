@@ -4,6 +4,7 @@ All routes require admin auth via get_admin_user dependency.
 Requirements: FR-ADMN-01 through FR-ADMN-05, FR-ADMN-06/07/10
 """
 
+import logging
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -48,6 +49,8 @@ from app.services.candidate_review import (
 )
 from app.services.cohere_client import get_cohere_client
 from app.services.qdrant import get_qdrant_client
+
+logger = logging.getLogger(__name__)
 
 # Keep references alive so ruff doesn't strip them (used in response_model)
 _USED = (
@@ -501,6 +504,32 @@ async def _get_review_service(
         cohere_client=cohere,
         qdrant_client=qdrant,  # type: ignore[arg-type]
     )
+
+    cove_service = None
+    retrieval_service = None
+    try:
+        import anthropic
+        import instructor
+
+        from app.distillation.cove_brain import BrainCoveService
+        from app.services.retrieval import RetrievalService
+
+        anthropic_client = anthropic.AsyncAnthropic()
+        instructor_client = instructor.from_anthropic(anthropic_client)
+        cove_service = BrainCoveService(
+            anthropic_client=anthropic_client,
+            instructor_client=instructor_client,
+        )
+        retrieval_service = RetrievalService(
+            cohere_client=cohere,
+            qdrant_client=qdrant,  # type: ignore[arg-type]
+        )
+    except Exception:
+        logger.warning(
+            "_get_review_service: failed to construct CoVe/retrieval deps — "
+            "CoVe re-run on edit will be skipped"
+        )
+
     return CandidateReviewService(
         db=db,
         candidate_repo=cand_repo,
@@ -508,6 +537,8 @@ async def _get_review_service(
         brain_embedding=brain_embedding,
         cohere_client=cohere,
         qdrant_client=qdrant,
+        cove_service=cove_service,
+        retrieval_service=retrieval_service,
     )
 
 
