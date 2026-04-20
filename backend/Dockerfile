@@ -1,5 +1,5 @@
 # Stage 1: builder — install all dependencies (including dev) for compilation
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ RUN uv sync --frozen
 COPY . .
 
 # Stage 2: runtime — lean image with only what's needed to run
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:804ddf3251a60bbf9c92e73b7566c40428d54d0e79d3428194edf40da6521286 AS runtime
 
 # System deps:
 #   - libgl1: OpenCV headless rendering
