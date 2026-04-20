@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.distillation.state import BrainCoveResult
 from app.models.coach_brain_candidate import (
     CoachBrainCandidate as CoachBrainCandidateRow,
 )
 from app.models.coach_brain_entry import CoachBrainEntry
+from app.schemas.rag import RetrievedContext
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
@@ -161,6 +163,230 @@ async def test_approve_applies_content_override_and_marks_edited():
     assert new_entry.content == "edited cue text"
     assert new_entry.extra_metadata["edited"] is True
     assert new_entry.extra_metadata["original_content"] == "original cue text"
+
+
+def _make_entry_repo_create():
+    """Return an entry_repo mock with a side-effectful async create."""
+    entry_repo = MagicMock()
+    entry_repo.create = AsyncMock(
+        side_effect=lambda e: (
+            e.__dict__.update(
+                id=uuid.uuid4(),
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            or e
+        )
+    )
+    return entry_repo
+
+
+@pytest.mark.asyncio
+async def test_approve_reruns_cove_when_content_edited():
+    """CoVe re-runs when content_override differs; new result is stored."""
+    candidate = _candidate_row(
+        content="original cue text",
+        cove_verified=False,
+        cove_explanation="evaluation_failed",
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+
+    cove_svc = MagicMock()
+    cove_svc.verify_claim = AsyncMock(
+        return_value=BrainCoveResult(
+            verified=True,
+            explanation="Re-verified after edit",
+        )
+    )
+    retrieval_svc = MagicMock()
+    retrieval_svc.hybrid_search = AsyncMock(
+        return_value=[MagicMock(spec=RetrievedContext)]
+    )
+
+    svc = CandidateReviewService(
+        db=db,
+        candidate_repo=cand_repo,
+        entry_repo=entry_repo,
+        brain_embedding=brain_embed,
+        cove_service=cove_svc,
+        retrieval_service=retrieval_svc,
+    )
+
+    await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        content_override="edited cue text",
+    )
+
+    new_entry = entry_repo.create.await_args.args[0]
+    assert new_entry.extra_metadata["cove_verified"] is True
+    assert new_entry.extra_metadata["cove_explanation"] == "Re-verified after edit"
+    assert new_entry.extra_metadata["cove_rerun"] is True
+    cove_svc.verify_claim.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_skips_cove_rerun_when_content_not_edited():
+    """When no content_override is given, CoVe is NOT re-run."""
+    candidate = _candidate_row(
+        cove_verified=True,
+        cove_explanation="original explanation",
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+
+    cove_svc = MagicMock()
+    cove_svc.verify_claim = AsyncMock()
+    retrieval_svc = MagicMock()
+    retrieval_svc.hybrid_search = AsyncMock(return_value=[])
+
+    svc = CandidateReviewService(
+        db=db,
+        candidate_repo=cand_repo,
+        entry_repo=entry_repo,
+        brain_embedding=brain_embed,
+        cove_service=cove_svc,
+        retrieval_service=retrieval_svc,
+    )
+
+    await svc.approve(candidate_id=candidate.id, admin_user_id=uuid.uuid4())
+
+    new_entry = entry_repo.create.await_args.args[0]
+    assert new_entry.extra_metadata["cove_verified"] is True
+    assert new_entry.extra_metadata["cove_explanation"] == "original explanation"
+    assert "cove_rerun" not in new_entry.extra_metadata
+    cove_svc.verify_claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_approve_falls_back_on_cove_rerun_failure():
+    """If BrainCoveService.verify_claim raises, approve still succeeds with original values."""
+    candidate = _candidate_row(
+        content="original cue text",
+        cove_verified=False,
+        cove_explanation="evaluation_failed",
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+
+    cove_svc = MagicMock()
+    cove_svc.verify_claim = AsyncMock(side_effect=RuntimeError("LLM timeout"))
+    retrieval_svc = MagicMock()
+    retrieval_svc.hybrid_search = AsyncMock(
+        return_value=[MagicMock(spec=RetrievedContext)]
+    )
+
+    svc = CandidateReviewService(
+        db=db,
+        candidate_repo=cand_repo,
+        entry_repo=entry_repo,
+        brain_embedding=brain_embed,
+        cove_service=cove_svc,
+        retrieval_service=retrieval_svc,
+    )
+
+    await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        content_override="edited cue text",
+    )
+
+    new_entry = entry_repo.create.await_args.args[0]
+    # Original CoVe values preserved on failure
+    assert new_entry.extra_metadata["cove_verified"] is False
+    assert new_entry.extra_metadata["cove_explanation"] == "evaluation_failed"
+    assert new_entry.extra_metadata["cove_rerun_error"] == "RuntimeError"
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_falls_back_on_retrieval_failure():
+    """If RetrievalService.hybrid_search raises, CoVe is skipped entirely."""
+    candidate = _candidate_row(
+        content="original cue text",
+        cove_verified=True,
+        cove_explanation="original explanation",
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+
+    cove_svc = MagicMock()
+    cove_svc.verify_claim = AsyncMock()
+    retrieval_svc = MagicMock()
+    retrieval_svc.hybrid_search = AsyncMock(side_effect=ConnectionError("Qdrant down"))
+
+    svc = CandidateReviewService(
+        db=db,
+        candidate_repo=cand_repo,
+        entry_repo=entry_repo,
+        brain_embedding=brain_embed,
+        cove_service=cove_svc,
+        retrieval_service=retrieval_svc,
+    )
+
+    await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        content_override="edited cue text",
+    )
+
+    new_entry = entry_repo.create.await_args.args[0]
+    # Original CoVe values preserved when retrieval fails
+    assert new_entry.extra_metadata["cove_verified"] is True
+    assert new_entry.extra_metadata["cove_explanation"] == "original explanation"
+    assert new_entry.extra_metadata["cove_rerun_error"] == "ConnectionError"
+    cove_svc.verify_claim.assert_not_awaited()
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_skips_cove_rerun_when_services_not_wired():
+    """Backward compat: edited approve works without cove_service/retrieval_service."""
+    candidate = _candidate_row(
+        content="original cue text",
+        cove_verified=False,
+        cove_explanation="evaluation_failed",
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+
+    # No cove_service or retrieval_service — positional-only ctor
+    svc = CandidateReviewService(db, cand_repo, entry_repo, brain_embed)
+
+    await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        content_override="edited cue text",
+    )
+
+    new_entry = entry_repo.create.await_args.args[0]
+    assert new_entry.content == "edited cue text"
+    # Original CoVe values forwarded unchanged
+    assert new_entry.extra_metadata["cove_verified"] is False
+    assert new_entry.extra_metadata["cove_explanation"] == "evaluation_failed"
+    assert "cove_rerun" not in new_entry.extra_metadata
+    db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
