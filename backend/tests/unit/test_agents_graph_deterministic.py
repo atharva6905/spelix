@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -180,3 +180,72 @@ async def test_wrap_trace_records_failed_node_in_state_trace():
     assert state["trace"][0]["node"] == "failing_node"
     assert state["trace"][0]["error"] == "synthetic failure"
     assert state["trace"][0]["output_keys"] == []
+
+
+def _run_graph_kwargs():
+    """Shared kwargs for run_coaching_graph calls in NFR-RELI-09 tests."""
+    return {
+        "analysis_id": uuid.uuid4(),
+        "user_id": uuid.uuid4(),
+        "exercise_type": "squat",
+        "exercise_variant": "high_bar",
+        "confidence_score": 0.85,
+        "body_stats": None,
+        "keyframe_analysis_text": None,
+        "mode": "deterministic",
+        "rep_metric_repo": AsyncMock(),
+        "retrieval_svc": AsyncMock(),
+        "thresholds": AsyncMock(),
+        "analysis_repo": AsyncMock(),
+        "coaching_svc": AsyncMock(),
+        "cove_svc": AsyncMock(),
+        "fg_svc": AsyncMock(),
+        "pubsub_redis": SimpleNamespace(publish=AsyncMock()),
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_sets_recursion_limit_15():
+    """NFR-RELI-09: recursion_limit must be 15, not the LangGraph default 25."""
+    mock_graph = AsyncMock()
+    mock_graph.ainvoke.return_value = {
+        "coaching_output": None,
+        "eval_scores": {},
+        "trace": [],
+        "cove_verified": False,
+        "retrieval_source": None,
+        "degraded_mode": False,
+    }
+
+    with patch("app.agents.graph.build_deterministic_graph", return_value=mock_graph):
+        await run_coaching_graph(**_run_graph_kwargs())
+
+    config = mock_graph.ainvoke.call_args[0][1]
+    assert config["recursion_limit"] == 15, (
+        f"NFR-RELI-09 requires recursion_limit=15, got {config['recursion_limit']}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_wraps_ainvoke_with_wait_for():
+    """NFR-RELI-09: graph.ainvoke must be wrapped in asyncio.wait_for(timeout=60.0)."""
+    import asyncio as _asyncio
+
+    mock_graph = AsyncMock()
+    mock_graph.ainvoke.return_value = {
+        "coaching_output": None,
+        "eval_scores": {},
+        "trace": [],
+        "cove_verified": False,
+        "retrieval_source": None,
+        "degraded_mode": False,
+    }
+
+    with (
+        patch("app.agents.graph.build_deterministic_graph", return_value=mock_graph),
+        patch("app.agents.graph.asyncio.wait_for", wraps=_asyncio.wait_for) as mock_wf,
+    ):
+        await run_coaching_graph(**_run_graph_kwargs())
+
+    mock_wf.assert_called_once()
+    assert mock_wf.call_args[1].get("timeout") == 60.0 or mock_wf.call_args[0][1] == 60.0
