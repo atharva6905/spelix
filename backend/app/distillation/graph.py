@@ -17,6 +17,7 @@ app/agents/graph.py) so NodeEvent rows accumulate in state['trace'].
 
 from __future__ import annotations
 
+import asyncio  # noqa: F401 — used at runtime in wait_for()
 import datetime as _dt
 import logging
 import time
@@ -178,7 +179,10 @@ async def run_distillation_graph(
         cove_service=cove_service_factory(),
         db_session=db_session,
     )
-    final_state = await graph.ainvoke(initial)
+    config: dict[str, Any] = {"recursion_limit": 15}
+    final_state = await asyncio.wait_for(
+        graph.ainvoke(initial, config), timeout=120.0
+    )
 
     trace_payload: dict[str, Any] = {
         "nodes_executed": final_state.get("trace") or [],

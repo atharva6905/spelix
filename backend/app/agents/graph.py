@@ -16,6 +16,7 @@ requested graph, invokes it, and returns the final AgentState.
 
 from __future__ import annotations
 
+import asyncio  # noqa: F401 — used at runtime in wait_for()
 import datetime as _dt
 import logging
 import time
@@ -464,10 +465,12 @@ async def run_coaching_graph(
         user_id=str(user_id),
         mode=mode,
     )
-    # recursion_limit prevents runaway loops in adaptive mode.
-    config["recursion_limit"] = 25
+    # NFR-RELI-09: recursion_limit=15, with asyncio.wait_for(timeout=60.0).
+    config["recursion_limit"] = 15
 
-    final_state = await graph.ainvoke(initial, config)
+    final_state = await asyncio.wait_for(
+        graph.ainvoke(initial, config), timeout=60.0
+    )
 
     serialized_nodes = serialize_trace_for_storage(final_state.get("trace") or [])
 
