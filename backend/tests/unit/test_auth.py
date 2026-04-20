@@ -18,7 +18,7 @@ import asyncio
 import base64
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -264,13 +264,6 @@ class TestGetAdminUser:
 class TestES256JWKSAuth:
     """Tests for the ES256/JWKS verification path in get_current_user (B-067)."""
 
-    def _make_mock_httpx_response(self, jwks_data: dict) -> MagicMock:
-        """Build a mock httpx.Response that returns the given JWKS dict."""
-        resp = MagicMock()
-        resp.json.return_value = jwks_data
-        resp.raise_for_status = MagicMock()
-        return resp
-
     def _reset_jwks_cache(self) -> None:
         """Reset the module-level JWKS cache between tests."""
         import app.api.deps as deps_module
@@ -289,7 +282,6 @@ class TestES256JWKSAuth:
         jwks_data = {"keys": [jwk]}
 
         token = _make_es256_jwt(private_key, kid="test-key-1")
-        mock_resp = self._make_mock_httpx_response(jwks_data)
 
         with patch("app.api.deps._get_jwks", new_callable=AsyncMock, return_value=jwks_data):
             from app.api.deps import get_current_user
