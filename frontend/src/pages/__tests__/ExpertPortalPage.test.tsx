@@ -95,7 +95,7 @@ describe("ExpertPortalPage", () => {
         },
       },
       error: null,
-    } as ReturnType<typeof supabase.auth.getSession> extends Promise<infer R> ? R : never);
+    } as any);  // eslint-disable-line @typescript-eslint/no-explicit-any
 
     // Default queue response
     vi.mocked(getExpertQueue).mockResolvedValue([
@@ -166,7 +166,7 @@ describe("ExpertPortalPage", () => {
         },
       },
       error: null,
-    } as ReturnType<typeof supabase.auth.getSession> extends Promise<infer R> ? R : never);
+    } as any);  // eslint-disable-line @typescript-eslint/no-explicit-any
 
     renderExpertPortalPage();
 

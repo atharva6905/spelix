@@ -113,7 +113,7 @@ describe("ExpertAnalysisDetailPage", () => {
         },
       },
       error: null,
-    } as ReturnType<typeof supabase.auth.getSession> extends Promise<infer R> ? R : never);
+    } as any);  // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(getExpertAnalysis).mockResolvedValue({
       id: ANALYSIS_ID,
