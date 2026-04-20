@@ -635,6 +635,12 @@ export default function ResultsPage() {
           <div className="mt-4">
             <ConfidenceBadge score={analysis.confidence_score} />
           </div>
+
+          {/* App-purpose statement — SRS FR-SCOR-09 */}
+          <p className="text-sm text-muted-foreground mt-2">
+            This analysis evaluates Movement Quality, Technique, Path &amp; Balance, and
+            Control — grounded in peer-reviewed biomechanics research.
+          </p>
         </div>
 
         {/* Phase 1: Form Score Cards (FR-RESL-01, FR-SCOR-01–08) */}

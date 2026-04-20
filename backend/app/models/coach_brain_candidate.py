@@ -74,6 +74,7 @@ class CoachBrainCandidate(TimestampMixin, Base):
     nearest_entry_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     nearest_cosine_sim: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 4), nullable=True)
     contradiction_flag: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    requires_technical_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     review_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     rejected_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     promoted_entry_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)

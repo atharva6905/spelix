@@ -41,6 +41,7 @@ class CoachBrainCandidateCreate(BaseModel):
     nearest_entry_id: uuid.UUID | None = None
     nearest_cosine_sim: float | None = None
     contradiction_flag: bool = False
+    requires_technical_review: bool = False
     review_status: ReviewStatusLiteral = "pending"
 
 
@@ -65,6 +66,7 @@ class CoachBrainCandidate(BaseModel):
     nearest_entry_id: uuid.UUID | None
     nearest_cosine_sim: float | None
     contradiction_flag: bool
+    requires_technical_review: bool
     review_status: ReviewStatusLiteral
     rejected_reason: str | None
     promoted_entry_id: uuid.UUID | None

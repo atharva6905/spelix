@@ -63,15 +63,11 @@ class TestGlobalExceptionHandler:
             == "https://www.spelix.app"
         )
 
-    def test_unhandled_exception_includes_exception_type_in_detail(self) -> None:
-        """The error envelope's detail must include the exception type +
-        a short message so production bugs are diagnosable from the browser
-        without server-log access.
-
-        Spelix is a small private app — the security cost of exposing
-        ``RuntimeError: ...`` is much smaller than the operational cost of
-        chasing bugs that show up as a generic "An unexpected error occurred".
-        Tracebacks are NOT leaked (those go to server logs only).
+    def test_unhandled_exception_does_not_leak_exception_detail(self) -> None:
+        """500 response must NOT expose exception type or message to clients
+        (M-01 security fix). SQL errors, file paths, and connection strings
+        can appear in exception messages and must stay server-side only.
+        The exception is still logged via logger.exception() server-side.
         """
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get(
@@ -80,11 +76,13 @@ class TestGlobalExceptionHandler:
         )
 
         body = response.json()
-        assert body["error"]["detail"] is not None
-        assert body["error"]["detail"]["type"] == "RuntimeError"
-        # The synthetic message text from the test route MUST be present —
-        # this is the whole point of enriching the handler.
-        assert "synthetic crash" in body["error"]["detail"]["message"]
+        body_text = response.text
+        # detail must be None — not a dict leaking exc type or message
+        assert body["error"]["detail"] is None
+        # Exception type name must not appear in the response
+        assert "RuntimeError" not in body_text
+        # Exception message text must not appear in the response
+        assert "synthetic crash" not in body_text
 
     def test_unhandled_exception_does_not_leak_traceback(self) -> None:
         """Stack traces stay in server logs, not in HTTP responses."""

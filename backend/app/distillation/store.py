@@ -55,6 +55,7 @@ async def store_entry(
             nearest_entry_id=row.nearest_entry_id,
             nearest_cosine_sim=row.nearest_cosine_sim,
             contradiction_flag=row.contradiction_flag,
+            requires_technical_review=(row.entry_type == "compensation"),
             review_status=row.review_status,
         )
         db_session.add(candidate_row)

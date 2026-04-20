@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,24 @@ if TYPE_CHECKING:
     from app.repositories.analysis import AnalysisRepository
 
 logger = logging.getLogger(__name__)
+
+_MAX_MESSAGE_LENGTH = 2000
+_XML_TAG_PATTERN = re.compile(
+    r"</?(?:system|human|assistant|tool_use|tool_result|function_call|function_result)[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_user_message(content: str) -> str:
+    """Sanitize user chat message before LLM context injection.
+
+    Truncates to 2000 chars and strips XML-like tags that could
+    confuse Claude's prompt structure.
+    """
+    content = content[:_MAX_MESSAGE_LENGTH]
+    content = _XML_TAG_PATTERN.sub("", content)
+    return content.strip()
+
 
 CHAT_MODEL = "claude-sonnet-4-6"
 CHAT_MAX_TOKENS = 512
@@ -89,7 +108,7 @@ class ChatService:
         messages: list[anthropic.types.MessageParam] = []
         for msg in history:
             messages.append({"role": msg.role, "content": msg.content})  # type: ignore[arg-type]
-        messages.append({"role": "user", "content": content})
+        messages.append({"role": "user", "content": _sanitize_user_message(content)})
 
         # Call Claude
         response = await self._anthropic_client.messages.create(

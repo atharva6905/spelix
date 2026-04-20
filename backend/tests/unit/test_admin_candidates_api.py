@@ -47,6 +47,7 @@ def _candidate_schema(**overrides) -> CoachBrainCandidate:
         nearest_entry_id=None,
         nearest_cosine_sim=None,
         contradiction_flag=False,
+        requires_technical_review=False,
         review_status="pending",
         rejected_reason=None,
         promoted_entry_id=None,
