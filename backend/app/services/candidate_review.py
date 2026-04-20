@@ -27,7 +27,10 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.schemas.candidate_review import SimilarEntry
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -236,7 +239,7 @@ class CandidateReviewService:
         *,
         candidate_id: uuid.UUID,
         limit: int = 2,
-    ) -> list["SimilarEntry"]:
+    ) -> list[SimilarEntry]:
         """Return top-N nearest active/seed Coach Brain entries for a candidate.
 
         FR-ADMN-12 (D-037): reviewer sees up to 2 existing entries closest to
@@ -319,13 +322,15 @@ class CandidateReviewService:
                 )
                 continue
             results.append(
-                SimilarEntry(
-                    id=entry.id,
-                    content=entry.content,
-                    exercise=entry.exercise,
-                    phase=entry.phase,
-                    entry_type=entry.entry_type,
-                    cosine_sim=float(hit.score),
+                SimilarEntry.model_validate(
+                    {
+                        "id": entry.id,
+                        "content": entry.content,
+                        "exercise": entry.exercise,
+                        "phase": entry.phase,
+                        "entry_type": entry.entry_type,
+                        "cosine_sim": float(hit.score),
+                    }
                 )
             )
         return results
