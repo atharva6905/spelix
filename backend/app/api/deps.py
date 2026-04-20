@@ -18,6 +18,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 
+from app.config_constants import JWKS_TTL_SECONDS as _JWKS_TTL_SECONDS
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -41,7 +43,6 @@ def _get_expected_issuer() -> str:
 # JWKS cache: fetched from Supabase and refreshed every 60 minutes
 _jwks_cache: dict | None = None
 _jwks_fetched_at: float = 0
-_JWKS_TTL_SECONDS = 3600
 
 
 def _get_supabase_url() -> str:

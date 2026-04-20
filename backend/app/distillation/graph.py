@@ -179,9 +179,11 @@ async def run_distillation_graph(
         cove_service=cove_service_factory(),
         db_session=db_session,
     )
-    config: dict[str, Any] = {"recursion_limit": 15}
+    from app.config_constants import DISTILLATION_RECURSION_LIMIT, DISTILLATION_TIMEOUT_SECONDS
+
+    config: dict[str, Any] = {"recursion_limit": DISTILLATION_RECURSION_LIMIT}
     final_state = await asyncio.wait_for(
-        graph.ainvoke(initial, config), timeout=120.0
+        graph.ainvoke(initial, config), timeout=DISTILLATION_TIMEOUT_SECONDS
     )
 
     trace_payload: dict[str, Any] = {

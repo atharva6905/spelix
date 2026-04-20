@@ -39,6 +39,7 @@ from app.agents.tools import (
     retrieve_coach_brain,
     retrieve_papers,
 )
+from app.config_constants import AGENT_RECURSION_LIMIT, AGENT_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -466,10 +467,10 @@ async def run_coaching_graph(
         mode=mode,
     )
     # NFR-RELI-09: recursion_limit=15, with asyncio.wait_for(timeout=60.0).
-    config["recursion_limit"] = 15
+    config["recursion_limit"] = AGENT_RECURSION_LIMIT
 
     final_state = await asyncio.wait_for(
-        graph.ainvoke(initial, config), timeout=60.0
+        graph.ainvoke(initial, config), timeout=AGENT_TIMEOUT_SECONDS
     )
 
     serialized_nodes = serialize_trace_for_storage(final_state.get("trace") or [])
