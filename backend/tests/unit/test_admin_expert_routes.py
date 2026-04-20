@@ -142,7 +142,7 @@ def _make_expert_review(**kwargs):
         annotator_id=kwargs.get("annotator_id", TEST_EXPERT_ID),
         issues_identified=kwargs.get("issues_identified", {"knee_cave": "moderate"}),
         coaching_quality_score=kwargs.get("coaching_quality_score", Decimal("7.5")),
-        injury_advice_accurate=kwargs.get("injury_advice_accurate", True),
+        movement_advice_accurate=kwargs.get("movement_advice_accurate", True),
         engagement_advice_accurate=kwargs.get("engagement_advice_accurate", True),
         suggested_corrections=kwargs.get("suggested_corrections", "Add knee tracking cue"),
         cited_sources=kwargs.get("cited_sources", [{"title": "Squat Biomechanics", "doi": "10.1234/squat"}]),
@@ -592,7 +592,7 @@ class TestExpertAnnotation:
             json={
                 "issues_identified": {"knee_cave": "moderate"},
                 "coaching_quality_score": 7.5,
-                "injury_advice_accurate": True,
+                "movement_advice_accurate": True,
                 "engagement_advice_accurate": True,
                 "suggested_corrections": "Add knee tracking cue",
                 "cited_sources": [{"title": "Squat Biomechanics"}],
@@ -620,6 +620,15 @@ class TestExpertAnnotation:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
+
+
+def test_annotation_create_uses_movement_advice_field():
+    """D-029: field must be movement_advice_accurate, not injury_advice_accurate."""
+    from app.schemas.expert_review import AnnotationCreate
+
+    schema = AnnotationCreate(movement_advice_accurate=True)
+    assert schema.movement_advice_accurate is True
+    assert not hasattr(schema, "injury_advice_accurate")
 
 
 # ---------------------------------------------------------------------------

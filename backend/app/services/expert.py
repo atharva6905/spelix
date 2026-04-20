@@ -130,7 +130,7 @@ class ExpertService:
             annotator_id=annotator_id,
             issues_identified=data.issues_identified,
             coaching_quality_score=data.coaching_quality_score,
-            injury_advice_accurate=data.injury_advice_accurate,
+            movement_advice_accurate=data.movement_advice_accurate,
             engagement_advice_accurate=data.engagement_advice_accurate,
             suggested_corrections=data.suggested_corrections,
             cited_sources=data.cited_sources,

@@ -26,7 +26,7 @@ class AnnotationCreate(BaseModel):
 
     issues_identified: dict[str, Any] = Field(default_factory=dict)
     coaching_quality_score: float | None = Field(default=None, ge=1.0, le=10.0)
-    injury_advice_accurate: bool | None = None
+    movement_advice_accurate: bool | None = None
     engagement_advice_accurate: bool | None = None
     suggested_corrections: str | None = None
     cited_sources: list[dict[str, Any]] = Field(default_factory=list)
@@ -41,7 +41,7 @@ class AnnotationResponse(BaseModel):
     annotator_id: uuid.UUID
     issues_identified: dict[str, Any]
     coaching_quality_score: float | None
-    injury_advice_accurate: bool | None
+    movement_advice_accurate: bool | None
     engagement_advice_accurate: bool | None
     suggested_corrections: str | None
     cited_sources: list[dict[str, Any]]
