@@ -13,7 +13,8 @@ Shape:
   - Task wrappers: `process_analysis`, `cascade_consent_withdrawal`,
     `ingest_paper` — thin decorators around the existing task functions
     (which still accept the ARQ-style `ctx: dict`).
-  - Cron wrappers: `cleanup_expired_artifacts_cron`, `ping_qdrant_health_cron`.
+  - Cron wrappers: `cleanup_expired_artifacts_cron`, `ping_qdrant_health_cron`,
+    `cleanup_orphan_papers_cron`.
 
 streaq 6.4.0 DI pattern (verified from installed source):
   - Task signature uses `WorkerDepends()` marker as a parameter default:
@@ -244,3 +245,13 @@ async def ping_qdrant_health_cron(
     from app.workers.keepalive import ping_qdrant_health as _ping
 
     await _ping(_adapt_ctx(context))
+
+
+@worker.cron("0 4 * * *")  # 04:00 UTC nightly (D-030)
+async def cleanup_orphan_papers_cron(
+    context: WorkerContext = WorkerDepends(),
+) -> int:
+    """Nightly orphan rag_documents cleanup. See cleanup_orphan_papers.py."""
+    from app.workers.cleanup_orphan_papers import cleanup_orphan_papers as _cleanup
+
+    return await _cleanup(_adapt_ctx(context))
