@@ -378,6 +378,21 @@ describe("ResultsPage", () => {
     expect(screen.getByText(/Conventional/)).toBeInTheDocument();
   });
 
+  // FR-SCOR-09: App-purpose statement visible on results page (H-08)
+  it("renders the FR-SCOR-09 app-purpose statement grounded in peer-reviewed biomechanics research", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis(),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(
+      screen.getByText(/grounded in peer-reviewed biomechanics research/i),
+    ).toBeInTheDocument();
+  });
+
   // 7-day artifact banner
   it("always shows the 7-day artifact banner", () => {
     mockUseAnalysisDetail.mockReturnValue({
