@@ -95,6 +95,8 @@ class CandidateReviewService:
         brain_embedding: BrainEmbeddingService,
         cohere_client: Any | None = None,
         qdrant_client: Any | None = None,
+        cove_service: Any | None = None,
+        retrieval_service: Any | None = None,
     ) -> None:
         self._db = db
         self._candidate_repo = candidate_repo
@@ -102,6 +104,57 @@ class CandidateReviewService:
         self._brain_embedding = brain_embedding
         self._cohere_client = cohere_client
         self._qdrant_client = qdrant_client
+        self._cove_service = cove_service
+        self._retrieval_service = retrieval_service
+
+    async def _rerun_cove_for_edited_content(
+        self,
+        *,
+        final_content: str,
+        exercise: str,
+        candidate: Any,
+    ) -> dict[str, Any]:
+        from app.schemas.rag import RetrievedContext
+        from app.services.qdrant import COLLECTION_PAPERS_RAG
+
+        try:
+            contexts: list[RetrievedContext] = (
+                await self._retrieval_service.hybrid_search(
+                    query=final_content,
+                    collection=COLLECTION_PAPERS_RAG,
+                    top_k=5,
+                    exercise_filter=exercise,
+                    rerank=True,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "candidate_review: CoVe re-run retrieval failed for candidate=%s (%s)",
+                candidate.id,
+                type(exc).__name__,
+            )
+            return {"cove_rerun_error": type(exc).__name__}
+
+        try:
+            from app.distillation.state import BrainCoveResult
+
+            result: BrainCoveResult = await self._cove_service.verify_claim(
+                claim=final_content,
+                contexts=contexts,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "candidate_review: CoVe re-run verify_claim failed for candidate=%s (%s)",
+                candidate.id,
+                type(exc).__name__,
+            )
+            return {"cove_rerun_error": type(exc).__name__}
+
+        return {
+            "cove_verified": result.verified,
+            "cove_explanation": result.explanation,
+            "cove_rerun": True,
+        }
 
     async def approve(
         self,
@@ -150,6 +203,14 @@ class CandidateReviewService:
         }
         if edited:
             extra_metadata["original_content"] = candidate.content
+
+            if self._cove_service is not None and self._retrieval_service is not None:
+                cove_overrides = await self._rerun_cove_for_edited_content(
+                    final_content=final_content,
+                    exercise=candidate.exercise,
+                    candidate=candidate,
+                )
+                extra_metadata.update(cove_overrides)
 
         entry = CoachBrainEntry(
             exercise=candidate.exercise,

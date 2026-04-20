@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.distillation.state import BrainCoveResult
 from app.models.coach_brain_candidate import (
     CoachBrainCandidate as CoachBrainCandidateRow,
 )
 from app.models.coach_brain_entry import CoachBrainEntry
+from app.schemas.rag import RetrievedContext
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
