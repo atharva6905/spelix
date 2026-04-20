@@ -971,3 +971,13 @@ above Step 5 (rep detection) and passes the same instance into `detect_reps`.
 `backend/tests/unit/test_pipeline_rep_detection_cfg.py`. ADR-018 (ThresholdConfig
 design). Supersedes ADR-REPDET-02 final bullet; otherwise preserves
 ADR-REPDET-02 hybrid-detection decisions.
+
+### ADR-COVE-RERUN-01: CoVe re-run on admin content edit is best-effort
+
+**Context:** D-039. When an admin edits a Coach Brain candidate's content during approval, the promoted entry should carry a CoVe result reflecting the edited content, not the stale distillation-time verification.
+
+**Decision:** Re-run `BrainCoveService.verify_claim` with fresh `papers_rag` contexts fetched via `RetrievalService.hybrid_search`. The re-run is best-effort: if retrieval or verification fails, the original `cove_verified`/`cove_explanation` values are preserved and `cove_rerun_error` is logged in `extra_metadata`. The approve flow never blocks on CoVe failure.
+
+**Rationale:** Blocking approval on CoVe would make the review queue unusable when Qdrant or Haiku is down. The admin has already reviewed the content and made a trust decision; CoVe is a secondary verification signal. Logging the error type in metadata provides an audit trail without blocking the reviewer's workflow.
+
+**Consequences:** Entries promoted during a CoVe outage will carry stale verification. The admin dashboard could surface a "CoVe stale" badge in a future iteration. The `cove_rerun` boolean in extra_metadata distinguishes re-verified entries from passthrough entries.
