@@ -293,9 +293,9 @@ function PreviousAnnotations({ annotations }: PreviousAnnotationsProps) {
             <div>
               <span className="text-xs font-medium text-gray-500">Movement Advice Accurate</span>
               <p>
-                {ann.injury_advice_accurate === true
+                {ann.movement_advice_accurate === true
                   ? "Yes"
-                  : ann.injury_advice_accurate === false
+                  : ann.movement_advice_accurate === false
                   ? "No"
                   : "N/A"}
               </p>
@@ -336,7 +336,7 @@ type RadioValue = "yes" | "no" | "na";
 
 interface AnnotationFormState {
   coaching_quality_score: string;
-  injury_advice_accurate: RadioValue | "";
+  movement_advice_accurate: RadioValue | "";
   engagement_advice_accurate: RadioValue | "";
   issues_identified: string;
   suggested_corrections: string;
@@ -352,7 +352,7 @@ interface AnnotationFormProps {
 function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
   const [form, setForm] = useState<AnnotationFormState>({
     coaching_quality_score: "",
-    injury_advice_accurate: "",
+    movement_advice_accurate: "",
     engagement_advice_accurate: "",
     issues_identified: "",
     suggested_corrections: "",
@@ -392,7 +392,7 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
 
     const payload: AnnotationCreate = {
       coaching_quality_score: qualityNum,
-      injury_advice_accurate: radioToBool(form.injury_advice_accurate),
+      movement_advice_accurate: radioToBool(form.movement_advice_accurate),
       engagement_advice_accurate: radioToBool(form.engagement_advice_accurate),
       issues_identified: parseJsonField(form.issues_identified) as Record<string, unknown>,
       suggested_corrections: form.suggested_corrections.trim() || null,
@@ -447,7 +447,7 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
         />
       </div>
 
-      {/* Movement advice accurate — replaces "injury_advice_accurate" in UI copy */}
+      {/* Movement advice accurate (D-029) */}
       <fieldset>
         <legend className="mb-1 text-sm font-medium text-gray-700">
           Movement Quality Advice Accurate?
@@ -457,10 +457,10 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
             <label key={val} className="flex items-center gap-1.5 text-sm text-gray-600">
               <input
                 type="radio"
-                name="injury_advice_accurate"
+                name="movement_advice_accurate"
                 value={val}
-                checked={form.injury_advice_accurate === val}
-                onChange={() => setForm((f) => ({ ...f, injury_advice_accurate: val }))}
+                checked={form.movement_advice_accurate === val}
+                onChange={() => setForm((f) => ({ ...f, movement_advice_accurate: val }))}
                 className="text-indigo-600"
               />
               {val === "yes" ? "Yes" : val === "no" ? "No" : "N/A"}
