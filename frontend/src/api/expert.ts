@@ -45,7 +45,7 @@ export interface ExpertAnalysisDetail {
 export interface AnnotationCreate {
   issues_identified: Record<string, unknown>;
   coaching_quality_score: number | null;
-  injury_advice_accurate: boolean | null;
+  movement_advice_accurate: boolean | null;
   engagement_advice_accurate: boolean | null;
   suggested_corrections: string | null;
   cited_sources: Record<string, unknown>[];
@@ -58,7 +58,7 @@ export interface AnnotationResponse {
   annotator_id: string;
   issues_identified: Record<string, unknown>;
   coaching_quality_score: number | null;
-  injury_advice_accurate: boolean | null;
+  movement_advice_accurate: boolean | null;
   engagement_advice_accurate: boolean | null;
   suggested_corrections: string | null;
   cited_sources: Record<string, unknown>[];

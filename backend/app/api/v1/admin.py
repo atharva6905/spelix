@@ -5,7 +5,7 @@ Requirements: FR-ADMN-01 through FR-ADMN-05, FR-ADMN-06/07/10
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -250,11 +250,20 @@ async def _get_review_repo(
     return AnalysisExpertReviewRepository(db)
 
 
+RagReviewStatusFilter = Literal[
+    "pending",
+    "needs_revision",
+    "reviewed_approved",
+    "reviewed_rejected",
+    "uploading",
+]
+
+
 @router.get("/rag/documents", response_model=list[RagDocumentResponse])
 async def list_rag_documents(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    review_status: str | None = Query(None),
+    review_status: RagReviewStatusFilter | None = Query(None),
     exercise_tag: str | None = Query(None),
     quality_tier: str | None = Query(None),
     user: CurrentUser = Depends(get_admin_user),
@@ -266,6 +275,7 @@ async def list_rag_documents(
         review_status=review_status,
         exercise_tag=exercise_tag,
         quality_tier=quality_tier,
+        exclude_uploading=review_status is None,
     )
     return [RagDocumentResponse.model_validate(d, from_attributes=True) for d in docs]
 

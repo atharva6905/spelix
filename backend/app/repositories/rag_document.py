@@ -29,10 +29,13 @@ class RagDocumentRepository:
         review_status: str | None = None,
         exercise_tag: str | None = None,
         quality_tier: str | None = None,
+        exclude_uploading: bool = False,
     ) -> list[RagDocument]:
         stmt = select(RagDocument).order_by(RagDocument.created_at.desc())
         if review_status is not None:
             stmt = stmt.where(RagDocument.review_status == review_status)
+        elif exclude_uploading:
+            stmt = stmt.where(RagDocument.review_status != "uploading")
         if exercise_tag is not None:
             stmt = stmt.where(RagDocument.exercise_tags.contains([exercise_tag]))
         if quality_tier is not None:

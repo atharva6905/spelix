@@ -142,7 +142,7 @@ def _make_expert_review(**kwargs):
         annotator_id=kwargs.get("annotator_id", TEST_EXPERT_ID),
         issues_identified=kwargs.get("issues_identified", {"knee_cave": "moderate"}),
         coaching_quality_score=kwargs.get("coaching_quality_score", Decimal("7.5")),
-        injury_advice_accurate=kwargs.get("injury_advice_accurate", True),
+        movement_advice_accurate=kwargs.get("movement_advice_accurate", True),
         engagement_advice_accurate=kwargs.get("engagement_advice_accurate", True),
         suggested_corrections=kwargs.get("suggested_corrections", "Add knee tracking cue"),
         cited_sources=kwargs.get("cited_sources", [{"title": "Squat Biomechanics", "doi": "10.1234/squat"}]),
@@ -332,6 +332,30 @@ class TestAdminRagCorpus:
 
         resp = admin_client.post(f"/api/v1/admin/rag/documents/{TEST_DOC_ID}/re-embed")
         assert resp.status_code == 400
+
+    @patch("app.api.v1.admin.RagDocumentRepository")
+    def test_list_rag_documents_invalid_review_status_422(self, MockRepo, admin_client):
+        instance = MockRepo.return_value
+        instance.list_all = AsyncMock(return_value=[])
+
+        resp = admin_client.get(
+            "/api/v1/admin/rag/documents",
+            params={"review_status": "bogus_value"},
+        )
+        assert resp.status_code == 422
+
+    @patch("app.api.v1.admin.RagDocumentRepository")
+    def test_list_rag_documents_excludes_uploading_by_default(
+        self, MockRepo, admin_client
+    ):
+        instance = MockRepo.return_value
+        instance.list_all = AsyncMock(return_value=[])
+
+        admin_client.get("/api/v1/admin/rag/documents")
+
+        instance.list_all.assert_called_once()
+        call_kwargs = instance.list_all.call_args.kwargs
+        assert call_kwargs.get("exclude_uploading") is True
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +592,7 @@ class TestExpertAnnotation:
             json={
                 "issues_identified": {"knee_cave": "moderate"},
                 "coaching_quality_score": 7.5,
-                "injury_advice_accurate": True,
+                "movement_advice_accurate": True,
                 "engagement_advice_accurate": True,
                 "suggested_corrections": "Add knee tracking cue",
                 "cited_sources": [{"title": "Squat Biomechanics"}],
@@ -596,6 +620,15 @@ class TestExpertAnnotation:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
+
+
+def test_annotation_create_uses_movement_advice_field():
+    """D-029: field must be movement_advice_accurate, not injury_advice_accurate."""
+    from app.schemas.expert_review import AnnotationCreate
+
+    schema = AnnotationCreate(movement_advice_accurate=True)
+    assert schema.movement_advice_accurate is True
+    assert not hasattr(schema, "injury_advice_accurate")
 
 
 # ---------------------------------------------------------------------------

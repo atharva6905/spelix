@@ -32,7 +32,7 @@ class AnalysisExpertReview(TimestampMixin, Base):
     annotator_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     issues_identified: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     coaching_quality_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(3, 1), nullable=True)
-    injury_advice_accurate: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    movement_advice_accurate: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     engagement_advice_accurate: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     suggested_corrections: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cited_sources: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
