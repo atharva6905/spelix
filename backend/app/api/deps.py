@@ -51,7 +51,7 @@ def _get_supabase_url() -> str:
     return url.rstrip("/")
 
 
-def _get_jwks() -> dict:
+async def _get_jwks() -> dict:
     """Fetch and cache the Supabase JWKS (public keys for JWT verification)."""
     global _jwks_cache, _jwks_fetched_at
 
@@ -60,7 +60,8 @@ def _get_jwks() -> dict:
         return _jwks_cache
 
     jwks_url = f"{_get_supabase_url()}/auth/v1/.well-known/jwks.json"
-    resp = httpx.get(jwks_url, timeout=10)
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(jwks_url, timeout=10)
     resp.raise_for_status()
     data: dict = resp.json()
     _jwks_cache = data
@@ -117,15 +118,16 @@ async def get_current_user(
     # Try JWKS-based verification first (ES256), fall back to legacy HS256
     payload = None
     try:
-        jwks_data = _get_jwks()
+        jwks_data = await _get_jwks()
         payload = jwt.decode(
             token,
             jwks_data,
             algorithms=["ES256", "RS256"],
             audience=_JWT_AUDIENCE,
         )
-    except Exception:
-        # Fall back to legacy HS256 symmetric secret
+    except (httpx.HTTPError, JWTError, ExpiredSignatureError, KeyError, ValueError):
+        # Fall back to legacy HS256 for expected JWKS/JWT errors only.
+        # KeyError/ValueError cover malformed JWKS response parsing.
         secret = _get_jwt_secret()
         if secret:
             try:
