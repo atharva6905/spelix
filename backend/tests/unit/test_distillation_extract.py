@@ -88,6 +88,59 @@ async def test_extract_insights_llm_error_returns_empty_safely() -> None:
     assert update["candidates"] == []
 
 
+@pytest.mark.asyncio
+async def test_extract_accepts_compensation_entry_type() -> None:
+    """D-038: the extract prompt must accept compensation-typed insights
+    from the LLM so the distillation pipeline can produce the rows the
+    UI banner expects."""
+    state = _state_with_coaching_output(
+        CoachingOutput(
+            summary="Excessive forward lean at the squat bottom compensates for limited ankle dorsiflexion.",
+            strengths=["Consistent bar path"],
+            issues=[
+                Issue(
+                    rep_number=1,
+                    joint="ankle",
+                    description="limited dorsiflexion range forces forward torso lean at bottom",
+                    severity="Medium",
+                ),
+            ],
+            correction_plan=["Improve ankle dorsiflexion mobility to reduce forward lean."],
+            recommended_cues=["Heels down, chest up"],
+            citations=[],
+            safety_warnings=[],
+            confidence_level="Moderate",
+            dimension_addressed="Movement Quality",
+            disclaimer=_disclaimer(),
+            raw_prompt_tokens=0,
+            raw_completion_tokens=0,
+        )
+    )
+    anthropic_client = MagicMock()
+    instructor_client = MagicMock()
+    instructor_client.chat.completions.create = AsyncMock(
+        return_value=ExtractedInsights(
+            candidates=[
+                CandidateInsight(
+                    content="Excessive forward lean at the squat bottom compensates for limited ankle dorsiflexion.",
+                    exercise="squat",
+                    phase="bottom",
+                    entry_type="compensation",
+                    trigger_tags=["forward_lean", "ankle_mobility"],
+                    confidence_score=0.85,
+                ),
+            ]
+        )
+    )
+    update = await extract_insights(
+        state,
+        anthropic_client=anthropic_client,
+        instructor_client=instructor_client,
+    )
+    assert len(update["candidates"]) == 1
+    assert update["candidates"][0].entry_type == "compensation"
+
+
 def _state_with_coaching_output(co):
     return make_initial_distillation_state(
         analysis_id=uuid.uuid4(),

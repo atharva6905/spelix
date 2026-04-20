@@ -248,7 +248,7 @@ export interface CoachBrainCandidate {
   id: string;
   exercise: "squat" | "bench" | "deadlift";
   phase: "setup" | "descent" | "bottom" | "ascent" | "lockout" | "general" | null;
-  entry_type: "cue" | "correction" | "principle" | "drill";
+  entry_type: "cue" | "correction" | "principle" | "drill" | "compensation";
   content: string;
   trigger_tags: string[];
   source_analysis_ids: string[];
@@ -325,5 +325,39 @@ export async function rejectCoachBrainCandidate(
       method: "POST",
       body: JSON.stringify({ reason }),
     },
+  );
+}
+
+export interface SimilarEntry {
+  id: string;
+  content: string;
+  exercise: "squat" | "bench" | "deadlift";
+  phase:
+    | "setup"
+    | "descent"
+    | "bottom"
+    | "ascent"
+    | "lockout"
+    | "general"
+    | null;
+  entry_type:
+    | "cue"
+    | "correction"
+    | "principle"
+    | "drill"
+    | "compensation";
+  cosine_sim: number;
+}
+
+export interface SimilarEntriesResponse {
+  items: SimilarEntry[];
+}
+
+export async function getCoachBrainCandidateSimilar(
+  id: string,
+  limit = 2,
+): Promise<SimilarEntriesResponse> {
+  return adminFetch<SimilarEntriesResponse>(
+    `/api/v1/admin/coach-brain/candidates/${id}/similar?limit=${limit}`,
   );
 }

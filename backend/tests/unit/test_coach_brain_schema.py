@@ -122,7 +122,7 @@ class TestCoachBrainEntry:
     def test_all_entry_type_values_accepted(self) -> None:
         from app.schemas.coach_brain import CoachBrainEntry
 
-        for et in ("cue", "correction", "principle", "drill"):
+        for et in ("cue", "correction", "principle", "drill", "compensation"):
             data = {**_make_valid_entry_dict(), "entry_type": et}
             entry = CoachBrainEntry(**data)
             assert entry.entry_type == et
@@ -261,7 +261,7 @@ class TestCoachBrainEntryCreate:
     def test_all_entry_types_accepted(self) -> None:
         from app.schemas.coach_brain import CoachBrainEntryCreate
 
-        for et in ("cue", "correction", "principle", "drill"):
+        for et in ("cue", "correction", "principle", "drill", "compensation"):
             create = CoachBrainEntryCreate(**{**self._valid_create_dict(), "entry_type": et})
             assert create.entry_type == et
 
@@ -410,3 +410,34 @@ class TestCoachBrainPayload:
         data = {**self._valid_payload_dict(), "trigger_tags": ["knee_cave"]}
         payload = CoachBrainPayload(**data)
         assert payload.trigger_tags == ["knee_cave"]
+
+
+# ---------------------------------------------------------------------------
+# D-038: EntryTypeLiteral widening — compensation
+# ---------------------------------------------------------------------------
+
+
+def test_coach_brain_entry_create_accepts_compensation() -> None:
+    from app.schemas.coach_brain import CoachBrainEntryCreate
+
+    entry = CoachBrainEntryCreate(
+        content="Quad-dominant ascent compensates for posterior-chain weakness",
+        exercise="squat",
+        phase="ascent",
+        entry_type="compensation",
+    )
+    assert entry.entry_type == "compensation"
+
+
+def test_coach_brain_candidate_create_accepts_compensation() -> None:
+    from app.schemas.coach_brain_candidate import CoachBrainCandidateCreate
+
+    candidate = CoachBrainCandidateCreate(
+        exercise="squat",
+        phase="descent",
+        entry_type="compensation",
+        content="Knee valgus compensates for weak hip abduction",
+        source_analysis_ids=[uuid.uuid4()],
+        lifecycle_decision="ADD",
+    )
+    assert candidate.entry_type == "compensation"

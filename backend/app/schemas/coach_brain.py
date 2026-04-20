@@ -61,6 +61,7 @@ EntryTypeLiteral = Literal[
     "correction",
     "principle",
     "drill",
+    "compensation",
 ]
 
 StatusLiteral = Literal["seed", "active", "deprecated"]
@@ -91,7 +92,7 @@ class CoachBrainEntry(BaseModel):
         general.  ``None`` is NOT accepted here — use ``CoachBrainEntryCreate``
         for partial data.
     entry_type:
-        Coaching category.  CHECK: cue | correction | principle | drill.
+        Coaching category.  CHECK: cue | correction | principle | drill | compensation.
     status:
         Lifecycle state.  CHECK: seed | active | deprecated.  NOT
         pending/approved/rejected (those values are rejected).

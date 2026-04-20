@@ -27,7 +27,10 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.schemas.candidate_review import SimilarEntry
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,11 +93,15 @@ class CandidateReviewService:
         candidate_repo: CoachBrainCandidateRepository,
         entry_repo: CoachBrainRepository,
         brain_embedding: BrainEmbeddingService,
+        cohere_client: Any | None = None,
+        qdrant_client: Any | None = None,
     ) -> None:
         self._db = db
         self._candidate_repo = candidate_repo
         self._entry_repo = entry_repo
         self._brain_embedding = brain_embedding
+        self._cohere_client = cohere_client
+        self._qdrant_client = qdrant_client
 
     async def approve(
         self,
@@ -226,3 +233,104 @@ class CandidateReviewService:
             admin_user_id,
         )
         return RejectResponse(candidate_id=candidate.id, rejected_reason=reason)
+
+    async def get_similar_entries(
+        self,
+        *,
+        candidate_id: uuid.UUID,
+        limit: int = 2,
+    ) -> list[SimilarEntry]:
+        """Return top-N nearest active/seed Coach Brain entries for a candidate.
+
+        FR-ADMN-12 (D-037): reviewer sees up to 2 existing entries closest to
+        the pending candidate so near-duplicates are obvious pre-approve.
+
+        Re-embeds the candidate's contextual text on demand rather than storing
+        the insight embedding — distillation runs daily at low volume and the
+        Cohere call is cheap (<10 ms, <0.01¢) per card view. Avoids a schema
+        change during the L2 sprint.
+        """
+        from qdrant_client import models as qdrant_models
+
+        from app.schemas.candidate_review import SimilarEntry
+        from app.schemas.coach_brain import CoachBrainEntryCreate
+        from app.services.cohere_client import EmbedInputType
+        from app.services.qdrant import COLLECTION_COACH_BRAIN
+
+        candidate = await self._candidate_repo.get_by_id(candidate_id)
+        if candidate is None:
+            raise CandidateNotFound(str(candidate_id))
+
+        if self._cohere_client is None or self._qdrant_client is None:
+            logger.warning(
+                "get_similar_entries: vector clients not wired — returning empty list"
+            )
+            return []
+
+        proxy = CoachBrainEntryCreate(
+            content=candidate.content,
+            exercise=candidate.exercise,
+            phase=candidate.phase,
+            entry_type=candidate.entry_type,
+            trigger_tags=list(candidate.trigger_tags or []),
+        )
+        ctx_text = self._brain_embedding.build_contextual_text(proxy)
+
+        [vector] = await self._cohere_client.embed_batch(
+            [ctx_text], input_type=EmbedInputType.SEARCH_DOCUMENT
+        )
+
+        # FR-BRAIN-05 cold-start: both active and seed are retrievable.
+        query_filter = qdrant_models.Filter(
+            must=[
+                qdrant_models.FieldCondition(
+                    key="exercise",
+                    match=qdrant_models.MatchValue(value=candidate.exercise),
+                ),
+                qdrant_models.FieldCondition(
+                    key="status",
+                    match=qdrant_models.MatchAny(any=["active", "seed"]),
+                ),
+            ]
+        )
+        try:
+            response = await self._qdrant_client.query_points(
+                collection=COLLECTION_COACH_BRAIN,
+                query=vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=False,
+            )
+            hits = list(response.points)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "get_similar_entries: qdrant query_points failed (%s) — returning empty list",
+                exc,
+            )
+            hits = []
+
+        results: list[SimilarEntry] = []
+        for hit in hits:
+            entry_id = uuid.UUID(hit.id) if isinstance(hit.id, str) else hit.id
+            entry = await self._entry_repo.get_by_id(entry_id)
+            if entry is None:
+                # Qdrant/Postgres drift — skip the orphan silently; it's not
+                # reviewer-relevant and the log line is enough.
+                logger.warning(
+                    "get_similar_entries: Qdrant hit %s missing in Postgres",
+                    entry_id,
+                )
+                continue
+            results.append(
+                SimilarEntry.model_validate(
+                    {
+                        "id": entry.id,
+                        "content": entry.content,
+                        "exercise": entry.exercise,
+                        "phase": entry.phase,
+                        "entry_type": entry.entry_type,
+                        "cosine_sim": float(hit.score),
+                    }
+                )
+            )
+        return results

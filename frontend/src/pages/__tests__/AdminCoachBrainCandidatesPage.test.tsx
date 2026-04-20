@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   getCoachBrainCandidateStats: vi.fn(),
   approveCoachBrainCandidate: vi.fn(),
   rejectCoachBrainCandidate: vi.fn(),
+  getCoachBrainCandidateSimilar: vi.fn().mockResolvedValue({ items: [] }),
 }));
 
 vi.mock("@/api/admin", async (importOriginal) => {
@@ -58,6 +59,8 @@ beforeEach(() => {
   apiMock.getCoachBrainCandidateStats.mockReset();
   apiMock.approveCoachBrainCandidate.mockReset();
   apiMock.rejectCoachBrainCandidate.mockReset();
+  apiMock.getCoachBrainCandidateSimilar.mockReset();
+  apiMock.getCoachBrainCandidateSimilar.mockResolvedValue({ items: [] });
 });
 
 function renderPage() {
@@ -107,18 +110,27 @@ describe("AdminCoachBrainCandidatesPage - loading + list", () => {
     );
   });
 
-  it("renders nearest-entry badge when set", async () => {
-    const withNearest = {
-      ...candidate,
-      nearest_entry_id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
-      nearest_cosine_sim: 0.74,
-    };
-    apiMock.listCoachBrainCandidates.mockResolvedValue([withNearest]);
+  it("renders similar entries panel with cosine when entries returned", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValue([candidate]);
     apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
+    apiMock.getCoachBrainCandidateSimilar.mockResolvedValue({
+      items: [
+        {
+          id: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+          content: "brace the lats before unracking",
+          exercise: "bench",
+          phase: "setup",
+          entry_type: "cue",
+          cosine_sim: 0.74,
+        },
+      ],
+    });
 
     renderPage();
 
-    await waitFor(() => expect(screen.getByText(/dddddddd/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/brace the lats before unracking/i)).toBeTruthy(),
+    );
     expect(screen.getByText(/0\.740/)).toBeTruthy();
   });
 
@@ -136,7 +148,7 @@ describe("AdminCoachBrainCandidatesPage - loading + list", () => {
 
   it("shows compensation banner when entry_type is compensation", async () => {
     apiMock.listCoachBrainCandidates.mockResolvedValue([
-      { ...candidate, entry_type: "compensation" as unknown as typeof candidate.entry_type },
+      { ...candidate, entry_type: "compensation" },
     ]);
     apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
 
@@ -329,5 +341,54 @@ describe("AdminCoachBrainCandidatesPage - keyboard shortcuts", () => {
     await userEvent.type(textarea, "a");
 
     expect(apiMock.approveCoachBrainCandidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminCoachBrainCandidatesPage - SimilarEntriesList", () => {
+  it("renders top 2 similar entries on the review card", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValue([candidate]);
+    apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
+    apiMock.getCoachBrainCandidateSimilar.mockResolvedValueOnce({
+      items: [
+        {
+          id: "e1",
+          content: "drive knees out at the bottom",
+          exercise: "squat",
+          phase: "descent",
+          entry_type: "cue",
+          cosine_sim: 0.88,
+        },
+        {
+          id: "e2",
+          content: "push the floor apart",
+          exercise: "squat",
+          phase: "ascent",
+          entry_type: "cue",
+          cosine_sim: 0.81,
+        },
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/drive knees out at the bottom/i)).toBeTruthy(),
+    );
+    expect(screen.getByText(/push the floor apart/i)).toBeTruthy();
+    expect(screen.getByText(/0\.880/)).toBeTruthy();
+    expect(screen.getByText(/0\.810/)).toBeTruthy();
+  });
+
+  it("renders nothing when no similar entries are returned", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValue([candidate]);
+    apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
+    apiMock.getCoachBrainCandidateSimilar.mockResolvedValueOnce({ items: [] });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/tuck elbows at 45 degrees/i)).toBeTruthy(),
+    );
+    expect(screen.queryByText(/similar existing entries/i)).toBeNull();
   });
 });

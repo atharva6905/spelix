@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.admin import router
-from app.schemas.candidate_review import ApproveResponse, RejectResponse
+from app.schemas.candidate_review import ApproveResponse, RejectResponse, SimilarEntry
 from app.schemas.coach_brain_candidate import CoachBrainCandidate
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
@@ -287,3 +287,73 @@ class TestRejectCandidate:
         )
         assert resp.status_code == 409
         assert resp.json()["detail"]["error"]["code"] == "ALREADY_REVIEWED"
+
+
+class TestListSimilarEntries:
+    def test_returns_top_2(self, admin_client, mock_service):
+
+        e1_id, e2_id = uuid.uuid4(), uuid.uuid4()
+        cand_id = uuid.uuid4()
+
+        mock_service.get_similar_entries = AsyncMock(
+            return_value=[
+                SimilarEntry(
+                    id=e1_id,
+                    content="knees out",
+                    exercise="squat",
+                    phase="descent",
+                    entry_type="cue",
+                    cosine_sim=0.88,
+                ),
+                SimilarEntry(
+                    id=e2_id,
+                    content="push the floor apart",
+                    exercise="squat",
+                    phase="ascent",
+                    entry_type="cue",
+                    cosine_sim=0.81,
+                ),
+            ]
+        )
+
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{cand_id}/similar",
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert len(body["items"]) == 2
+        assert body["items"][0]["cosine_sim"] == 0.88
+        assert body["items"][1]["id"] == str(e2_id)
+        mock_service.get_similar_entries.assert_awaited_once_with(
+            candidate_id=cand_id, limit=2
+        )
+
+    def test_404_on_missing_candidate(self, admin_client, mock_service):
+        mock_service.get_similar_entries = AsyncMock(
+            side_effect=CandidateNotFound(str(uuid.uuid4()))
+        )
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar",
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"]["code"] == "NOT_FOUND"
+
+    def test_requires_admin(self, non_admin_client):
+        resp = non_admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar",
+        )
+        assert resp.status_code == 403
+
+    def test_limit_zero_rejected(self, admin_client):
+        """FastAPI validates `limit >= 1` before the handler runs → 422."""
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar?limit=0",
+        )
+        assert resp.status_code == 422
+
+    def test_limit_above_max_rejected(self, admin_client):
+        """FastAPI validates `limit <= 5` before the handler runs → 422."""
+        resp = admin_client.get(
+            f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar?limit=6",
+        )
+        assert resp.status_code == 422

@@ -12,10 +12,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
   approveCoachBrainCandidate,
+  getCoachBrainCandidateSimilar,
   getCoachBrainCandidateStats,
   listCoachBrainCandidates,
   rejectCoachBrainCandidate,
   type CoachBrainCandidate,
+  type SimilarEntry,
 } from "@/api/admin";
 
 const PAGE_SIZE = 25;
@@ -187,7 +189,7 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
 
   return (
     <article className="rounded-lg bg-white p-6 shadow">
-      {(candidate.entry_type as string) === "compensation" && (
+      {candidate.entry_type === "compensation" && (
         <div className="mb-4 rounded-md border border-orange-300 bg-orange-50 p-3 text-sm text-orange-900">
           <p className="font-semibold">
             Compensation entry - biomechanics reviewer required
@@ -265,17 +267,7 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
         />
       </div>
 
-      {candidate.nearest_entry_id && (
-        <p className="mb-2 text-xs text-gray-600">
-          Closest existing entry:{" "}
-          <span className="font-mono">
-            {candidate.nearest_entry_id.slice(0, 8)}...
-          </span>
-          {candidate.nearest_cosine_sim !== null && (
-            <> (cosine: {candidate.nearest_cosine_sim.toFixed(3)})</>
-          )}
-        </p>
-      )}
+      <SimilarEntriesList candidateId={candidate.id} />
 
       {candidate.source_analysis_ids.length > 0 && (
         <p className="mb-2 text-xs text-gray-500">
@@ -440,6 +432,60 @@ function EvalScoreCard({ scores }: { scores: Record<string, number> }) {
           );
         })}
       </dl>
+    </div>
+  );
+}
+
+function SimilarEntriesList({ candidateId }: { candidateId: string }) {
+  const [items, setItems] = useState<SimilarEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getCoachBrainCandidateSimilar(candidateId, 2)
+      .then((resp) => {
+        if (!cancelled) setItems(resp.items);
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [candidateId]);
+
+  if (loading) {
+    return (
+      <p className="mb-2 text-xs text-gray-500">Loading similar entries...</p>
+    );
+  }
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mb-3">
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+        Similar existing entries
+      </p>
+      <ul className="space-y-2">
+        {items.map((e) => (
+          <li
+            key={e.id}
+            className="rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-800"
+          >
+            <p className="mb-1 line-clamp-2">{e.content}</p>
+            <p className="font-mono text-[10px] text-gray-500">
+              {e.exercise}
+              {e.phase ? ` • ${e.phase}` : ""} • {e.entry_type} • cosine{" "}
+              {e.cosine_sim.toFixed(3)}
+            </p>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
