@@ -123,3 +123,55 @@ async def test_store_entry_empty_formatted_writes_nothing(db_session: AsyncSessi
     state = _state_with_formatted([])
     update = await store_entry(state, db_session=db_session)
     assert update["stored_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_store_entry_compensation_sets_requires_technical_review(
+    db_session: AsyncSession,
+) -> None:
+    """FR-ADMN-12: compensation entries must have requires_technical_review=True."""
+    row = CoachBrainCandidateCreate(
+        exercise="bench",
+        phase="bottom",
+        entry_type="compensation",
+        content="Arching excessively to compensate for lack of thoracic mobility.",
+        source_analysis_ids=[uuid.uuid4()],
+        lifecycle_decision="ADD",
+    )
+    state = _state_with_formatted([row])
+    update = await store_entry(state, db_session=db_session)
+    assert len(update["stored_ids"]) == 1
+    found = (
+        await db_session.execute(
+            select(CoachBrainCandidate).where(
+                CoachBrainCandidate.id == update["stored_ids"][0]
+            )
+        )
+    ).scalar_one()
+    assert found.requires_technical_review is True
+
+
+@pytest.mark.asyncio
+async def test_store_entry_cue_does_not_require_technical_review(
+    db_session: AsyncSession,
+) -> None:
+    """Non-compensation entries must have requires_technical_review=False."""
+    row = CoachBrainCandidateCreate(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="Drive knees out.",
+        source_analysis_ids=[uuid.uuid4()],
+        lifecycle_decision="ADD",
+    )
+    state = _state_with_formatted([row])
+    update = await store_entry(state, db_session=db_session)
+    assert len(update["stored_ids"]) == 1
+    found = (
+        await db_session.execute(
+            select(CoachBrainCandidate).where(
+                CoachBrainCandidate.id == update["stored_ids"][0]
+            )
+        )
+    ).scalar_one()
+    assert found.requires_technical_review is False
