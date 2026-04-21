@@ -41,7 +41,9 @@ class Issue(BaseModel):
         min_length=1,
         description=(
             "Observable description of the deviation including movement phase. "
-            "No speculation about causes outside the video."
+            "No speculation about causes outside the video. "
+            "Embed [N] citation markers inline (e.g., '[1]') wherever retrieved "
+            "evidence supports the observation."
         ),
     )
     severity: Literal["High", "Medium", "Low"] = Field(
@@ -108,11 +110,19 @@ class CoachingOutput(BaseModel):
 
     summary: str = Field(
         min_length=1,
-        description="Two-sentence overall assessment of the session.",
+        description=(
+            "Two-sentence overall assessment of the session. "
+            "Embed [N] citation markers inline (e.g., '[1]') wherever retrieved "
+            "evidence supports a claim."
+        ),
     )
     strengths: list[str] = Field(
         min_length=1,
-        description="Two to three positive observations.",
+        description=(
+            "Two to three positive observations. "
+            "Embed [N] citation markers inline (e.g., '[1]') wherever retrieved "
+            "evidence supports a positive observation."
+        ),
     )
     issues: list[Issue] = Field(
         default_factory=list,
@@ -120,7 +130,11 @@ class CoachingOutput(BaseModel):
     )
     correction_plan: list[str] = Field(
         min_length=1,
-        description="Three to five specific, actionable coaching cues.",
+        description=(
+            "Three to five specific, actionable coaching cues. "
+            "Embed [N] citation markers inline (e.g., '[1]') wherever retrieved "
+            "evidence supports a specific correction."
+        ),
     )
     disclaimer: str = Field(
         description=(
