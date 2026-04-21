@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import anthropic
 
+from app.config_constants import LLM_MAX_TOKENS_CHAT as CHAT_MAX_TOKENS
 from app.models.chat_message import ChatMessage
 from app.repositories.chat_message import ChatMessageRepository
 from app.services.safety_filter import SafetyFilter
@@ -42,7 +43,6 @@ def _sanitize_user_message(content: str) -> str:
 
 
 CHAT_MODEL = "claude-sonnet-4-6"
-CHAT_MAX_TOKENS = 512
 CHAT_TEMPERATURE = 0.3
 
 SYSTEM_PROMPT = (

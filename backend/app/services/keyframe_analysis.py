@@ -27,6 +27,7 @@ import instructor
 import openai
 from pydantic import BaseModel, Field
 
+from app.config_constants import LLM_MAX_TOKENS_KEYFRAME as MAX_TOKENS
 from app.cv.keyframe_extraction import RepKeyframes
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,6 @@ logger = logging.getLogger(__name__)
 
 MODEL = "gpt-4o"
 TEMPERATURE = 0.2
-MAX_TOKENS = 2048
 
 # Max keyframe images to send (6 reps × 3 frames = 18).
 # Beyond 6 reps, only depth frames are sent.

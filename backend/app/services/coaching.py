@@ -29,6 +29,7 @@ import anthropic
 import instructor
 
 from app.config import ThresholdConfig
+from app.config_constants import LLM_MAX_TOKENS_COACHING as MAX_TOKENS
 from app.cv.confidence import confidence_label
 from app.schemas.coaching import CoachingOutput
 from app.schemas.rag import CitationBlock, RetrievedContext
@@ -41,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-4-6"
 TEMPERATURE = 0.3
-MAX_TOKENS = 2048
 NETWORK_TIMEOUT_S = 60.0
 
 MANDATORY_DISCLAIMER = (
