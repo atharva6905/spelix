@@ -868,3 +868,64 @@ def test_claim_extraction_prompt_has_negative_worked_examples() -> None:
         "anchor for an inversion or extrapolation rejection. Pure rule "
         "text without negative examples is fragile (D-052)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 4: CoVe Step 4 revision — must preserve inline [N] citation markers
+# ---------------------------------------------------------------------------
+
+
+def test_cove_revision_prompt_preserves_inline_citations() -> None:
+    """CoVe Step 4 rewrites CoachingOutput to remove unverified claims.
+    It MUST preserve [N] inline citation markers on surviving verified
+    claims — otherwise Task 2/3's markers get stripped by the revision.
+
+    Tasks 2 and 3 (citation-inline-markers plan) ask Claude to embed [N]
+    markers in summary, strengths, correction_plan, and
+    issues[].description. When CoVe Step 4 revises those fields to remove
+    unverified claims, Sonnet may silently strip the markers. The revision
+    prompt must explicitly instruct Claude to keep [N] markers on claims
+    that survive verification.
+    """
+    from app.services.cove import _build_revision_prompt
+
+    output = _make_coaching_output()
+    context = _make_retrieved_context()
+    failed: list = []  # no failed claims needed — we're testing the prompt text
+
+    prompt_text = _build_revision_prompt(
+        original_output=output,
+        failed_answers=failed,
+        contexts=[context],
+    )
+
+    lowered = prompt_text.lower()
+
+    # The prompt must reference [N] inline citation markers so Sonnet
+    # knows what to preserve. Accept either the literal bracket form or
+    # the phrase "citation marker".
+    assert "[n]" in lowered or "citation marker" in lowered, (
+        "revision prompt must reference [N] inline citation markers explicitly "
+        "so Sonnet knows what artefacts to preserve during rewrite"
+    )
+
+    # The prompt must instruct Sonnet to preserve / keep / retain the markers
+    # on claims that survive verification — not silently strip them.
+    preservation_keywords = ("preserve", "keep", "retain", "do not remove", "don't remove")
+    assert any(kw in lowered for kw in preservation_keywords), (
+        "revision prompt must contain a preservation instruction (preserve / keep / "
+        "retain / do not remove / don't remove) for citation markers; "
+        "without this Sonnet may strip [N] markers while rewriting verified claims"
+    )
+
+    # The prompt should name the specific prose fields where markers appear
+    # (summary, strengths, correction_plan, issues) so the instruction is
+    # unambiguous — a vague "preserve inline citations" is weaker.
+    field_names = ("summary", "strengths", "correction_plan", "issues")
+    named_fields = [f for f in field_names if f in lowered]
+    assert len(named_fields) >= 2, (
+        f"revision prompt should name at least 2 specific prose fields "
+        f"(summary, strengths, correction_plan, issues[].description) where [N] "
+        f"markers appear; only found: {named_fields}. Naming fields makes the "
+        "preservation instruction unambiguous to Sonnet."
+    )

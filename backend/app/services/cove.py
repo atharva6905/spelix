@@ -252,6 +252,11 @@ def _build_revision_prompt(
         f"Original summary: {original_output.summary}\n\n"
         f"Failed/uncertain claims:\n{failed_claims_text}\n\n"
         f"Retrieved evidence:\n{evidence_text}\n\n"
+        "When rewriting the coaching output, preserve any existing [N] inline "
+        "citation markers in the prose fields (summary, strengths, correction_plan, "
+        "issues[].description) for claims that survive verification. Do not remove "
+        "[N] markers attached to verified claims — they enable source tracing in "
+        "the UI.\n\n"
         "Return a complete, revised CoachingOutput. Preserve the mandatory disclaimer "
         "verbatim. Never use the words 'injury', 'diagnose', or 'treat'."
     )
