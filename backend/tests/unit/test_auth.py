@@ -89,7 +89,7 @@ def _make_es256_jwt(
         "aud": AUDIENCE,
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
-        "user_metadata": {"role": role},
+        "app_metadata": {"role": role},
     }
     if issuer is not None:
         payload["iss"] = issuer
@@ -116,7 +116,7 @@ def make_jwt(
         "exp": int(exp.timestamp()),
     }
     if role is not None:
-        payload["user_metadata"] = {"role": role}
+        payload["app_metadata"] = {"role": role}
     if issuer is not None:
         payload["iss"] = issuer
     return jwt.encode(payload, TEST_SECRET, algorithm=ALGORITHM)
@@ -199,11 +199,11 @@ class TestGetCurrentUser:
 
         assert exc_info.value.status_code == 401
 
-    def test_default_role_is_user_when_user_metadata_missing(self, set_jwt_secret):
-        """When user_metadata.role is absent, role defaults to 'user'."""
+    def test_default_role_is_user_when_app_metadata_missing(self, set_jwt_secret):
+        """When app_metadata.role is absent, role defaults to 'user'."""
         from app.api.deps import get_current_user
 
-        # role=None causes make_jwt to omit user_metadata entirely
+        # role=None causes make_jwt to omit app_metadata entirely
         token = make_jwt(role=None)
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         result = asyncio.run(get_current_user(creds))
@@ -211,7 +211,7 @@ class TestGetCurrentUser:
         assert result["role"] == "user"
 
     def test_admin_role_preserved(self, set_jwt_secret):
-        """JWT with user_metadata.role='admin' returns role='admin'."""
+        """JWT with app_metadata.role='admin' returns role='admin'."""
         from app.api.deps import get_current_user
 
         token = make_jwt(role="admin")
@@ -219,6 +219,37 @@ class TestGetCurrentUser:
         result = asyncio.run(get_current_user(creds))
 
         assert result["role"] == "admin"
+
+    def test_role_read_from_app_metadata_not_user_metadata(self, set_jwt_secret):
+        """L-09 regression: role comes from app_metadata, not user_metadata.
+
+        When app_metadata.role and user_metadata.role differ, the returned
+        role MUST match app_metadata.role. user_metadata is user-editable and
+        is therefore not a safe privilege claim.
+        """
+        from app.api.deps import get_current_user
+
+        now = datetime.now(timezone.utc)
+        payload: dict = {
+            "sub": TEST_USER_ID,
+            "email": TEST_EMAIL,
+            "aud": AUDIENCE,
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+            "iss": TEST_ISSUER,
+            # Attacker-controlled bag: user claims admin via user_metadata
+            "user_metadata": {"role": "admin"},
+            # Service-role-controlled bag: actual role is "user"
+            "app_metadata": {"role": "user"},
+        }
+        token = jwt.encode(payload, TEST_SECRET, algorithm=ALGORITHM)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["role"] == "user", (
+            "Role must be sourced from app_metadata (service-role-only), "
+            "not user_metadata (user-editable). L-09 regression."
+        )
 
 
 class TestGetAdminUser:

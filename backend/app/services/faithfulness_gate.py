@@ -25,6 +25,7 @@ import anthropic
 import instructor
 from pydantic import BaseModel, Field
 
+from app.config_constants import LLM_MAX_TOKENS_FAITHFULNESS as _MAX_TOKENS
 from app.schemas.coaching import CoachingOutput
 from app.schemas.rag import RetrievedContext
 
@@ -37,7 +38,6 @@ logger = logging.getLogger(__name__)
 FAITHFULNESS_THRESHOLD = 0.8
 _MODEL = "claude-sonnet-4-6"
 _TEMPERATURE = 0.1
-_MAX_TOKENS = 1024
 
 # ---------------------------------------------------------------------------
 # Pydantic model for instructor structured output

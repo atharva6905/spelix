@@ -165,6 +165,8 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /home/deploy/spelix
+            PREVIOUS_SHA=$(git rev-parse HEAD)
+            echo "Pre-deploy SHA: $PREVIOUS_SHA"
             git pull origin main
             docker compose -f docker-compose.prod.yml up -d --build
             docker compose -f docker-compose.prod.yml exec -T backend uv run alembic upgrade head
@@ -173,5 +175,8 @@ jobs:
               curl -sf http://localhost:8000/health && echo "Health check passed" && exit 0
               echo "Attempt $i failed, retrying..."
             done
-            echo "Health check failed after 6 attempts"
+            echo "Health check failed after 6 attempts — ROLLING BACK"
+            git checkout "$PREVIOUS_SHA"
+            docker compose -f docker-compose.prod.yml up -d --build
+            echo "Rolled back to $PREVIOUS_SHA. Note: migrations were NOT downgraded — manual alembic downgrade may be required."
             exit 1

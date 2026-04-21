@@ -25,7 +25,7 @@ export default function PrivacySection() {
           <AccordionItem title="Spelix is not a medical device.">
             <p>
               Spelix analyses movement patterns and grounds coaching in the
-              published biomechanics literature. It does not diagnose anything,
+              published biomechanics literature. It is not a medical tool,
               and it is not a substitute for a physiotherapist, a qualified
               coach, or a medical professional. All feedback is for educational
               and performance purposes only.

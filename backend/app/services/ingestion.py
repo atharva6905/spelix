@@ -28,6 +28,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 
+from app.config_constants import LLM_MAX_TOKENS_INGESTION as _DEFAULT_MAX_TOKENS
 from app.schemas.rag import ChunkPayload, QualityTier
 from app.services.cohere_client import CohereEmbedClient, EmbedInputType
 from app.services.qdrant import QdrantClientWrapper
@@ -37,8 +38,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_DEFAULT_MAX_TOKENS = 500
 _DEFAULT_OVERLAP_TOKENS = 50
 _PAPERS_RAG_COLLECTION = "papers_rag"
 
