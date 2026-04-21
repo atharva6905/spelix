@@ -6,6 +6,15 @@
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
 
+/**
+ * Convention: strings thrown from fetch functions below are surfaced directly
+ * to users by useAnalysisDetail's catch branch (no wrapping). If a fetch
+ * function throws a bare string, it MUST be user-safe — never an internal
+ * backend detail (e.g., raw 4xx/5xx bodies, RLS violation text, stack traces).
+ * Wrap anything user-unsafe in `new Error(userSafeMessage)` so the hook
+ * still displays a readable fallback.
+ */
+
 // ---------------------------------------------------------------------------
 // Types — Upload (B-013)
 // ---------------------------------------------------------------------------
