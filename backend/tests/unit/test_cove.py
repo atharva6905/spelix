@@ -923,9 +923,7 @@ def test_cove_revision_prompt_preserves_inline_citations() -> None:
     # unambiguous — a vague "preserve inline citations" is weaker.
     field_names = ("summary", "strengths", "correction_plan", "issues")
     named_fields = [f for f in field_names if f in lowered]
-    assert len(named_fields) >= 2, (
-        f"revision prompt should name at least 2 specific prose fields "
-        f"(summary, strengths, correction_plan, issues[].description) where [N] "
-        f"markers appear; only found: {named_fields}. Naming fields makes the "
-        "preservation instruction unambiguous to Sonnet."
+    assert len(named_fields) == 4, (
+        f"Revision prompt must name all 4 prose fields explicitly (summary, strengths, "
+        f"correction_plan, issues[].description). Found only: {named_fields}"
     )
