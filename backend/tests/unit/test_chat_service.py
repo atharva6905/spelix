@@ -117,7 +117,7 @@ async def test_send_message_happy_path(
 ) -> None:
     """Happy path: returns assistant ChatMessage and persists both messages."""
     mock_analysis = _make_analysis(user_id)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
 
     assistant_text = "Focus on hip hinge pattern before adding weight."
     anthropic_client.messages.create = AsyncMock(
@@ -156,7 +156,7 @@ async def test_send_message_returns_assistant_chat_message(
 ) -> None:
     """Return value is the assistant ChatMessage (role='assistant')."""
     mock_analysis = _make_analysis(user_id)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
     anthropic_client.messages.create = AsyncMock(
         return_value=_make_anthropic_response("Tuck your elbows slightly.")
     )
@@ -178,7 +178,7 @@ async def test_send_message_analysis_not_found_raises_lookup_error(
     analysis_id: uuid.UUID,
 ) -> None:
     """LookupError when analysis does not exist."""
-    analysis_repo.get_by_id = AsyncMock(return_value=None)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=None)
 
     with pytest.raises(LookupError, match=str(analysis_id)):
         await chat_service.send_message(
@@ -198,7 +198,7 @@ async def test_send_message_wrong_user_raises_permission_error(
     """PermissionError when analysis belongs to a different user."""
     other_user_id = uuid.uuid4()
     mock_analysis = _make_analysis(other_user_id)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
 
     with pytest.raises(PermissionError):
         await chat_service.send_message(
@@ -222,7 +222,7 @@ async def test_send_message_no_anthropic_client_raises_runtime_error(
         anthropic_client=None,
     )
     mock_analysis = _make_analysis(user_id)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
 
     with pytest.raises(RuntimeError):
         await service.send_message(
@@ -243,7 +243,7 @@ async def test_send_message_includes_history_in_llm_call(
 ) -> None:
     """Existing conversation history is forwarded to the Anthropic API call."""
     mock_analysis = _make_analysis(user_id)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
 
     prev_user = _make_chat_message(analysis_id, role="user", content="First question.")
     prev_asst = _make_chat_message(analysis_id, role="assistant", content="First answer.")
@@ -278,7 +278,7 @@ async def test_send_message_no_coaching_result_still_works(
 ) -> None:
     """send_message succeeds even when coaching_result is None."""
     mock_analysis = _make_analysis(user_id, has_coaching_result=False)
-    analysis_repo.get_by_id = AsyncMock(return_value=mock_analysis)
+    analysis_repo.get_by_id_with_relations = AsyncMock(return_value=mock_analysis)
     anthropic_client.messages.create = AsyncMock(
         return_value=_make_anthropic_response("General tip here.")
     )
