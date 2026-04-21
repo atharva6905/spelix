@@ -293,8 +293,9 @@ export async function getAnalysisStatus(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
+    const raw = body.error?.message ?? body.detail;
     const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch status";
+      typeof raw === "string" ? raw : "Failed to fetch status";
     throw new Error(message);
   }
 
@@ -316,8 +317,9 @@ export async function getAnalysisDetail(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
+    const raw = body.error?.message ?? body.detail;
     const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch analysis";
+      typeof raw === "string" ? raw : "Failed to fetch analysis";
     throw new Error(message);
   }
 
@@ -359,8 +361,9 @@ export async function listAnalyses(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
+    const raw = body.error?.message ?? body.detail;
     const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch analyses";
+      typeof raw === "string" ? raw : "Failed to fetch analyses";
     throw new Error(message);
   }
 
