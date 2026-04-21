@@ -49,6 +49,7 @@ const candidate: CoachBrainCandidate = {
   nearest_entry_id: null,
   nearest_cosine_sim: null,
   contradiction_flag: false,
+  requires_technical_review: false,
   review_status: "pending",
   created_at: "2026-04-17T10:02:31Z",
 };
@@ -146,9 +147,9 @@ describe("AdminCoachBrainCandidatesPage - loading + list", () => {
     });
   });
 
-  it("shows compensation banner when entry_type is compensation", async () => {
+  it("shows compensation banner when requires_technical_review is true", async () => {
     apiMock.listCoachBrainCandidates.mockResolvedValue([
-      { ...candidate, entry_type: "compensation" },
+      { ...candidate, entry_type: "compensation", requires_technical_review: true },
     ]);
     apiMock.getCoachBrainCandidateStats.mockResolvedValue({ total_pending: 1 });
 

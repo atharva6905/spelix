@@ -19,11 +19,12 @@ from app.schemas.coach_brain_candidate import CoachBrainCandidate
 from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
+    NotBiomechanicsQualified,
     PromptInjectionDetected,
     QdrantUpsertFailed,
 )
 
-_ = PromptInjectionDetected  # keep import alive through formatter strip
+_ = (PromptInjectionDetected, NotBiomechanicsQualified)  # keep imports alive
 
 TEST_ADMIN_ID = uuid.uuid4()
 
@@ -75,7 +76,12 @@ def admin_client(mock_service):
     app.include_router(router, prefix="/api/v1/admin")
 
     async def _mock_admin():
-        return {"id": TEST_ADMIN_ID, "email": "admin@spelix.app", "role": "admin"}
+        return {
+            "id": TEST_ADMIN_ID,
+            "email": "admin@spelix.app",
+            "role": "admin",
+            "biomechanics_qualified": False,
+        }
 
     async def _mock_review_service():
         return mock_service
@@ -231,6 +237,22 @@ class TestApproveCandidate:
         )
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"]["code"] == "PROMPT_INJECTION_DETECTED"
+
+    def test_approve_403_when_not_biomechanics_qualified(self, admin_client, mock_service):
+        """H-02: unqualified admin approving compensation candidate returns 403."""
+        cid = uuid.uuid4()
+        mock_service.approve = AsyncMock(
+            side_effect=NotBiomechanicsQualified(
+                f"Candidate {cid} requires biomechanics-qualified reviewer"
+            )
+        )
+        resp = admin_client.post(
+            f"/api/v1/admin/coach-brain/candidates/{cid}/approve",
+            json={},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["error"]["code"] == "NOT_BIOMECHANICS_QUALIFIED"
+        assert resp.json()["detail"]["error"]["detail"] is None
 
 
 class TestRejectCandidate:

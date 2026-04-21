@@ -686,3 +686,80 @@ class TestEmailClaimEdgeCases:
         result = asyncio.run(get_current_user(creds))
 
         assert result["email"] == custom_email
+
+
+# ---------------------------------------------------------------------------
+# H-02: biomechanics_qualified parsing from app_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestBiomechanicsQualifiedParsing:
+    """Tests that CurrentUser.biomechanics_qualified is parsed from app_metadata (H-02)."""
+
+    def test_biomechanics_qualified_defaults_false_when_absent(self, monkeypatch):
+        """When app_metadata has no biomechanics_qualified key, default is False."""
+        from app.api.deps import get_current_user
+
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+        # make_jwt only sets app_metadata.role — no biomechanics_qualified key
+        token = make_jwt(role="admin")
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["biomechanics_qualified"] is False
+
+    def test_biomechanics_qualified_true_when_set_in_app_metadata(self, monkeypatch):
+        """When app_metadata.biomechanics_qualified=true, CurrentUser reflects True."""
+        from app.api.deps import get_current_user
+
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": TEST_USER_ID,
+            "email": TEST_EMAIL,
+            "aud": AUDIENCE,
+            "iss": TEST_ISSUER,
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+            "app_metadata": {"role": "admin", "biomechanics_qualified": True},
+        }
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["biomechanics_qualified"] is True
+
+    def test_biomechanics_qualified_false_when_explicitly_false(self, monkeypatch):
+        """When app_metadata.biomechanics_qualified=false, CurrentUser reflects False."""
+        from app.api.deps import get_current_user
+
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": TEST_USER_ID,
+            "email": TEST_EMAIL,
+            "aud": AUDIENCE,
+            "iss": TEST_ISSUER,
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+            "app_metadata": {"role": "admin", "biomechanics_qualified": False},
+        }
+        token = _make_jwt_with_payload(payload)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["biomechanics_qualified"] is False
+
+    def test_biomechanics_qualified_defaults_false_when_app_metadata_missing(
+        self, monkeypatch
+    ):
+        """When app_metadata is absent entirely, biomechanics_qualified defaults False."""
+        from app.api.deps import get_current_user
+
+        monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+        # role=None causes make_jwt to omit app_metadata entirely
+        token = make_jwt(role=None)
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        result = asyncio.run(get_current_user(creds))
+
+        assert result["biomechanics_qualified"] is False

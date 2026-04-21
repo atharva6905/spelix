@@ -84,6 +84,12 @@ class QdrantUpsertFailed(Exception):
     transaction so retrieval never observes a Postgres orphan."""
 
 
+class NotBiomechanicsQualified(Exception):
+    """Raised when a non-biomechanics-qualified admin attempts to approve
+    a candidate flagged with requires_technical_review=True (FR-ADMN-12).
+    """
+
+
 class CandidateReviewService:
     """Orchestrates approve/reject for Coach Brain candidates."""
 
@@ -165,6 +171,7 @@ class CandidateReviewService:
         candidate_id: uuid.UUID,
         admin_user_id: uuid.UUID,
         content_override: str | None = None,
+        approver_qualified: bool = False,
     ) -> ApproveResponse:
         candidate = await self._candidate_repo.get_by_id_for_update(candidate_id)
         if candidate is None:
@@ -172,6 +179,12 @@ class CandidateReviewService:
         if candidate.review_status != "pending":
             raise CandidateAlreadyReviewed(
                 f"candidate {candidate_id} review_status={candidate.review_status}"
+            )
+
+        # FR-ADMN-12: compensation entries require a biomechanics-qualified reviewer.
+        if candidate.requires_technical_review and not approver_qualified:
+            raise NotBiomechanicsQualified(
+                f"Candidate {candidate.id} requires biomechanics-qualified reviewer"
             )
 
         if content_override is not None:

@@ -33,6 +33,7 @@ const fakeCandidate: CoachBrainCandidate = {
   nearest_entry_id: null,
   nearest_cosine_sim: null,
   contradiction_flag: false,
+  requires_technical_review: false,
   review_status: "pending",
   created_at: "2026-04-17T10:02:31Z",
 };

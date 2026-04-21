@@ -86,6 +86,7 @@ class CurrentUser(TypedDict):
     id: uuid.UUID
     email: str
     role: str
+    biomechanics_qualified: bool
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +174,10 @@ async def get_current_user(
     # Supabase restricts app_metadata writes to service role only.
     app_metadata: dict = payload.get("app_metadata") or {}
     role: str = app_metadata.get("role") or "user"
+    # biomechanics_qualified defaults to False — restrictive default (H-02, FR-ADMN-12).
+    biomechanics_qualified: bool = bool(app_metadata.get("biomechanics_qualified") or False)
 
-    return CurrentUser(id=user_id, email=email, role=role)
+    return CurrentUser(id=user_id, email=email, role=role, biomechanics_qualified=biomechanics_qualified)
 
 
 async def get_redis() -> AsyncGenerator[Any, None]:

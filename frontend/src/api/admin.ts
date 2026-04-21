@@ -260,6 +260,7 @@ export interface CoachBrainCandidate {
   nearest_entry_id: string | null;
   nearest_cosine_sim: number | null;
   contradiction_flag: boolean;
+  requires_technical_review: boolean;
   review_status: "pending" | "approved" | "rejected" | "superseded";
   created_at: string;
 }
