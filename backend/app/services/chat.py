@@ -74,7 +74,7 @@ class ChatService:
     ) -> ChatMessage:
         """Process a user chat message and return the assistant response."""
         # Load analysis + verify ownership
-        analysis = await self._analysis_repo.get_by_id(analysis_id)
+        analysis = await self._analysis_repo.get_by_id_with_relations(analysis_id)
         if analysis is None:
             raise LookupError(f"Analysis {analysis_id} not found")
         if analysis.user_id != user_id:
