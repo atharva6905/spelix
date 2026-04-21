@@ -977,6 +977,26 @@ describe("ResultsPage — Phase 1 coaching extensions", () => {
     );
   });
 
+  // -------------------------------------------------------------------------
+  // Error rendering hardening — [object Object] regression guard
+  // -------------------------------------------------------------------------
+
+  describe("error rendering hardening", () => {
+    it("never renders [object Object] even if error state is a non-string value", () => {
+      mockUseAnalysisDetail.mockReturnValue({
+        analysis: null,
+        isLoading: false,
+        // Simulate a regression where a non-string leaks out of the hook's catch branch
+        error: { code: "OOPS", message: "real message inside an object" } as unknown as string,
+      });
+
+      renderResultsPage();
+
+      expect(screen.queryByText(/\[object Object\]/)).toBeNull();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
+
   describe("How AI Reasoned sidebar integration (P3-007)", () => {
     it("does not render the button when agent_trace_json is null", () => {
       mockUseAnalysisDetail.mockReturnValue({

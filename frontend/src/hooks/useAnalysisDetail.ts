@@ -37,7 +37,11 @@ export function useAnalysisDetail(id: string): UseAnalysisDetailResult {
       } catch (err) {
         if (!cancelled) {
           const message =
-            err instanceof Error ? err.message : "Failed to load analysis";
+            err instanceof Error
+              ? err.message
+              : typeof err === "string"
+                ? err
+                : "Failed to load analysis";
           setError(message);
         }
       } finally {
