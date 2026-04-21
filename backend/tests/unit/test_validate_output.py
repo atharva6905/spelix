@@ -236,3 +236,36 @@ def test_validate_tracks_uncited_issues() -> None:
     # Rep 1 has no citations, so it should be in uncited_issues
     assert 1 in result.uncited_issues
     assert 2 not in result.uncited_issues
+
+
+def test_validator_scans_strengths_for_citation_markers() -> None:
+    """strengths[] items with [N] markers must be scanned — not just summary / issues / correction_plan.
+
+    The test puts an out-of-range [5] marker ONLY in strengths (all other fields
+    are citation-free). With only 2 citation blocks, [5] is invalid. If the
+    validator does NOT scan strengths it will silently miss the bad index and
+    return has_invalid_citations=False — which would be the wrong (failing) answer.
+    """
+    from app.services.validate_output import ValidateOutputTool
+
+    # Only strengths contains a [5] marker — all other text fields are citation-free.
+    output = _make_coaching_output(
+        summary="Good squat session overall.",
+        strengths=["Consistent bracing throughout [5].", "Good bar path"],
+        issues=[
+            Issue(
+                rep_number=1,
+                joint="knee",
+                description="No citation here.",
+                severity="Low",
+            ),
+        ],
+        correction_plan=["No citation here either."],
+    )
+    # Only 2 citation blocks — [5] is out of range.
+    blocks = _make_citation_blocks(2)
+    result = ValidateOutputTool.validate(output, blocks)
+
+    # The [5] in strengths is invalid — the validator must catch it.
+    assert result.has_invalid_citations is True
+    assert 5 in result.invalid_indices

@@ -64,6 +64,10 @@ class ValidateOutputTool:
         # Scan summary
         all_found.update(extract_citation_indices(output.summary))
 
+        # Scan strengths items
+        for item in output.strengths:
+            all_found.update(extract_citation_indices(item))
+
         # Scan correction_plan items
         for item in output.correction_plan:
             all_found.update(extract_citation_indices(item))

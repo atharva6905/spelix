@@ -772,6 +772,30 @@ class TestCoachingService:
         for phrase in banned:
             assert phrase not in prompt.lower()
 
+    def test_system_prompt_requires_inline_citation_markers(self) -> None:
+        """The system prompt MUST tell Claude to embed [N] inline in prose fields,
+        not just list citations separately."""
+        from app.services.coaching import _build_system_prompt
+
+        prompt = _build_system_prompt()
+
+        # The prompt must mention [N] / [1] marker syntax.
+        assert "[N]" in prompt or "[1]" in prompt, (
+            "system prompt must reference [N] / [1] marker syntax"
+        )
+        lowered = prompt.lower()
+        # The prompt must say markers go inline / embedded in the prose.
+        assert "inline" in lowered or "embed" in lowered, (
+            "system prompt must tell Claude to embed markers inline"
+        )
+        # The prompt must name all 4 canonical prose fields where markers must appear.
+        required_fields = ("summary", "correction_plan", "strengths", "issues")
+        missing = [f for f in required_fields if f not in lowered]
+        assert not missing, (
+            f"system prompt must name all 4 prose fields where markers must appear; "
+            f"missing from prompt: {missing}"
+        )
+
     @pytest.mark.asyncio
     async def test_generate_coaching_passes_new_params(self) -> None:
         """generate_coaching must pass body_stats and keyframe_analysis_text to prompt."""
