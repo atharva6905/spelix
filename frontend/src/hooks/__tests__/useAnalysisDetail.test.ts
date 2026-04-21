@@ -79,8 +79,20 @@ describe("useAnalysisDetail", () => {
     expect(result.current.analysis).toBeNull();
   });
 
-  it("uses fallback error message when error is not an Error instance", async () => {
+  it("passes through a thrown string directly as the error message", async () => {
     mockGetAnalysisDetail.mockRejectedValue("plain string error");
+
+    const { result } = renderHook(() => useAnalysisDetail("analysis-abc"));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBe("plain string error");
+  });
+
+  it("uses fallback error message when error is a plain object (not Error or string)", async () => {
+    mockGetAnalysisDetail.mockRejectedValue({ code: "OOPS" });
 
     const { result } = renderHook(() => useAnalysisDetail("analysis-abc"));
 

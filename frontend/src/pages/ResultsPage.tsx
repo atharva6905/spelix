@@ -576,7 +576,7 @@ export default function ResultsPage() {
             role="alert"
             className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-800"
           >
-            {error}
+            {typeof error === "string" ? error : "Failed to load analysis."}
           </div>
           <Link
             to="/"
