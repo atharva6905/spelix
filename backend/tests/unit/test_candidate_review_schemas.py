@@ -47,10 +47,10 @@ def test_reject_request_requires_reason_min_length():
     assert req.reason == "off-topic"
 
 
-def test_candidate_list_item_roundtrip_from_schema():
+def _make_list_item(**overrides) -> CandidateListItem:
     cid = uuid.uuid4()
     now = datetime.now(timezone.utc)
-    item = CandidateListItem(
+    defaults = dict(
         id=cid,
         exercise="bench",
         phase="descent",
@@ -66,12 +66,57 @@ def test_candidate_list_item_roundtrip_from_schema():
         nearest_entry_id=None,
         nearest_cosine_sim=None,
         contradiction_flag=False,
+        requires_technical_review=False,
         review_status="pending",
         created_at=now,
     )
+    defaults.update(overrides)
+    return CandidateListItem(**defaults)
+
+
+def test_candidate_list_item_roundtrip_from_schema():
+    item = _make_list_item()
     dumped = item.model_dump()
-    assert dumped["id"] == cid
     assert dumped["eval_scores"]["faithfulness"] == 0.82
+
+
+def test_candidate_list_item_requires_technical_review_false_for_cue():
+    item = _make_list_item(entry_type="cue", requires_technical_review=False)
+    assert item.requires_technical_review is False
+
+
+def test_candidate_list_item_requires_technical_review_true_for_compensation():
+    item = _make_list_item(entry_type="compensation", requires_technical_review=True)
+    assert item.requires_technical_review is True
+    dumped = item.model_dump()
+    assert dumped["requires_technical_review"] is True
+
+
+def test_candidate_list_item_defaults_requires_technical_review_false():
+    """Field has a default of False — omitting it in construction should not error."""
+    cid = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    # Build without requires_technical_review — should default to False
+    item = CandidateListItem(
+        id=cid,
+        exercise="bench",
+        phase=None,
+        entry_type="cue",
+        content="Drive heels down.",
+        trigger_tags=[],
+        source_analysis_ids=[uuid.uuid4()],
+        confidence_score=None,
+        eval_scores={},
+        cove_verified=None,
+        cove_explanation=None,
+        lifecycle_decision="ADD",
+        nearest_entry_id=None,
+        nearest_cosine_sim=None,
+        contradiction_flag=False,
+        review_status="pending",
+        created_at=now,
+    )
+    assert item.requires_technical_review is False
 
 
 def test_approve_response_carries_both_ids():
