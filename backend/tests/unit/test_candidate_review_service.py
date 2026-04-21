@@ -18,11 +18,12 @@ from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
     CandidateReviewService,
+    NotBiomechanicsQualified,
     PromptInjectionDetected,
     QdrantUpsertFailed,
 )
 
-_ = PromptInjectionDetected  # keep import alive through formatter strip
+_ = (PromptInjectionDetected, NotBiomechanicsQualified)  # keep imports alive through formatter strip
 
 
 def _candidate_row(**overrides) -> CoachBrainCandidateRow:
@@ -44,6 +45,7 @@ def _candidate_row(**overrides) -> CoachBrainCandidateRow:
         nearest_entry_id=None,
         nearest_cosine_sim=None,
         contradiction_flag=False,
+        requires_technical_review=False,
         review_status="pending",
         rejected_reason=None,
         promoted_entry_id=None,
@@ -534,3 +536,83 @@ async def test_concurrent_approve_second_caller_hits_already_reviewed():
 
     with pytest.raises(CandidateAlreadyReviewed):
         await svc.approve(candidate_id=candidate.id, admin_user_id=uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# H-02: biomechanics_qualified gate (FR-ADMN-12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_approve_compensation_candidate_unqualified_raises():
+    """Unqualified admin cannot approve a requires_technical_review candidate."""
+    candidate = _candidate_row(
+        entry_type="compensation",
+        requires_technical_review=True,
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    db = AsyncMock()
+    svc = CandidateReviewService(db, cand_repo, MagicMock(), MagicMock())
+
+    with pytest.raises(NotBiomechanicsQualified):
+        await svc.approve(
+            candidate_id=candidate.id,
+            admin_user_id=uuid.uuid4(),
+            approver_qualified=False,
+        )
+    # No DB write should have happened
+    db.commit.assert_not_awaited()
+    assert candidate.review_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_compensation_candidate_qualified_succeeds():
+    """Qualified admin CAN approve a requires_technical_review candidate."""
+    candidate = _candidate_row(
+        entry_type="compensation",
+        requires_technical_review=True,
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+    svc = CandidateReviewService(db, cand_repo, entry_repo, brain_embed)
+
+    resp = await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        approver_qualified=True,
+    )
+
+    assert candidate.review_status == "approved"
+    assert resp.entry_id is not None
+    db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_approve_cue_candidate_unqualified_succeeds():
+    """Cue candidate (requires_technical_review=False) is not gated by qualification."""
+    candidate = _candidate_row(
+        entry_type="cue",
+        requires_technical_review=False,
+    )
+    cand_repo = MagicMock()
+    cand_repo.get_by_id_for_update = AsyncMock(return_value=candidate)
+    entry_repo = _make_entry_repo_create()
+    brain_embed = MagicMock()
+    brain_embed.embed_and_upsert = AsyncMock(return_value="pt-0")
+    db = AsyncMock()
+    svc = CandidateReviewService(db, cand_repo, entry_repo, brain_embed)
+
+    resp = await svc.approve(
+        candidate_id=candidate.id,
+        admin_user_id=uuid.uuid4(),
+        approver_qualified=False,  # unqualified, but not required
+    )
+
+    assert candidate.review_status == "approved"
+    assert resp.entry_id is not None
+    db.commit.assert_awaited_once()

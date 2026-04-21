@@ -44,6 +44,7 @@ from app.services.candidate_review import (
     CandidateAlreadyReviewed,
     CandidateNotFound,
     CandidateReviewService,
+    NotBiomechanicsQualified,
     PromptInjectionDetected,
     QdrantUpsertFailed,
 )
@@ -52,12 +53,13 @@ from app.services.qdrant import get_qdrant_client
 
 logger = logging.getLogger(__name__)
 
-# Keep references alive so ruff doesn't strip them (used in response_model)
+# Keep references alive so ruff doesn't strip them (used in response_model or except clauses)
 _USED = (
     AnalysisExpertReviewRepository,
     CoachBrainRepository,
     CoachBrainCandidateRepository,
     CandidateReviewService,
+    NotBiomechanicsQualified,
     PromptInjectionDetected,
     CoachBrainEntryModel,
     CoachBrainEntrySchema,
@@ -583,6 +585,7 @@ async def approve_coach_brain_candidate(
             candidate_id=candidate_id,
             admin_user_id=user["id"],
             content_override=body.content_override,
+            approver_qualified=user.get("biomechanics_qualified", False),
         )
     except CandidateNotFound:
         raise HTTPException(
@@ -602,6 +605,20 @@ async def approve_coach_brain_candidate(
                 "error": {
                     "code": "ALREADY_REVIEWED",
                     "message": "Candidate has already been reviewed.",
+                    "detail": None,
+                }
+            },
+        )
+    except NotBiomechanicsQualified:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "NOT_BIOMECHANICS_QUALIFIED",
+                    "message": (
+                        "This candidate requires a biomechanics-qualified reviewer. "
+                        "Your account does not have the biomechanics_qualified flag set."
+                    ),
                     "detail": None,
                 }
             },
