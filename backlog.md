@@ -887,3 +887,56 @@ Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2
 | L2-LANDING-V2-04 | Admin beta-request approval UI + transactional-email invite flow — `/admin` card listing pending requests with approve/reject; single-use invite token → `/signup?invite=TOKEN` | M | L2-LANDING-02 | ADR-050 | pending |
 | L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | pending |
 
+
+## Completed — Pre-Beta Audit Full Closeout (2026-04-20/21, session 58)
+
+Closed 20 audit findings across 4 PRs, then ran Phase 3 audit and fixed 2 HIGH findings in a 5th PR. 38 of 42 total audit findings resolved — remaining 4 are intentional deferrals (H-11 Phase 4, M-07 infra sprint, M-10 refactor, L-03 server config; L-06 was already resolved pre-session).
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| AUDIT-M-01 | Remove exception details from 500 responses (no `type(exc).__name__` / `str(exc)` leak) | done | S | — | NFR-SECU-08 | `c620dcb` | `backend/app/main.py`, `backend/tests/unit/test_global_exception_handler.py` |
+| AUDIT-M-02 | IP-based rate limiting (remove unverified JWT sub extraction) | done | S | — | NFR-SECU-10 | `4cd0412` | `backend/app/rate_limit.py`, `backend/tests/unit/test_rate_limit_key.py` |
+| AUDIT-M-03 | Chat endpoint prompt injection defense (`_sanitize_user_message`) | done | S | — | FR-AICP-17 | `ca98a8a` | `backend/app/services/chat.py`, `backend/tests/unit/test_chat_prompt_injection.py` |
+| AUDIT-H-03 | RLS on `rag_documents`, `expert_annotations`, `coach_brain_entries` | done | S | — | NFR-SECU-07 | `c97680d` | `backend/alembic/versions/015_rls_admin_tables.py` |
+| AUDIT-H-08 | FR-SCOR-09 app-purpose statement on ResultsPage | done | S | — | FR-SCOR-09 | `5f733ea` | `frontend/src/pages/ResultsPage.tsx` |
+| AUDIT-H-09 | `requires_technical_review` column + distillation wiring | done | M | — | FR-ADMN-12 | `86f3d80` | `backend/alembic/versions/016_add_requires_technical_review.py`, `backend/app/models/coach_brain_candidate.py`, `backend/app/distillation/store.py` |
+| AUDIT-M-08 | ChatService unit tests (32% → ~70% coverage) | done | S | — | — | `06d8daf` | `backend/tests/unit/test_chat_service.py` |
+| AUDIT-M-09 | ExpertService unit tests (31% → ~65% coverage) | done | S | — | — | `1526318` | `backend/tests/unit/test_expert_service.py` |
+| AUDIT-H-07 | Pin Docker base images to SHA256 digests | done | S | — | — | `bb5712f` | `backend/Dockerfile`, `docker-compose.prod.yml`, `docker-compose.dev.yml`, `.github/workflows/ci.yml` |
+| AUDIT-H-10 | ExpertPortalPage + ExpertAnalysisDetailPage test coverage | done | M | — | NFR-MAIN-05 | `6328098` | `frontend/src/pages/__tests__/ExpertPortalPage.test.tsx`, `frontend/src/pages/__tests__/ExpertAnalysisDetailPage.test.tsx` |
+| AUDIT-H-13 | Log 6 silently-swallowed exceptions in `analysis_worker.py` | done | S | — | NFR-OPER-01 | `347162b` | `backend/app/workers/analysis_worker.py` |
+| AUDIT-H-14 | Standalone index on `analyses.status` | done | S | — | NFR-PERF-01 | `17cd9bb` | `backend/alembic/versions/017_add_missing_indexes.py` |
+| AUDIT-H-15 | Standalone index on `consent_records.consent_type` | done | S | — | NFR-PERF-01 | `17cd9bb` | `backend/alembic/versions/017_add_missing_indexes.py` |
+| AUDIT-M-04 | SHA256 checksum verification on BlazePose model download | done | S | — | — | `fccdebd` | `backend/Dockerfile` |
+| AUDIT-M-05 | Pin TruffleHog action to v3.94.3 commit SHA (no more `@main`) | done | S | — | — | `fccdebd` | `.github/workflows/ci.yml` |
+| AUDIT-M-06 | Worker Docker healthcheck (Redis heartbeat probe) | done | S | — | NFR-RELI-02 | `fccdebd` | `docker-compose.prod.yml` |
+| AUDIT-M-11 | Extract magic numbers to `app/config_constants.py` | done | M | — | — | `0a2fe8c` | `backend/app/config_constants.py`, `backend/app/agents/graph.py`, `backend/app/api/deps.py`, `backend/app/distillation/graph.py` |
+| AUDIT-M-12 | Widen `coach_brain_candidates.review_status` VARCHAR(20) → (30) | done | S | — | — | `cce6a47` | `backend/alembic/versions/f2c0572a0bde_widen_review_status_varchar30.py`, `backend/app/models/coach_brain_candidate.py` |
+| AUDIT-M-13 | Standalone index on `analyses.user_id` | done | S | — | NFR-PERF-01 | `66b43c2` | `backend/alembic/versions/019_add_analyses_user_id_index.py` |
+| AUDIT-M-14 | Distillation graph passes `RunnableConfig` with `run_name` + `tags` for LangSmith tracing | done | S | AUDIT-M-11 | FR-BRAIN-06 | `93c4ce0` | `backend/app/distillation/graph.py`, `backend/tests/unit/test_distillation_graph.py` |
+| AUDIT-M-15 | Wrap delete button query in `waitFor` to fix flaky AdminPage test | done | S | — | — | `e068a69` | `frontend/src/pages/__tests__/AdminPage.test.tsx` |
+| AUDIT-L-01 | CI deploy script rollback on post-deploy health check failure | done | S | — | NFR-RELI-02 | `48d9071` | `.github/workflows/ci.yml` |
+| AUDIT-L-02 | Upper-bound 26 backend dependencies in `pyproject.toml` | done | M | — | — | `f2a0cd9` | `backend/pyproject.toml`, `backend/uv.lock` |
+| AUDIT-L-04 | Dedupe `_HEARTBEAT_TTL` constant across worker files | done | S | — | — | `5a5d3e1` | `backend/app/workers/analysis_worker.py`, `backend/app/workers/streaq_worker.py` |
+| AUDIT-L-05 | Centralize 5 LLM `MAX_TOKENS` constants to `config_constants.py` | done | S | AUDIT-M-11 | — | `2bed7d1` | `backend/app/config_constants.py`, `backend/app/services/chat.py`, `backend/app/services/faithfulness_gate.py`, `backend/app/services/ingestion.py`, `backend/app/services/keyframe_analysis.py`, `backend/app/services/coaching.py` |
+| AUDIT-L-07 | Dedupe `MAX_FILE_SIZE_BYTES` between schemas and services | done | S | — | — | `ddcb227` | `backend/app/services/analysis.py` |
+| AUDIT-L-08 | Remove "diagnose" language from landing PrivacySection (SaMD policy) | done | S | — | — | `067872d` | `frontend/src/components/landing/PrivacySection.tsx` |
+| AUDIT-L-09 | Read JWT role from `app_metadata` not `user_metadata` (privilege escalation fix) | done | M | — | NFR-SECU-09 | `0b5363c` | `backend/app/api/deps.py`, `backend/tests/unit/test_auth.py`, `backend/scripts/oneoff/migrate_roles_to_app_metadata.py` |
+| AUDIT-L-10 | Composite index on `consent_records(user_id, consent_type)` | done | S | — | NFR-PERF-01 | `30fafd1` | `backend/alembic/versions/020_add_consent_records_composite_index.py` |
+| AUDIT-L-11 | Standalone index on `coach_brain_entries.status` | done | S | — | NFR-PERF-01 | `3e2197a` | `backend/alembic/versions/021_add_coach_brain_entries_status_index.py` |
+| AUDIT-P3-H01 | Expose `requires_technical_review` in `CandidateListItem` API response + frontend banner condition | done | S | — | FR-ADMN-12 | `341779f` | `backend/app/schemas/candidate_review.py`, `frontend/src/api/admin.ts`, `frontend/src/pages/AdminCoachBrainCandidatesPage.tsx` |
+| AUDIT-P3-H02 | Gate compensation approve on `biomechanics_qualified` claim; HTTP 403 otherwise | done | M | AUDIT-L-09 | FR-ADMN-12 | `0e45401` | `backend/app/api/deps.py`, `backend/app/services/candidate_review.py`, `backend/app/api/v1/admin.py`, `backend/tests/unit/test_auth.py` |
+
+**Ops completed this session:**
+- `migrate_roles_to_app_metadata.py` ran against prod Supabase: 0 users needed migration
+- `app_metadata.biomechanics_qualified=true` set on `atharva6905+admin-p3006@gmail.com`
+- Migrations 015→021 applied via CI deploy pipeline
+
+**Deferred items (still open):**
+
+| ID | Title | Status | Reason |
+|---|---|---|---|
+| D-AUDIT-H-11 | deepeval CI suite against golden dataset | deferred | Phase 4 work; `spelix-eval-engineer` agent not yet active |
+| D-AUDIT-M-07 | Pin system apt packages in Dockerfile | deferred | Requires per-mirror version resolution; infra sprint |
+| D-AUDIT-M-10 | Refactor files > 300 lines | deferred | Tech debt / refactoring scope — no feature context |
+| D-AUDIT-L-03 | Enable ufw on droplet | deferred | Pure server config, not code fix — do manually |

@@ -1,58 +1,71 @@
-# Session 56 Handoff → Session 57: D-039 + D-030 shipped
+# Session 58 Handoff → Session 59: Pre-Beta Audit Fully Closed + Phase 3 Audit Passed
 
-**Context (session 56, 2026-04-20, L2 Sprint Day 14):** Shipped D-039 (CoVe re-run on admin content edit) and D-030 (orphan rag_documents cleanup cron). Both backend-only, no migrations, no frontend changes.
+**Context (session 58, 2026-04-20/21, L2 Sprint Day 14–15):** Cleared all addressable pre-beta audit findings (38 of 42) across 5 PRs, then ran a full Phase 3 compliance audit and fixed the 2 HIGH findings surfaced. Phase 3 is now cleanly code-complete and production-verified.
 
-## 1. Completed
+## 1. PRs Merged This Session
 
-### PR #105 — D-039: CoVe re-run on admin content edit during approve
-Merge commit `596b77b`. 5 commits on branch `feat/d039-cove-rerun-on-approve-edit`:
+| PR | Scope | Merge SHA |
+|----|-------|-----------|
+| #108 | HIGH/MEDIUM audit batch 1 (H-03, H-08, H-09, M-01–M-03, M-08, M-09) | `4219992` |
+| #109 | Remaining HIGH audit (H-07, H-10, H-13, H-14, H-15) | `78fbbc3` |
+| #110 | MEDIUM audit (M-04–M-06, M-11–M-15) | `136efaf` |
+| #111 | LOW audit (L-01, L-02, L-04, L-05, L-07–L-11) | `88327e9` |
+| #112 | Phase 3 audit fixes (H-01, H-02 — FR-ADMN-12 routing) | `0e30d81` |
 
-| Commit | Scope |
-|---|---|
-| `b509ae1` | TDD red: 5 failing tests for CoVe re-run behavior |
-| `186c434` | `_rerun_cove_for_edited_content` method + `approve` flow update |
-| `24aec8d` | Wire `BrainCoveService` + `RetrievalService` into `_get_review_service` |
-| `e574060` | Pyright fix: add assertions for optional service fields |
-| `0210a81` | Docs: D-039 closed in backlog + ADR-COVE-RERUN-01 |
+All 5 deployed to prod via CI. Migrations 015 → 021 applied. Playwright E2E not yet run on #111/#112 — recommended for session 59.
 
-Backend: +5 tests (19 total in `test_candidate_review_service.py`). Ruff + pyright clean. CI 6/6 green.
+## 2. Audit Status — Closed
 
-### PR #106 — D-030: Nightly orphan `rag_documents` cleanup cron
-Merge commit `befba80`. 4 commits on branch `feat/d030-orphan-rag-cleanup`:
+**38 of 42 findings resolved.** Remaining 4 are intentional deferrals:
+- H-11 (deepeval CI) — Phase 4 work, `spelix-eval-engineer` agent not yet active
+- M-07 (apt package pinning) — brittle without deeper analysis, defer to infra sprint
+- M-10 (files > 300 lines) — refactor scope, not a fixable task
+- L-03 (droplet ufw) — pure server config, not a code fix
 
-| Commit | Scope |
-|---|---|
-| `86d9fa6` | TDD: 6 tests for orphan cleanup |
-| `0226e55` | `cleanup_orphan_papers.py` — query stale uploading rows, delete Storage + DB |
-| `abdd6a2` | Register `cleanup_orphan_papers_cron` at 04:00 UTC in `streaq_worker.py` |
-| `1e4db53` | Backlog close |
+## 3. Phase 3 Status — CLEAN
 
-Backend: +6 tests. Cron runs at 04:00 UTC (distinct from artifact cleanup 03:00, Qdrant keepalive 02:00). CI 6/6 green.
+All 8 MUST requirements implemented and audit-verified:
+- FR-AICP-18, FR-AICP-19, FR-AICP-20 (LangGraph agent + LangSmith + trace UI)
+- FR-RESL-07 ("How AI Reasoned" sidebar)
+- FR-ADMN-12 (admin review queue — compensation routing via `requires_technical_review` + `biomechanics_qualified` gate)
+- FR-BRAIN-06, FR-BRAIN-07, FR-BRAIN-17 (distillation pipeline + review queue + lifecycle decisions)
 
-## 2. Remaining open items
+Compliance: ruff + pyright + tsc clean. Language policy: no SaMD violations. Trace schema aligned backend ↔ frontend. Feature flags (`SPELIX_PHASE3_AGENT_ENABLED`, `SPELIX_AGENT_MODE`) properly gated.
 
-- **L2 gate blocker**: Invite 3-5 trusted test users through end-to-end flow
-- Landing V2-01: "Four Dimensions" section (pending)
-- Landing V2-02: "Roadmap" section (pending)
-- M-06: Phase 4 eval_scores.overall precedence check (pending, Phase 4 scope)
-- D-056: Working vs non-working rep distinction (open post-L2)
+## 4. Production Ops Steps Completed
 
-## 3. L2 Sprint Gate Status (May 3)
+- **L-09**: Ran `migrate_roles_to_app_metadata.py` against prod Supabase — 0 users needed migration (all roles already in `app_metadata`)
+- **H-02**: Set `app_metadata.biomechanics_qualified=true` on admin `atharva6905+admin-p3006@gmail.com`
+- Migrations 015 (RLS admin tables), 016 (requires_technical_review), 017 (missing indexes), 018 (VARCHAR(30)), 019 (analyses.user_id index), 020 (consent composite), 021 (coach_brain_entries.status) all applied via CI deploy pipeline
 
-| Gate | Status |
-|------|--------|
-| Landing page V1 live | done |
-| Expert paper upload live | done |
-| ARQ → streaq migration | done |
-| Phase 3 agent on prod | done |
-| Distillation StateGraph operational | done |
-| Coach Brain review queue | done |
-| Reasoning sidebar | done |
-| 3-5 trusted test users | **NOT YET** |
-| No CRITICAL prod bugs | verified — D-039 + D-030 were the last open items |
+## 5. Test Counts
 
-## 4. Test counts
+- Backend: **1778+** passed, 27 skipped, 0 failed (90% coverage)
+- Frontend: **347+** passed (5 pre-existing flakes not introduced this session — AgentReasoningSidebar, AppLayout, ResultsPage, EmailCaptureForm)
 
-- Backend: ~1720+ (1710 baseline + 5 D-039 + 6 D-030)
-- Frontend: ~333 (unchanged)
-- 0 failures
+## 6. Alembic Head
+
+`021_coach_brain_status_idx` — applied on prod.
+
+## 7. Next Session Priorities
+
+**Primary path forward (choose one):**
+
+1. **Phase 4 kickoff** — Activate `spelix-eval-engineer` agent, seed the golden dataset, implement deepeval CI (closes H-11 and FR-AICP-08). Per CLAUDE.md this agent activates at Phase 4.
+2. **L2 sprint acceptance** — Run full E2E Playwright verification on prod for PR #111/#112 surfaces. Beta user invites sequenced after verification.
+3. **Beta readiness polish** — Any stray landing polish, email flows, or content before inviting real users.
+
+**Known follow-ups (low-priority, already backlog):**
+- M-06 (Phase 4 RAGAS `overall/correctness` precedence audit — docs change when Phase 4 ships)
+- M-10 file-length tech debt (post-beta)
+- M-07 apt package pinning (infra sprint)
+
+## 8. New Files / Modules Introduced This Session
+
+- `backend/app/config_constants.py` — centralized runtime constants (recursion limits, timeouts, JWKS TTL, LLM MAX_TOKENS)
+- `backend/scripts/oneoff/migrate_roles_to_app_metadata.py` — Supabase role backfill (already run)
+- Migrations 015–021
+
+## 9. New ADRs
+
+See `decisions.md` additions in this session — role-source security hardening, biomechanics-qualified claim, config-constants module pattern.

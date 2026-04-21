@@ -981,3 +981,46 @@ ADR-REPDET-02 hybrid-detection decisions.
 **Rationale:** Blocking approval on CoVe would make the review queue unusable when Qdrant or Haiku is down. The admin has already reviewed the content and made a trust decision; CoVe is a secondary verification signal. Logging the error type in metadata provides an audit trail without blocking the reviewer's workflow.
 
 **Consequences:** Entries promoted during a CoVe outage will carry stale verification. The admin dashboard could surface a "CoVe stale" badge in a future iteration. The `cove_rerun` boolean in extra_metadata distinguishes re-verified entries from passthrough entries.
+
+### ADR-SECU-05: JWT role claim lives in `app_metadata`, not `user_metadata`
+
+**Context:** Pre-beta audit L-09. Supabase JWTs have two metadata bags — `user_metadata` is user-editable via the client SDK, while `app_metadata` can only be written by service-role operations. Reading privilege claims from `user_metadata` is a privilege-escalation vector: any authenticated user can self-grant admin access via `supabase.auth.updateUser()`.
+
+**Decision:** `backend/app/api/deps.py` reads `role` (and any future privilege claim such as `biomechanics_qualified`) exclusively from `payload["app_metadata"]`. `user_metadata` is ignored for all security-relevant parsing. Defaults are restrictive — missing `role` → `"user"`, missing `biomechanics_qualified` → `False`.
+
+**Consequences:**
+- A one-off backfill script (`backend/scripts/oneoff/migrate_roles_to_app_metadata.py`) copies existing roles from `user_metadata` to `app_metadata`. Ran successfully against prod on 2026-04-21: 0 users needed migration — all 2 privileged users already had their role in `app_metadata`, so the L-09 fix was a no-op for existing users.
+- New privileged roles must be assigned via the Supabase admin dashboard or the service-role SDK, never via client-side `updateUser()`.
+- Any new privilege claim follows the same rule: live in `app_metadata`, default-restrictive, defensive `.get(..., False)` parsing.
+
+**Related:** L-09 audit finding, PR #111 (commit `0b5363c`). Supersedes no prior ADR — earlier code was an oversight.
+
+### ADR-ADMN-03: Compensation candidates require `biomechanics_qualified` admin
+
+**Context:** Phase 3 compliance audit H-02. FR-ADMN-12 states compensation Coach Brain entries "shall be routed to biomechanics-qualified reviewers." Previously any admin could approve any entry.
+
+**Decision:** `coach_brain_candidates.requires_technical_review` is set to `True` at distillation time when `entry_type == "compensation"` (existing behavior from M-01 fix, extended in #108). `CandidateReviewService.approve()` now takes an `approver_qualified: bool` parameter. When `candidate.requires_technical_review` is True and `approver_qualified` is False, the service raises `NotBiomechanicsQualified`, which the router maps to HTTP 403 with error code `NOT_BIOMECHANICS_QUALIFIED`. The approver's qualification flag is sourced from the JWT `app_metadata.biomechanics_qualified` claim via `CurrentUser.biomechanics_qualified` (per ADR-SECU-05).
+
+**Rationale:** Compensation entries encode clinical reasoning about movement dysfunction — approving the wrong compensation cue can put users at injury risk. Gating approval on an orthogonal-to-role qualification flag lets us expand admin access without loosening the biomechanics gate. Non-compensation entries (cues, corrections, principles, drills) remain approvable by any admin.
+
+**Consequences:**
+- New admins default to `biomechanics_qualified=False`. They can promote cue/correction/principle/drill candidates but receive HTTP 403 on compensation candidates.
+- Set the flag via Supabase service-role: `PUT /auth/v1/admin/users/{id}` with `{"app_metadata": {"biomechanics_qualified": true}}`. Applied in this session for `atharva6905+admin-p3006@gmail.com`.
+- Frontend gates the biomechanics banner on `candidate.requires_technical_review` (the authoritative DB flag), not on `entry_type === "compensation"`. The two are decoupled so future entry types can require technical review without a string match.
+- The approve endpoint surfaces `NOT_BIOMECHANICS_QUALIFIED` specifically so the admin UI can render a clear "you can't approve this one" state rather than a generic 403.
+
+**Related:** H-01, H-02 audit findings. FR-ADMN-12. PR #112 (commits `341779f`, `0e45401`). Builds on ADR-SECU-05.
+
+### ADR-CONFIG-01: Runtime constants centralized in `app/config_constants.py`
+
+**Context:** Pre-beta audit M-11 and L-05. Magic numbers (`recursion_limit=15`, JWKS TTL = 3600, various `MAX_TOKENS`, retry limits, timeout values) were scattered across a dozen files. Any tuning change required hunting them down; env-override wasn't possible without a code change.
+
+**Decision:** A single module `backend/app/config_constants.py` defines all runtime constants as module-level `int | float` values sourced from `os.getenv("SPELIX_*", default)`. Consumers import with aliased names to preserve local readability (e.g. `from app.config_constants import LLM_MAX_TOKENS_CHAT as CHAT_MAX_TOKENS`). This is distinct from `ThresholdConfig` (FR-SCOR-11), which is reserved for kinesiology thresholds that Expert Reviewers tune via PR — `config_constants` holds infrastructure/runtime knobs that only engineers change.
+
+**Consequences:**
+- Every constant has a `SPELIX_*` env var for per-deploy override without code change (e.g. bump `SPELIX_AGENT_TIMEOUT=120` on the droplet to test a longer budget).
+- New constants go in this module by default. The bar to introduce a new file-local magic number is now "why isn't this a config constant?"
+- Changing a default requires a code change + review, preserving the architectural decision trail for hot spots like `AGENT_RECURSION_LIMIT` that are locked by SRS (NFR-RELI-09).
+- Does NOT replace `ThresholdConfig` — coaching/scoring thresholds have a separate versioning flow via `config/thresholds_v1.json` with provenance citations. Don't mix the two.
+
+**Related:** M-11, L-05 audit findings. ADR-018 (ThresholdConfig design) is the orthogonal file for kinesiology tuning. PRs #110 (commit `0a2fe8c`) and #111 (commit `2bed7d1`).
