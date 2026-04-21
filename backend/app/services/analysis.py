@@ -21,6 +21,7 @@ from fastapi import HTTPException, status
 from app.models.analysis import Analysis
 from app.models.base import gen_uuid
 from app.repositories.analysis import AnalysisRepository
+from app.schemas.analysis import MAX_FILE_SIZE_BYTES
 from app.services.status import InvalidTransition, transition
 from app.services.storage import StorageService, get_storage_path
 
@@ -33,8 +34,6 @@ _VALID_VARIANTS: dict[str, frozenset[str]] = {
     "bench": frozenset({"flat", "incline", "decline"}),
     "deadlift": frozenset({"conventional", "sumo", "romanian"}),
 }
-
-MAX_FILE_SIZE_BYTES = 52_428_800  # 50 MB
 
 
 # ---------------------------------------------------------------------------
