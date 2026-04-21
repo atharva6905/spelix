@@ -27,6 +27,7 @@ from app.repositories.rep_metric import RepMetricRepository
 from app.services.pipeline import QualityGateRejection, run_cv_pipeline
 from app.services.status import transition
 from app.services.summary import SummaryService
+from app.workers.streaq_worker import _HEARTBEAT_TTL
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,6 @@ _TERMINAL_STATES = frozenset({"completed", "quality_gate_rejected"})
 
 # Heartbeat key and TTL (seconds)
 _HEARTBEAT_KEY = "spelix:worker:heartbeat"
-_HEARTBEAT_TTL = 90  # seconds
 
 
 # ---------------------------------------------------------------------------
