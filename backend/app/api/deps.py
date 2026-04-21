@@ -169,9 +169,10 @@ async def get_current_user(
     except ValueError:
         raise invalid_credentials_exc
 
-    # user_metadata.role is optional — default to "user"
-    user_metadata: dict = payload.get("user_metadata") or {}
-    role: str = user_metadata.get("role") or "user"
+    # app_metadata.role is authoritative — user_metadata is user-editable (L-09).
+    # Supabase restricts app_metadata writes to service role only.
+    app_metadata: dict = payload.get("app_metadata") or {}
+    role: str = app_metadata.get("role") or "user"
 
     return CurrentUser(id=user_id, email=email, role=role)
 
