@@ -97,6 +97,7 @@ def _make_coaching_result(analysis_id: uuid.UUID) -> CoachingResult:
         id=uuid.uuid4(),
         analysis_id=analysis_id,
         structured_output_json={"summary": "Test coaching output"},
+        retrieved_sources_json=[{"title": "Test Paper", "year": 2024}],
         stream_complete=True,
     )
 
@@ -134,6 +135,7 @@ async def test_get_by_id_with_relations_loads_coaching_result(
     assert loaded.coaching_result.structured_output_json == {
         "summary": "Test coaching output"
     }
+    assert len(loaded.coaching_result.retrieved_sources_json) == 1
 
 
 @_skip_no_db
@@ -180,6 +182,6 @@ async def test_get_by_id_without_relations_raises_on_lazy_access(
             # attempt, which SQLAlchemy cannot execute asynchronously → raises
             # MissingGreenlet.
             with pytest.raises(sqlalchemy.exc.MissingGreenlet):
-                _ = loaded.coaching_result  # noqa: F841 — access triggers lazy-load
+                _ = loaded.coaching_result  # access triggers lazy-load
     finally:
         await engine2.dispose()
