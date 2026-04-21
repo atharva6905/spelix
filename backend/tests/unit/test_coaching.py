@@ -788,11 +788,13 @@ class TestCoachingService:
         assert "inline" in lowered or "embed" in lowered, (
             "system prompt must tell Claude to embed markers inline"
         )
-        # The prompt must name at least one of the prose fields.
-        assert any(
-            field in lowered
-            for field in ("summary", "correction_plan", "correction plan", "strengths", "issues")
-        ), "system prompt must name the prose fields where markers must appear"
+        # The prompt must name all 4 canonical prose fields where markers must appear.
+        required_fields = ("summary", "correction_plan", "strengths", "issues")
+        missing = [f for f in required_fields if f not in lowered]
+        assert not missing, (
+            f"system prompt must name all 4 prose fields where markers must appear; "
+            f"missing from prompt: {missing}"
+        )
 
     @pytest.mark.asyncio
     async def test_generate_coaching_passes_new_params(self) -> None:

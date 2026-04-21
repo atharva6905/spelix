@@ -85,7 +85,7 @@ def _build_system_prompt() -> str:
         "  - Reference the exact rep number, joint, and movement phase.\n"
         "  - Provide a 'Recommended Cues' list with specific verbal or tactile cues "
         "the coach can use with the lifter.\n"
-        "  - When referencing research or retrieved evidence, you MUST embed inline "
+        "  - When a Retrieved Evidence section is provided below, you MUST embed inline "
         "citation markers directly in your prose using [N] notation "
         "(e.g., \"Knee valgus collapse [1] is linked to reduced hip abductor strength [2]\"). "
         "Use the same [N] index as the numbered item in the Retrieved Evidence section. "
