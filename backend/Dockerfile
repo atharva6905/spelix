@@ -70,7 +70,8 @@ COPY app/ ./app/
 RUN mkdir -p /app/models && \
     curl -fsSL \
         "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task" \
-        -o /app/models/pose_landmarker_heavy.task
+        -o /app/models/pose_landmarker_heavy.task && \
+    echo "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b  /app/models/pose_landmarker_heavy.task" | sha256sum -c -
 
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix

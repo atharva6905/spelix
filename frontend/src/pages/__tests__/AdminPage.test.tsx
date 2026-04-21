@@ -293,7 +293,9 @@ describe("AdminPage", () => {
       expect(screen.getByText("178 cm")).toBeInTheDocument();
     });
 
-    const deleteButtons = screen.getAllByRole("button", { name: /delete user/i });
+    const deleteButtons = await waitFor(() =>
+      screen.getAllByRole("button", { name: /delete user/i })
+    );
     fireEvent.click(deleteButtons[0]);
 
     await waitFor(() => {
