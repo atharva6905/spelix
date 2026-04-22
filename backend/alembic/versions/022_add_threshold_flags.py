@@ -12,14 +12,16 @@ this table only records *proposals* for admin triage.
 
 from __future__ import annotations
 
+from typing import Sequence, Union
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "022_threshold_flags"
-down_revision = "021_coach_brain_status_idx"
-branch_labels = None
-depends_on = None
+revision: str = "022_threshold_flags"
+down_revision: Union[str, Sequence[str], None] = "021_coach_brain_status_idx"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
@@ -37,7 +39,7 @@ def upgrade() -> None:
         sa.Column("proposed_citation", sa.Text(), nullable=False),
         sa.Column("rationale", sa.Text(), nullable=False),
         sa.Column("status", sa.String(length=30), nullable=False,
-                  server_default=sa.text("'open'")),
+                  server_default="open"),
         sa.Column("resolution_note", sa.Text(), nullable=True),
         sa.Column("resolved_by", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
@@ -47,41 +49,45 @@ def upgrade() -> None:
                   server_default=sa.text("now()")),
         sa.CheckConstraint(
             "status IN ('open', 'resolved', 'rejected')",
-            name="threshold_flags_status_check",
+            name="ck_threshold_flags_status",
         ),
         sa.CheckConstraint(
             "char_length(rationale) >= 20",
-            name="threshold_flags_rationale_min_len",
+            name="ck_threshold_flags_rationale_min_len",
         ),
         sa.CheckConstraint(
             "char_length(proposed_citation) >= 5",
-            name="threshold_flags_citation_min_len",
+            name="ck_threshold_flags_citation_min_len",
         ),
     )
     op.create_index(
         "ix_threshold_flags_reviewer_created",
-        "threshold_flags", ["reviewer_id", "created_at"],
-        postgresql_ops={"created_at": "DESC"},
+        "threshold_flags",
+        ["reviewer_id", sa.text("created_at DESC")],
     )
     op.create_index(
         "ix_threshold_flags_status_created",
-        "threshold_flags", ["status", "created_at"],
-        postgresql_ops={"created_at": "DESC"},
+        "threshold_flags",
+        ["status", sa.text("created_at DESC")],
     )
     op.create_index(
         "ix_threshold_flags_section_key",
         "threshold_flags", ["section", "key"],
     )
 
-    # RLS: reviewer sees own + admin sees all; insert by expert_reviewer/admin;
-    # update restricted to admin.
+    # Row-Level Security (Spelix rule: no DDL FK to auth.users — enforce via RLS).
+    # Access model:
+    #   SELECT — reviewer sees own flags; admin sees all.
+    #   INSERT — expert_reviewer or admin; reviewer_id must equal auth.uid().
+    #   UPDATE — admin only (service layer enforces reviewer_id/section/key
+    #            immutability; DB-level WITH CHECK only constrains the role).
     op.execute("ALTER TABLE threshold_flags ENABLE ROW LEVEL SECURITY;")
     op.execute("""
         CREATE POLICY threshold_flags_select_own_or_admin ON threshold_flags
         FOR SELECT
         USING (
             reviewer_id = auth.uid()
-            OR (auth.jwt() ->> 'role')::text IN ('admin', 'expert_reviewer')
+            OR (auth.jwt() ->> 'role')::text = 'admin'
         );
     """)
     op.execute("""
@@ -95,7 +101,8 @@ def upgrade() -> None:
     op.execute("""
         CREATE POLICY threshold_flags_update_admin_only ON threshold_flags
         FOR UPDATE
-        USING ((auth.jwt() ->> 'role')::text = 'admin');
+        USING ((auth.jwt() ->> 'role')::text = 'admin')
+        WITH CHECK ((auth.jwt() ->> 'role')::text = 'admin');
     """)
 
 
@@ -103,6 +110,7 @@ def downgrade() -> None:
     op.execute("DROP POLICY IF EXISTS threshold_flags_update_admin_only ON threshold_flags;")
     op.execute("DROP POLICY IF EXISTS threshold_flags_insert_expert_or_admin ON threshold_flags;")
     op.execute("DROP POLICY IF EXISTS threshold_flags_select_own_or_admin ON threshold_flags;")
+    op.execute("ALTER TABLE threshold_flags DISABLE ROW LEVEL SECURITY;")
     op.drop_index("ix_threshold_flags_section_key", table_name="threshold_flags")
     op.drop_index("ix_threshold_flags_status_created", table_name="threshold_flags")
     op.drop_index("ix_threshold_flags_reviewer_created", table_name="threshold_flags")
