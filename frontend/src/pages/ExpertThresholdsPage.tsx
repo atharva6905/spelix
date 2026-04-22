@@ -81,18 +81,19 @@ export default function ExpertThresholdsPage() {
   }, []);
 
   useEffect(() => {
-    if (authorized !== true) return;
-    if (tab === "thresholds") {
-      if (!listing) void loadListing();
-    } else {
-      void loadFlags();
-    }
-  }, [authorized, tab, listing, loadListing, loadFlags]);
+    if (authorized !== true || tab !== "thresholds") return;
+    if (!listing) void loadListing();
+  }, [authorized, tab, listing, loadListing]);
+
+  useEffect(() => {
+    if (authorized !== true || tab !== "my_flags") return;
+    void loadFlags();
+  }, [authorized, tab, loadFlags]);
 
   async function handleFlagSubmit(payload: ThresholdFlagCreate) {
     await createThresholdFlag(payload);
     setModalRow(null);
-    void loadFlags();
+    setTab("my_flags");
   }
 
   const sections = useMemo(() => {
