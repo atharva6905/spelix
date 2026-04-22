@@ -1,71 +1,76 @@
-# Session 58 Handoff → Session 59: Pre-Beta Audit Fully Closed + Phase 3 Audit Passed
+# Session 59 Handoff → Session 60: Phase 3 E2E Audit FULLY CLOSED
 
-**Context (session 58, 2026-04-20/21, L2 Sprint Day 14–15):** Cleared all addressable pre-beta audit findings (38 of 42) across 5 PRs, then ran a full Phase 3 compliance audit and fixed the 2 HIGH findings surfaced. Phase 3 is now cleanly code-complete and production-verified.
+**Context (session 59, 2026-04-21, L2 Sprint Day 15):** Ran Phase 3 E2E production verification against spelix.app covering 20 tasks across 3 user perspectives (regular user, admin, expert reviewer). Found 5 items — 1 blocker (chat 500) + 4 non-blockers. All 5 resolved in one session across 4 PRs + 1 prod-ops step. Beta invites unblocked.
 
-## 1. PRs Merged This Session
+## 1. Verdict: GO — all audit items resolved
 
-| PR | Scope | Merge SHA |
-|----|-------|-----------|
-| #108 | HIGH/MEDIUM audit batch 1 (H-03, H-08, H-09, M-01–M-03, M-08, M-09) | `4219992` |
-| #109 | Remaining HIGH audit (H-07, H-10, H-13, H-14, H-15) | `78fbbc3` |
-| #110 | MEDIUM audit (M-04–M-06, M-11–M-15) | `136efaf` |
-| #111 | LOW audit (L-01, L-02, L-04, L-05, L-07–L-11) | `88327e9` |
-| #112 | Phase 3 audit fixes (H-01, H-02 — FR-ADMN-12 routing) | `0e30d81` |
+| # | Item | PR | Status |
+|---|------|----|--------|
+| 1 | Chat endpoint 500 (MissingGreenlet) | #113 (`82cfa80`) | ✅ Shipped + verified HTTP 201 on prod |
+| 2 | Citation inline `[N]` markers | #114 (`4571102`) | ✅ Shipped + verified tooltips render on prod |
+| 3 | `[object Object]` on 404 | #115 + #116 (`fea02e1`) | ✅ Shipped + verified "Failed to fetch analysis" on prod |
+| 4 | Worker `(unhealthy)` | #115 + #116 (`fea02e1`) | ✅ Shipped + verified `(healthy)` on prod |
+| 5 | LangSmith tracing not configured | SSH ops (no repo change) | ✅ Env vars loaded, analysis ran, dashboard check pending user |
 
-All 5 deployed to prod via CI. Migrations 015 → 021 applied. Playwright E2E not yet run on #111/#112 — recommended for session 59.
+## 2. Config ops applied to prod this session
 
-## 2. Audit Status — Closed
+- **`SPELIX_AGENT_TIMEOUT=180`** — was default 60s, insufficient for 6-node agent graph on 2GB droplet. Bumped in `.env.prod` + recreated containers.
+- **`app_metadata.role=admin` + `biomechanics_qualified=true`** — set on `atharva6905@gmail.com` via Supabase admin API. Previously this account had no role, which blocked admin testing early in the E2E.
+- **LangSmith 3 env vars** — `LANGCHAIN_TRACING_V2=true`, `LANGCHAIN_API_KEY=<secret>`, `LANGCHAIN_PROJECT=spelix-prod`. Appended to `.env.prod`, containers recreated via `up -d --no-build` (restart does NOT re-read env).
 
-**38 of 42 findings resolved.** Remaining 4 are intentional deferrals:
-- H-11 (deepeval CI) — Phase 4 work, `spelix-eval-engineer` agent not yet active
-- M-07 (apt package pinning) — brittle without deeper analysis, defer to infra sprint
-- M-10 (files > 300 lines) — refactor scope, not a fixable task
-- L-03 (droplet ufw) — pure server config, not a code fix
+**Important:** `docker compose restart` does NOT pick up new env vars. Must use `up -d --no-build` to recreate containers.
 
-## 3. Phase 3 Status — CLEAN
+## 3. Architecture decisions recorded (new ADRs in decisions.md)
 
-All 8 MUST requirements implemented and audit-verified:
-- FR-AICP-18, FR-AICP-19, FR-AICP-20 (LangGraph agent + LangSmith + trace UI)
-- FR-RESL-07 ("How AI Reasoned" sidebar)
-- FR-ADMN-12 (admin review queue — compensation routing via `requires_technical_review` + `biomechanics_qualified` gate)
-- FR-BRAIN-06, FR-BRAIN-07, FR-BRAIN-17 (distillation pipeline + review queue + lifecycle decisions)
+- **ADR-CHAT-01** — `ChatService.send_message` uses `get_by_id_with_relations` to avoid async lazy-load outside greenlet
+- **ADR-ROOTCAUSE-01** — fix at the source site, not the symptom. Two second-pass PRs this session proved the cost of defensive-first fixes.
+- **ADR-INFRA-02** — container healthchecks use `/app/.venv/bin/python` explicitly, not system `python` (system has no app deps)
 
-Compliance: ruff + pyright + tsc clean. Language policy: no SaMD violations. Trace schema aligned backend ↔ frontend. Feature flags (`SPELIX_PHASE3_AGENT_ENABLED`, `SPELIX_AGENT_MODE`) properly gated.
+## 4. Test counts
 
-## 4. Production Ops Steps Completed
+- Backend: 1769 → **1773 passed**, 21 skipped, 0 failures (+4 new across L2-E2E-01/02a/02b)
+- Frontend: 347 → **352+ passed** (+5 net across L2-E2E-02 schema-description + L2-E2E-03 api/hook/page)
+- Integration: +2 new (`test_chat_greenlet.py`) — both pass against live Supabase Postgres
 
-- **L-09**: Ran `migrate_roles_to_app_metadata.py` against prod Supabase — 0 users needed migration (all roles already in `app_metadata`)
-- **H-02**: Set `app_metadata.biomechanics_qualified=true` on admin `atharva6905+admin-p3006@gmail.com`
-- Migrations 015 (RLS admin tables), 016 (requires_technical_review), 017 (missing indexes), 018 (VARCHAR(30)), 019 (analyses.user_id index), 020 (consent composite), 021 (coach_brain_entries.status) all applied via CI deploy pipeline
+## 5. Known issues / deferred
 
-## 5. Test Counts
+- **LangSmith dashboard verification** — user to confirm trace for analysis `a2a78e1f-3185-4981-985f-f21b4641858e` appears at https://smith.langchain.com → `spelix-prod` project. Functional evidence strong (env vars loaded, analysis ran without LangSmith errors) but no programmatic check made.
+- **Worker still shows `(unhealthy)` for ~40s after container restart** — expected, during `start_period`. Not a regression.
 
-- Backend: **1778+** passed, 27 skipped, 0 failed (90% coverage)
-- Frontend: **347+** passed (5 pre-existing flakes not introduced this session — AgentReasoningSidebar, AppLayout, ResultsPage, EmailCaptureForm)
+## 6. Relevant analysis IDs for future debugging
 
-## 6. Alembic Head
+- `1c2bbb98-e40e-4d63-8194-06b2a9b02be2` — session 59 first-pass squat analysis (pre-citation-markers)
+- `183c19a2-040a-492b-8c1f-865cd8171f3e` — post-citation-markers squat with inline `[N]` tooltips visible
+- `a2a78e1f-3185-4981-985f-f21b4641858e` — post-LangSmith squat (should have trace in LangSmith dashboard)
 
-`021_coach_brain_status_idx` — applied on prod.
+## 7. Session 60 candidate priorities
 
-## 7. Next Session Priorities
+1. **Send beta invites** — core blockers are gone, this is the next forward step per STRATEGY.md
+2. **LangSmith dashboard sanity check** — 30-second manual confirmation
+3. **Phase 4 kickoff** — activate `spelix-eval-engineer` subagent, seed golden dataset, implement deepeval CI (closes H-11 from the pre-beta audit)
+4. **Backend CLAUDE.md — add SQLAlchemy async relationship-loading gotcha** — document the `get_by_id` vs `get_by_id_with_relations` trap from this session
+5. **Post-beta monitoring setup** — Langfuse dashboards, LangSmith alerts for agent failures, Sentry error budget alerting
 
-**Primary path forward (choose one):**
+## 8. Session 59 retro highlights
 
-1. **Phase 4 kickoff** — Activate `spelix-eval-engineer` agent, seed the golden dataset, implement deepeval CI (closes H-11 and FR-AICP-08). Per CLAUDE.md this agent activates at Phase 4.
-2. **L2 sprint acceptance** — Run full E2E Playwright verification on prod for PR #111/#112 surfaces. Beta user invites sequenced after verification.
-3. **Beta readiness polish** — Any stray landing polish, email flows, or content before inviting real users.
+**What went well:**
+- Subagent-driven development pattern scaled cleanly to 5 PRs in one session
+- Two-stage review (spec compliance → code quality) caught real issues per task
+- TDD on the `MissingGreenlet` bug using two independent async engines was elegant
 
-**Known follow-ups (low-priority, already backlog):**
-- M-06 (Phase 4 RAGAS `overall/correctness` precedence audit — docs change when Phase 4 ships)
-- M-10 file-length tech debt (post-beta)
-- M-07 apt package pinning (infra sprint)
+**What to improve:**
+- Defensive coding first → root cause later cost 2× deploy cycles on L2-E2E-03 and L2-E2E-04. ADR-ROOTCAUSE-01 documents the lesson.
+- Test suite runs are slow (5-7 min backend) — should move more tests to the unit tier with mocks
+- The Bash output-file reading has been intermittently broken this session — investigate environment issue next time it surfaces
 
-## 8. New Files / Modules Introduced This Session
+## 9. Production state at session close
 
-- `backend/app/config_constants.py` — centralized runtime constants (recursion limits, timeouts, JWKS TTL, LLM MAX_TOKENS)
-- `backend/scripts/oneoff/migrate_roles_to_app_metadata.py` — Supabase role backfill (already run)
-- Migrations 015–021
+- Droplet commit: `fea02e1` (merge of PR #116)
+- Vercel frontend: auto-deployed from same merge
+- All 3 containers healthy (`spelix-backend-1`, `spelix-worker-1`, `spelix-redis-1`)
+- Backend 1773 tests green, Frontend 352+ tests green
+- Phase 3 agent: `SPELIX_PHASE3_AGENT_ENABLED=1`, `SPELIX_AGENT_MODE=deterministic`
+- Distillation: `SPELIX_DISTILLATION_ENABLED=1`, 48 pending candidates in review queue
+- LangSmith: configured, first traces should be landing
 
-## 9. New ADRs
-
-See `decisions.md` additions in this session — role-source security hardening, biomechanics-qualified claim, config-constants module pattern.
+**Beta invites can be sent tomorrow.**
