@@ -9,6 +9,7 @@ from app.models.coaching_result import CoachingResult
 from app.models.consent_record import ConsentRecord
 from app.models.rag_document import RagDocument
 from app.models.rep_metric import RepMetric
+from app.models.threshold_flag import ThresholdFlag  # noqa: F401
 from app.models.user_profile import UserProfile
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "ConsentRecord",
     "RagDocument",
     "RepMetric",
+    "ThresholdFlag",
     "UserProfile",
     "VALID_STATUSES",
 ]
