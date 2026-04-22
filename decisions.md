@@ -1024,3 +1024,65 @@ ADR-REPDET-02 hybrid-detection decisions.
 - Does NOT replace `ThresholdConfig` — coaching/scoring thresholds have a separate versioning flow via `config/thresholds_v1.json` with provenance citations. Don't mix the two.
 
 **Related:** M-11, L-05 audit findings. ADR-018 (ThresholdConfig design) is the orthogonal file for kinesiology tuning. PRs #110 (commit `0a2fe8c`) and #111 (commit `2bed7d1`).
+
+## ADR-CHAT-01: `ChatService.send_message` uses `get_by_id_with_relations` (Session 59)
+
+**Context:** Production hit HTTP 500 on `POST /api/v1/analyses/{id}/chat` with `sqlalchemy.exc.MissingGreenlet: greenlet_spawn has not been called`. Root cause: the service called `AnalysisRepository.get_by_id()` which issues a plain SELECT without eager loading, then accessed `analysis.coaching_result.structured_output_json` and `.retrieved_sources_json` to build the LLM system prompt. In SQLAlchemy 2.0 async, lazy-loading a relationship outside the greenlet context raises `MissingGreenlet` — which happened here because `coaching_result` is a default-lazy `relationship(...)` without `lazy="selectin"`.
+
+**Decision:** `ChatService.send_message` uses `get_by_id_with_relations` (already existed, used by the analyses detail endpoint) which adds `.options(selectinload(Analysis.coaching_result), selectinload(Analysis.rep_metrics))`. `get_history` at line 151 is left on plain `get_by_id` because it only accesses `analysis.user_id` (a scalar column, no lazy-load risk). An integration test (`tests/integration/test_chat_greenlet.py`) uses two independent engines to prove the old path raises `MissingGreenlet` and the new path does not.
+
+**Rejected alternatives:**
+- **`lazy="selectin"` on `Analysis.coaching_result`** — would make every list query (`GET /analyses`, admin log, history page) do an N+1 with coaching_result, which is heavy JSONB. Relationship-level eager defaults are the wrong tool for one call site.
+- **New `get_by_id_with_coaching`** method — would duplicate `get_by_id_with_relations` minus `rep_metrics`. The extra selectinload for `rep_metrics` is one cheap query per chat send; not worth a new method.
+
+**Consequences:**
+- Any future chat-service code that accesses new relationships (e.g. `chat_messages`) must either use a method that eager-loads them or live inside the same awaited session. Column access is still safe.
+- Similar pattern applies anywhere we load an Analysis and then descend into a relationship: use `get_by_id_with_relations` OR refactor to hold the session alive through the access.
+- Documented in `backend/CLAUDE.md` under a new "SQLAlchemy async relationship loading" gotcha (to-add as part of session 60 CLAUDE.md hygiene).
+
+**Related:** PR #113 (commit `82cfa80`). FR-AICP-17 (follow-up chat). Also ADR-ROOTCAUSE-01 (fix at the source, not the symptom).
+
+## ADR-ROOTCAUSE-01: Fix at the source, not the symptom (Session 59)
+
+**Context:** Two bugs in session 59 required a second PR after the first fix failed:
+1. `[object Object]` render on 404 — first fix (PR #115) added defensive type guards in `ResultsPage.tsx` and `useAnalysisDetail.ts`. After deploy, the UI still showed `[object Object]`. Investigation found the actual source: `api/analyses.ts` was coercing a nested-object backend response via `new Error(obj)` → `String(obj)` → `"[object Object]"`. The defensive guards downstream treated this string correctly but by then the content was already wrong. Second fix (PR #116) type-guarded the raw message before `new Error()`.
+2. Worker `(unhealthy)` — first fix (PR #115) rewrote the healthcheck command (added `r.ping()`, extended `start_period`). After deploy, the worker stayed `(unhealthy)`. Running the command manually via `docker exec` revealed `ModuleNotFoundError: No module named 'redis'` — the healthcheck used `python` (system) instead of `/app/.venv/bin/python` (uv venv). Second fix (PR #116) switched interpreter.
+
+In both cases the investigator's pre-fix report had identified the true source as a "possible" cause, but the implementer chose layered defensive coding over fixing the source directly. Net result: 2× PR/CI/merge/deploy cycles per bug.
+
+**Decision:** When an investigation identifies a specific coercion site, API boundary, or execution site as the source of a symptom, fix THAT site first. Defensive coding at downstream layers is acceptable AS ADDITIONAL HARDENING, but must never substitute for a source fix.
+
+**Concrete rules:**
+- If a bug reaches the UI as garbled data, trace backwards to the point where the data was last correct. That is the fix site.
+- If a healthcheck is failing, `docker exec <container> <exact-command>` before committing a new command. "The image has Python" is not equivalent to "our dependencies are on the system path."
+- Investigator reports that say "X is a possible cause" are not "X is speculative" — treat them as "X is the likely cause; verify and fix". Ruling out X before fixing Y saves round trips.
+- Defensive guards downstream of the root cause are fine, but commit them ALONGSIDE the source fix in one PR, not as a first pass that ships while the real fix waits for a second session.
+
+**Rejected alternatives:**
+- **"Ship defensive fixes first, iterate if prod shows the bug persists"** — this session proved exactly why that's wrong. Each deploy round costs 5-10 min of CI + verification, and the defensive code accumulates noise (typeof guards on already-typed values, etc.) that must be maintained forever.
+- **"Always fix every possible site"** — goes too far; we'd be refactoring whole files. The rule is "fix the identified source site and the downstream display site if it's trivially tightened". The `ResultsPage` typeof guard and the `useAnalysisDetail` 3-arm ternary are retained as belt-and-suspenders, but the actual fix is in `api/analyses.ts`.
+
+**Consequences:**
+- Pre-commit mental checklist for bug fixes: "Is this the source or a symptom site? If symptom, where is the source?"
+- Investigator prompts should emphasize "identify the source site, not just a possible source." See the investigator dispatch for L2-E2E-04 as a template.
+- Retros on session 59 items L2-E2E-03 and L2-E2E-04 documented in `backlog.md`.
+
+**Related:** Session 59 retro. PR #115 (first pass) + PR #116 (root cause) for both bugs. No code artifact — this is a process ADR.
+
+## ADR-INFRA-02: Container healthchecks use `/app/.venv/bin/python` for dependency access (Session 59)
+
+**Context:** The worker Dockerfile installs Python dependencies via `uv sync` into `/app/.venv`. The container's runtime command is `uv run --no-dev streaq run app.workers.streaq_worker:worker`, which activates the venv. But `docker-compose.prod.yml` healthcheck uses `["CMD", "python", "-c", "..."]` — `python` is the system Python (installed via the Dockerfile's `python:3.12-slim` base image), NOT the venv. System Python has zero app deps, so `import redis` fails immediately with `ModuleNotFoundError`, making the healthcheck a deterministic fail on every probe.
+
+**Decision:** All container healthchecks that need app dependencies (`redis`, `httpx`, etc.) MUST use `/app/.venv/bin/python` explicitly as the interpreter. System `python` is only for no-deps scripts.
+
+**Rejected alternatives:**
+- **`uv run python -c "..."`** — `uv run` triggers a sync step that writes to the `.venv` directory. In a running container with `.venv` potentially mounted read-only OR with strict permissions, the sync fails with "Permission denied" (observed on prod during this session). `uv run` is for dev, not healthchecks.
+- **Install deps to system Python via `pip install`** — defeats the purpose of `uv`-managed venvs; doubles dependency storage in the image.
+- **`source /app/.venv/bin/activate && python -c "..."`** — Docker's `CMD ["a","b","c"]` form doesn't run through a shell, so `source` wouldn't expand. The explicit binary path is simpler.
+
+**Consequences:**
+- Healthcheck commands in `docker-compose.prod.yml` follow the pattern `["CMD", "/app/.venv/bin/python", "-c", "..."]`.
+- Moving Python version (3.12 → 3.13 someday) requires updating the hardcoded path, but `uv` pins the venv's Python version in sync with `pyproject.toml` so the path is stable within a Python major.
+- When adding new healthchecks: SSH to the droplet and run `docker exec <container> /app/.venv/bin/python -c "..."` manually to confirm the command works BEFORE committing a healthcheck change. This session proved the cost of skipping that step.
+
+**Related:** PR #116 (commit `fea02e1`). Backend `Dockerfile`. Supersedes the healthcheck portion of PR #115's initial approach.
