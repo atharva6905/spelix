@@ -10,6 +10,7 @@ import ConsentPage from "@/pages/ConsentPage";
 import ExpertAnalysisDetailPage from "@/pages/ExpertAnalysisDetailPage";
 import ExpertPaperUploadPage from "@/pages/ExpertPaperUploadPage";
 import ExpertPortalPage from "@/pages/ExpertPortalPage";
+import ExpertThresholdsPage from "@/pages/ExpertThresholdsPage";
 import HistoryPage from "@/pages/HistoryPage";
 import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
@@ -61,6 +62,7 @@ const router = createBrowserRouter([
       { path: "/expert", element: <ExpertPortalPage /> },
       { path: "/expert/analyses/:id", element: <ExpertAnalysisDetailPage /> },
       { path: "/expert/papers/upload", element: <ExpertPaperUploadPage /> },
+      { path: "/expert/thresholds", element: <ExpertThresholdsPage /> },
     ],
   },
 ]);

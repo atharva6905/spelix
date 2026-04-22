@@ -278,12 +278,20 @@ export default function ExpertPortalPage() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mb-8 flex items-center justify-between">
           <h1 className="text-3xl font-bold text-gray-900">Expert Reviewer Portal</h1>
-          <Link
-            to="/expert/papers/upload"
-            className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            Upload Paper
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              to="/expert/thresholds"
+              className="rounded-md border border-indigo-200 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Validate Thresholds
+            </Link>
+            <Link
+              to="/expert/papers/upload"
+              className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            >
+              Upload Paper
+            </Link>
+          </div>
         </div>
 
         {/* Tab navigation */}
