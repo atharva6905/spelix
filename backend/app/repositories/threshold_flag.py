@@ -23,6 +23,7 @@ class ThresholdFlagRepository:
     async def create(self, flag: ThresholdFlag) -> ThresholdFlag:
         self._db.add(flag)
         await self._db.flush()
+        await self._db.refresh(flag)
         return flag
 
     async def get_by_id(self, flag_id: UUID) -> ThresholdFlag | None:

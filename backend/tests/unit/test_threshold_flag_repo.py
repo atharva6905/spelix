@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -66,9 +66,14 @@ async def test_create_returns_persisted_flag(db_session: AsyncSession):
 async def test_list_by_reviewer_orders_created_desc(db_session: AsyncSession):
     repo = ThresholdFlagRepository(db_session)
     reviewer_id = uuid4()
+    now = datetime.now(timezone.utc)
+
     first = await _make_flag(reviewer_id)
+    first.created_at = now - timedelta(seconds=2)
+
     second = await _make_flag(reviewer_id)
-    second.created_at = datetime.now(timezone.utc)
+    second.created_at = now
+
     await repo.create(first)
     await repo.create(second)
     await db_session.flush()
