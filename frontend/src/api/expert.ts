@@ -290,3 +290,73 @@ export async function labelGoldenDataset(
     body: JSON.stringify({ is_golden_dataset: isGolden }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Threshold Validation (FR-EXPV-08)
+// ---------------------------------------------------------------------------
+
+export interface ThresholdRow {
+  section: "squat" | "bench" | "deadlift" | "control";
+  key: string;
+  value: number;
+  unit: string;
+  provenance_citation: string | null;
+  last_modified_by: string | null;
+}
+
+export interface ThresholdListing {
+  version: string;
+  sections: Record<ThresholdRow["section"], ThresholdRow[]>;
+}
+
+export interface ThresholdFlagCreate {
+  section: ThresholdRow["section"];
+  key: string;
+  proposed_value: number;
+  proposed_citation: string;
+  rationale: string;
+}
+
+export interface ThresholdFlagResponse {
+  id: string;
+  reviewer_id: string;
+  section: ThresholdRow["section"];
+  key: string;
+  current_value: number;
+  current_citation: string | null;
+  proposed_value: number;
+  proposed_citation: string;
+  rationale: string;
+  status: "open" | "resolved" | "rejected";
+  resolution_note: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getThresholdListing(): Promise<ThresholdListing> {
+  return expertFetch<ThresholdListing>("/api/v1/expert/thresholds");
+}
+
+export async function createThresholdFlag(
+  payload: ThresholdFlagCreate,
+): Promise<ThresholdFlagResponse> {
+  return expertFetch<ThresholdFlagResponse>("/api/v1/expert/thresholds/flags", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listMyThresholdFlags(
+  limit = 20,
+  offset = 0,
+): Promise<ThresholdFlagResponse[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return expertFetch<ThresholdFlagResponse[]>(
+    `/api/v1/expert/thresholds/flags?${params}`,
+  );
+}

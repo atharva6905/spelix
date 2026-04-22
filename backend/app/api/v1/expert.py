@@ -1,7 +1,7 @@
 """FastAPI router for expert reviewer endpoints.
 
 All routes require expert_reviewer or admin role via get_expert_reviewer_user.
-Requirements: FR-EXPV-01 through FR-EXPV-07
+Requirements: FR-EXPV-01 through FR-EXPV-07, FR-EXPV-08
 """
 
 import logging
@@ -19,6 +19,7 @@ from app.models.rag_document import RagDocument
 from app.repositories.analysis import AnalysisRepository
 from app.repositories.analysis_expert_review import AnalysisExpertReviewRepository
 from app.repositories.rag_document import RagDocumentRepository
+from app.repositories.threshold_flag import ThresholdFlagRepository
 from app.schemas.expert_review import (
     AnnotationCreate,
     AnnotationResponse,
@@ -33,9 +34,18 @@ from app.schemas.rag_document import (
     RagDocumentUploadRequest,
     RagDocumentUploadResponse,
 )
+from app.schemas.threshold_flag import (
+    ThresholdFlagCreate,
+    ThresholdFlagResponse,
+    ThresholdListing,
+)
 from app.services.expert import ExpertService
 from app.services.paper_storage import PaperStorageService
 from app.services.supabase_client import get_service_role_client
+from app.services.threshold_flag import (
+    InvalidThresholdKey,
+    ThresholdFlagService,
+)
 from app.utils.pdf_upload import PDF_MAGIC_BYTES, FilenameValidationError, sanitize_pdf_filename
 
 logger = logging.getLogger(__name__)
@@ -104,6 +114,18 @@ async def _get_rag_repo(db: AsyncSession = Depends(get_db)) -> RagDocumentReposi
 
 async def _get_review_repo(db: AsyncSession = Depends(get_db)) -> AnalysisExpertReviewRepository:
     return AnalysisExpertReviewRepository(db)
+
+
+async def _get_threshold_flag_repo(
+    db: AsyncSession = Depends(get_db),
+) -> ThresholdFlagRepository:
+    return ThresholdFlagRepository(db)
+
+
+async def _get_threshold_service(
+    db: AsyncSession = Depends(get_db),
+) -> ThresholdFlagService:
+    return ThresholdFlagService(repo=ThresholdFlagRepository(db))
 
 
 # ---------------------------------------------------------------------------
@@ -428,3 +450,65 @@ async def label_golden_dataset(
             detail={"error": {"code": "NOT_FOUND", "message": "Analysis not found.", "detail": None}},
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Threshold Validation (FR-EXPV-08)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/thresholds", response_model=ThresholdListing)
+async def get_thresholds(
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    service: ThresholdFlagService = Depends(_get_threshold_service),
+) -> ThresholdListing:
+    """Return current angle thresholds grouped by exercise section.
+
+    Source: ``config/thresholds_v1.json``. This endpoint is read-only —
+    edits to values happen via PR review (FR-SCOR-11).
+    """
+    return service.get_listing()
+
+
+@router.post(
+    "/thresholds/flags",
+    response_model=ThresholdFlagResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_threshold_flag(
+    body: ThresholdFlagCreate,
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    service: ThresholdFlagService = Depends(_get_threshold_service),
+) -> Any:
+    try:
+        flag = await service.create_flag(
+            reviewer_id=user["id"],
+            section=body.section,
+            key=body.key,
+            proposed_value=body.proposed_value,
+            proposed_citation=body.proposed_citation,
+            rationale=body.rationale,
+        )
+    except InvalidThresholdKey as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "UNKNOWN_THRESHOLD_KEY",
+                    "message": str(err),
+                    "detail": None,
+                }
+            },
+        ) from err
+    return ThresholdFlagResponse.model_validate(flag, from_attributes=True)
+
+
+@router.get("/thresholds/flags", response_model=list[ThresholdFlagResponse])
+async def list_my_threshold_flags(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    repo: ThresholdFlagRepository = Depends(_get_threshold_flag_repo),
+) -> list[Any]:
+    rows = await repo.list_by_reviewer(user["id"], limit=limit, offset=offset)
+    return [ThresholdFlagResponse.model_validate(r, from_attributes=True) for r in rows]

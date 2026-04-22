@@ -21,6 +21,7 @@ from app.repositories.analysis_expert_review import AnalysisExpertReviewReposito
 from app.repositories.coach_brain import CoachBrainRepository
 from app.repositories.coach_brain_candidate import CoachBrainCandidateRepository
 from app.repositories.rag_document import RagDocumentRepository
+from app.repositories.threshold_flag import ThresholdFlagRepository
 from app.repositories.user_profile import UserProfileRepository
 from app.schemas.candidate_review import (
     ApproveRequest,
@@ -38,6 +39,7 @@ from app.schemas.coach_brain import (
 )
 from app.schemas.expert_review import AdminExpertQueueItem, AdminExpertQueueStats
 from app.schemas.rag_document import RagDocumentResponse, ReEmbedResponse
+from app.schemas.threshold_flag import ThresholdFlagResolveAction, ThresholdFlagResponse
 from app.services.admin import AdminService
 from app.services.brain_embedding import BrainEmbeddingService
 from app.services.candidate_review import (
@@ -723,3 +725,53 @@ async def list_similar_entries_for_candidate(
             },
         )
     return SimilarEntriesResponse(items=items)
+
+
+# ---------------------------------------------------------------------------
+# Threshold flags review (FR-EXPV-08)
+# ---------------------------------------------------------------------------
+
+
+async def _get_threshold_flag_repo(
+    db: AsyncSession = Depends(get_db),
+) -> ThresholdFlagRepository:
+    return ThresholdFlagRepository(db)
+
+
+@router.get(
+    "/threshold-flags",
+    response_model=list[ThresholdFlagResponse],
+)
+async def list_threshold_flags(
+    status_filter: str | None = Query(None, alias="status", pattern="^(open|resolved|rejected)$"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_admin_user),
+    repo: ThresholdFlagRepository = Depends(_get_threshold_flag_repo),
+) -> list[Any]:
+    rows = await repo.list_all(status=status_filter, limit=limit, offset=offset)
+    return [ThresholdFlagResponse.model_validate(r, from_attributes=True) for r in rows]
+
+
+@router.patch(
+    "/threshold-flags/{flag_id}",
+    response_model=ThresholdFlagResponse,
+)
+async def resolve_threshold_flag(
+    flag_id: UUID,
+    body: ThresholdFlagResolveAction,
+    user: CurrentUser = Depends(get_admin_user),
+    repo: ThresholdFlagRepository = Depends(_get_threshold_flag_repo),
+) -> Any:
+    updated = await repo.update_status(
+        flag_id,
+        status=body.status,
+        resolution_note=body.resolution_note,
+        resolved_by=user["id"],
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Threshold flag not found.", "detail": None}},
+        )
+    return ThresholdFlagResponse.model_validate(updated, from_attributes=True)
