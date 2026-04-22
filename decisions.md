@@ -1108,3 +1108,18 @@ In both cases the investigator's pre-fix report had identified the true source a
 **Consequences:** New table + 5 endpoints + 1 page + 1 modal component. Reviewers get in-portal flag submission with ≥20-char rationale + ≥5-char citation enforced at both the Pydantic layer (fast 422) and DB CHECK layer (defense in depth). Admin resolution uses terminal-only status literal (`resolved | rejected`) — the UI cannot reset a flag back to `open`.
 
 **Related:** Plan `docs/superpowers/plans/2026-04-21-fr-expv-08-threshold-validation-ui.md`. SRS FR-EXPV-08 (§3.15), FR-SCOR-11 (§3.9). Migration 022.
+
+## ADR-E2E-01 — Per-role E2E test accounts via Supabase service-role script
+
+**Context:** Session 60 FR-EXPV-08 E2E walkthrough required testing 3 distinct roles (regular user, expert_reviewer, admin) on spelix.app. Prior to this session, the only documented test account was `atharva6905@gmail.com` (admin) — insufficient for role-gate verification where we need to prove that a non-expert cannot reach `/expert/*` and that an expert flag becomes visible to an admin reviewer. Creating accounts by hand through the signup UI then manually toggling `app_metadata.role` via ad-hoc curl is slow and error-prone, especially when the service role key lives only on the prod droplet.
+
+**Decision:** Per-role E2E test accounts are provisioned by a reusable one-off Python script at `backend/scripts/oneoff/e2e_fr_expv_08_test_accounts.py` that reads Supabase URL + service role key from a `CREDS_FILE` env-pointed `.env`-style file, calls `POST /auth/v1/admin/users` with `email_confirm=true` and inline `app_metadata`, and prints email + freshly-generated 20-char alphanumeric password to stdout. The creds file is retrieved via `ssh spelix-droplet "cat /home/deploy/spelix/.env.prod | grep -E '^(SUPABASE_URL|SUPABASE_SERVICE_ROLE_KEY)='" > /tmp/spelix_creds.env` and deleted at session end. Script uses stdlib `urllib` only (no supabase-py dependency) so it runs from any Python venv.
+
+**Rejected alternatives:**
+- Hardcoded credentials in a committed `.env.e2e`: rejected — secrets in git, high blast radius.
+- Supabase CLI `supabase users create`: rejected — requires local Supabase project linkage and doesn't set `app_metadata` in one call.
+- supabase-py `auth.admin.create_user()`: rejected — adds a heavy dependency to a 60-line script; urllib is sufficient.
+
+**Consequences:** E2E test accounts are (a) reproducible via the script, (b) traceable by email convention (`e2e-<role>@spelix.internal`), (c) cheap to re-create if revoked. Passwords are per-invocation and printed once — they are NOT persisted anywhere, so losing the session output means re-running the script to get new passwords. The 3 session-60 accounts (`e2e-regular`, `e2e-expert`, `e2e-admin2`) were left in place for future E2E sessions to reuse; delete them with `DELETE /auth/v1/admin/users/{id}` when no longer needed. For future roles (e.g. `biomechanics_reviewer` when Coach Brain compensation routing lands) extend `TEST_ACCOUNTS` in the script rather than forking it.
+
+**Related:** `backend/scripts/oneoff/e2e_fr_expv_08_test_accounts.py`. Previous practice documented in session 59 handoff §2 ("`app_metadata.role=admin + biomechanics_qualified=true` set on atharva6905@gmail.com via Supabase admin API"). Memory `feedback_rate_limit_testing` ("Use separate test accounts for E2E") — ADR-E2E-01 now codifies the "how".
