@@ -1086,3 +1086,25 @@ In both cases the investigator's pre-fix report had identified the true source a
 - When adding new healthchecks: SSH to the droplet and run `docker exec <container> /app/.venv/bin/python -c "..."` manually to confirm the command works BEFORE committing a healthcheck change. This session proved the cost of skipping that step.
 
 **Related:** PR #116 (commit `fea02e1`). Backend `Dockerfile`. Supersedes the healthcheck portion of PR #115's initial approach.
+
+## ADR-EXPV-08 — Threshold validation UI uses a flag-only DB table; PR review remains the approval path
+
+**Date:** 2026-04-21
+**Context:** FR-EXPV-08 (Phase 3, Should) requires the Expert Reviewer to flag angle thresholds that conflict with literature. FR-SCOR-11 already mandates that threshold changes ship via PR review of `config/thresholds_v1.json`. We needed an in-portal workflow without breaking that approval model.
+
+**Decision:** Add a `threshold_flags` table (migration 022) storing reviewer flags with `{section, key, current_value (snapshot), current_citation (snapshot), proposed_value, proposed_citation, rationale, status}`. Surface via `ExpertThresholdsPage` under `/expert/thresholds`. The UI never writes to `config/thresholds_v1.json`; an admin reviews flags via `/admin/threshold-flags` and, if accepted, opens a PR mutating the JSON. Flag rows are audit-only proposals.
+
+**Rejected alternatives:**
+- Auto-opening a GitHub issue per flag: rejected — requires GitHub API credentials in prod, couples the product DB to external issue state, and duplicates the audit trail.
+- Append-only JSON file of flags in the repo: rejected — harder to query, no per-user RLS, no resolution workflow.
+- Editing threshold values in the UI: rejected — violates FR-SCOR-11 (PR review IS the approval flow).
+
+**Scope boundaries enforced in the plan:**
+- Only angle-threshold sections surface: `squat`, `bench`, `deadlift`, `control`. Non-angle sections (`scoring_weights`, `phase_multipliers`, `experience_tolerance`, `score_descriptors`, `confidence_landmark_weights`) are filtered out of the listing.
+- `current_value` + `current_citation` are snapshotted at submission time so a later config change doesn't retroactively rewrite a flag's context. The repository's `update_status` method writes only `status / resolution_note / resolved_by / resolved_at / updated_at` — snapshot columns are structurally unreachable from any update path.
+
+**RLS model:** SELECT — reviewer sees own flags only; admin sees all. INSERT — expert_reviewer or admin; `reviewer_id` must equal `auth.uid()` (prevents impersonation). UPDATE — admin only, with `WITH CHECK` also admin-only (prevents admin from mutating `reviewer_id` to escape attribution). No DDL FK to `auth.users`; RLS is the integrity gate.
+
+**Consequences:** New table + 5 endpoints + 1 page + 1 modal component. Reviewers get in-portal flag submission with ≥20-char rationale + ≥5-char citation enforced at both the Pydantic layer (fast 422) and DB CHECK layer (defense in depth). Admin resolution uses terminal-only status literal (`resolved | rejected`) — the UI cannot reset a flag back to `open`.
+
+**Related:** Plan `docs/superpowers/plans/2026-04-21-fr-expv-08-threshold-validation-ui.md`. SRS FR-EXPV-08 (§3.15), FR-SCOR-11 (§3.9). Migration 022.
