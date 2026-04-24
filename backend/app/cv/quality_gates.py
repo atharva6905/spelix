@@ -28,8 +28,15 @@ _VISIBILITY_LANDMARK_INDICES: list[int] = [11, 12, 13, 14, 23, 24, 25, 26]
 _BODY_VISIBILITY_THRESHOLD: float = 0.30
 
 # Framing gate — fraction of total frame area
-_FRAMING_MIN_FRACTION: float = 0.30
+# Calibrated 2026-04-24 against commercial-gym fixtures (atharva-{squat,bench,deadlift}).
+# Was 0.30 (lab fixtures, ~1.5 m camera distance). Real users at 3-4 m fill ~12-20 % of
+# portrait frame. See ADR-QGATE-COMMERCIAL-GYM.
+_FRAMING_MIN_FRACTION: float = 0.20
 _FRAMING_MAX_FRACTION: float = 0.80
+# Minimum number of post-sigmoid-visibility >= 0.5 landmarks needed to compute a
+# meaningful bbox. Below this, the sample is dropped (mirrors check_body_visibility's
+# NO_POSE skip pattern). Out of 33 BlazePose landmarks.
+_MIN_VISIBLE_LANDMARKS_FOR_BBOX: int = 10
 
 # Visibility threshold (post-sigmoid) for a landmark to count as "visible"
 # when computing the bounding box for the framing gate.
@@ -43,10 +50,17 @@ _COL_VISIBILITY = 3
 # Video file gate — maximum duration in seconds (FR-UPLD-02)
 _MAX_VIDEO_DURATION_S: float = 120.0
 
-# Single-person gate — hip landmark jump threshold as fraction of frame width
-_HIP_JUMP_THRESHOLD: float = 0.15
-_HIP_LANDMARKS: list[int] = [23, 24]  # left hip, right hip
-_MAX_JUMP_COUNT: int = 2
+# single_person gate (FR-CVPL-06) — anchor-based identity-jump detection.
+# See docs/superpowers/specs/2026-04-24-commercial-gym-quality-gate-design.md
+# and ADR-QGATE-COMMERCIAL-GYM. Replaces the prior "any large hip jump = multiple
+# people" rule, which produced false positives on commercial-gym videos where
+# MediaPipe re-acquires onto a clearly-visible bystander during tracking-loss
+# events.
+_HIP_LANDMARKS: list[int] = [23, 24]  # left hip, right hip (MediaPipe BlazePose)
+_ANCHOR_FROM_FIRST_N_SAMPLES: int = 3
+_OFF_ANCHOR_DISTANCE_FRAC: float = 0.25
+_MAX_CONSECUTIVE_OFF_ANCHOR: int = 4
+_MAX_OFF_ANCHOR_FRACTION: float = 0.30
 
 # Resolution gate — minimum dimension in pixels (FR-CVPL-07)
 _MIN_RESOLUTION_DIM: int = 720
