@@ -291,11 +291,14 @@ def check_framing(
     frame_width: int,
     frame_height: int,
 ) -> GateCheckResult:
-    """Gate P0-02: subject framing (ADR-053, ADR-054).
+    """Gate P0-02: subject framing (ADR-053, ADR-054, ADR-QGATE-COMMERCIAL-GYM).
 
     Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels,
-    computes bbox of all 33 landmarks, checks 90th-percentile area
-    fraction against [30 %, 80 %].
+    computes bbox from landmarks with sigmoid(visibility) >= 0.5 only
+    (hallucinated low-confidence landmarks cluster near body centre and
+    under-report the lifter's true frame coverage). Skips samples with
+    fewer than _MIN_VISIBLE_LANDMARKS_FOR_BBOX reliable landmarks.
+    Checks 90th-percentile area fraction against [20 %, 80 %].
     """
     indices = _sample_indices(len(landmarks_per_frame), _FRAMING_SAMPLE_COUNT)
 
@@ -305,8 +308,19 @@ def check_framing(
         if _is_no_pose_frame(frame):
             continue
 
-        xs = frame[:, _COL_X]
-        ys = frame[:, _COL_Y]
+        # Visibility-gated bbox (ADR-QGATE-COMMERCIAL-GYM).
+        # Hallucinated low-confidence landmarks cluster near body centre and
+        # under-report the lifter's true frame coverage. Use only landmarks
+        # with sigmoid(visibility) >= _LANDMARK_VISIBLE_THRESHOLD.
+        visibilities = np.array(
+            [sigmoid(float(v)) for v in frame[:, _COL_VISIBILITY]]
+        )
+        visible_mask = visibilities >= _LANDMARK_VISIBLE_THRESHOLD
+        if int(visible_mask.sum()) < _MIN_VISIBLE_LANDMARKS_FOR_BBOX:
+            continue
+
+        xs = frame[visible_mask, _COL_X]
+        ys = frame[visible_mask, _COL_Y]
         bbox_width = float(np.max(xs) - np.min(xs))
         bbox_height = float(np.max(ys) - np.min(ys))
         fractions.append(bbox_width * bbox_height)
