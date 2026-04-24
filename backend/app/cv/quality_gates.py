@@ -360,10 +360,15 @@ def check_single_person(
     landmarks_per_frame: list[np.ndarray],
     frame_width: int,
 ) -> GateCheckResult:
-    """Reject if hip centroids show discontinuous jumps suggesting multiple people.
+    """Reject when MediaPipe is tracking different people across the clip.
 
-    Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels, then
-    checks consecutive valid frames for large hip jumps.
+    Anchors on the lifter from the first 3 high-visibility samples (median hip
+    midpoint x), then counts samples whose hip midpoint drifts >25 % of frame
+    width from the anchor. Rejects if 4+ consecutive off-anchor samples or
+    >=30 % of valid samples are off-anchor. Skips samples where either hip's
+    post-sigmoid visibility is below ``_LANDMARK_VISIBLE_THRESHOLD`` — those
+    are MediaPipe guesses on occluded frames and would otherwise dominate the
+    decision (see ADR-QGATE-COMMERCIAL-GYM).
 
     Parameters
     ----------
@@ -378,31 +383,73 @@ def check_single_person(
     """
     indices = _sample_indices(len(landmarks_per_frame), _SINGLE_PERSON_SAMPLE_COUNT)
 
-    valid_frames = [
-        landmarks_per_frame[i]
-        for i in indices
-        if not _is_no_pose_frame(landmarks_per_frame[i])
+    midpoints: list[float] = []
+    for i in indices:
+        frame = landmarks_per_frame[i]
+        if _is_no_pose_frame(frame):
+            continue
+        left_vis = sigmoid(float(frame[_HIP_LANDMARKS[0], _COL_VISIBILITY]))
+        right_vis = sigmoid(float(frame[_HIP_LANDMARKS[1], _COL_VISIBILITY]))
+        if left_vis < _LANDMARK_VISIBLE_THRESHOLD or right_vis < _LANDMARK_VISIBLE_THRESHOLD:
+            continue
+        left_x = float(frame[_HIP_LANDMARKS[0], _COL_X])
+        right_x = float(frame[_HIP_LANDMARKS[1], _COL_X])
+        midpoints.append((left_x + right_x) / 2.0)
+
+    # Need at least N samples to anchor reliably. Fewer = cannot distinguish
+    # single-lifter-with-occlusion from genuinely-no-lifter.
+    if len(midpoints) < _ANCHOR_FROM_FIRST_N_SAMPLES:
+        return GateCheckResult(
+            passed=False,
+            name="single_person",
+            level="error",
+            metric_value=float(len(midpoints)),
+            threshold=float(_ANCHOR_FROM_FIRST_N_SAMPLES),
+            user_message=(
+                "Could not consistently track a single lifter — try filming "
+                "side-on with your full body in frame."
+            ),
+        )
+
+    anchor = float(np.median(midpoints[:_ANCHOR_FROM_FIRST_N_SAMPLES]))
+
+    off_anchor_flags = [
+        abs(m - anchor) > _OFF_ANCHOR_DISTANCE_FRAC for m in midpoints
     ]
 
-    jump_count = 0
-    for i in range(1, len(valid_frames)):
-        prev = valid_frames[i - 1]
-        curr = valid_frames[i]
-        for lm_idx in _HIP_LANDMARKS:
-            prev_x = prev[lm_idx, _COL_X] * frame_width
-            curr_x = curr[lm_idx, _COL_X] * frame_width
-            if abs(curr_x - prev_x) > _HIP_JUMP_THRESHOLD * frame_width:
-                jump_count += 1
-                break
+    # Longest consecutive run of off-anchor samples
+    longest_run = 0
+    current_run = 0
+    for flag in off_anchor_flags:
+        if flag:
+            current_run += 1
+            longest_run = max(longest_run, current_run)
+        else:
+            current_run = 0
 
-    passed = jump_count < _MAX_JUMP_COUNT
+    off_anchor_fraction = sum(off_anchor_flags) / len(off_anchor_flags)
+    rejected_by_run = longest_run >= _MAX_CONSECUTIVE_OFF_ANCHOR
+    rejected_by_fraction = off_anchor_fraction > _MAX_OFF_ANCHOR_FRACTION
+
+    passed = not (rejected_by_run or rejected_by_fraction)
+
+    # Report whichever metric drove the decision (or longest_run when passing
+    # — gives the operator a sense of margin). Threshold reported is the run
+    # threshold; the fraction threshold is informational and lives in the spec.
     return GateCheckResult(
         passed=passed,
         name="single_person",
         level="error",
-        metric_value=float(jump_count),
-        threshold=float(_MAX_JUMP_COUNT),
-        user_message="" if passed else "Multiple people detected — please film alone.",
+        metric_value=float(longest_run),
+        threshold=float(_MAX_CONSECUTIVE_OFF_ANCHOR),
+        user_message=(
+            ""
+            if passed
+            else (
+                "Could not consistently track a single lifter — try filming "
+                "side-on with your full body in frame."
+            )
+        ),
     )
 
 

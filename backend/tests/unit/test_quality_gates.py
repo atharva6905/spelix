@@ -877,3 +877,107 @@ class TestCameraStabilityGate:
         result = check_camera_stability([frame, frame])
         assert result.passed is True
         assert result.metric_value < 3.0
+
+
+# ---------------------------------------------------------------------------
+# check_single_person — anchor-based identity-jump detection
+# (ADR-QGATE-COMMERCIAL-GYM, FR-CVPL-06)
+# ---------------------------------------------------------------------------
+
+# Visibility raw values: any positive float gives sigmoid >= 0.5 (sigmoid(0)=0.5).
+# We use 4.0 for "high vis" (sigmoid ~0.98) and -4.0 for "low vis" (sigmoid ~0.02).
+_HIGH_VIS = 4.0
+_LOW_VIS = -4.0
+_FRAME_W = 1080
+_FRAME_H = 1920
+
+
+def _frame_with_hips(left_x: float, right_x: float, vis: float = _HIGH_VIS) -> np.ndarray:
+    """Build a 33x5 BlazePose-shaped frame with controlled hip x and visibility."""
+    frame = np.zeros((33, 5), dtype=np.float64)
+    # Set non-zero y on every landmark so _is_no_pose_frame returns False
+    # (sentinel = ALL x AND y are 0.0).
+    frame[:, 1] = 0.5
+    frame[:, 0] = 0.5  # default x for non-hip landmarks
+    frame[23, 0] = left_x
+    frame[23, 3] = vis
+    frame[23, 4] = vis  # presence (col 4 required for Tier 1 — do not omit)
+    frame[24, 0] = right_x
+    frame[24, 3] = vis
+    frame[24, 4] = vis
+    return frame
+
+
+class TestCheckSinglePersonAnchorRule:
+    """Tests for the anchor-based identity-jump detection introduced in
+    ADR-QGATE-COMMERCIAL-GYM. Anchor = median hip-midpoint x across first 3
+    high-visibility samples. Reject on >= 4 consecutive off-anchor or > 30 %
+    off-anchor fraction."""
+
+    def test_anchor_tolerates_brief_bystander_pickup(self) -> None:
+        # 30 samples: 27 anchored at hip x=0.5, 3 transient (idx 10,11,12) at
+        # x=0.85 (bystander), then back to anchor. Not sustained, not >30%.
+        samples = []
+        for i in range(30):
+            if i in (10, 11, 12):
+                samples.append(_frame_with_hips(0.83, 0.87))
+            else:
+                samples.append(_frame_with_hips(0.48, 0.52))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is True, (
+            f"Expected pass, got user_message={result.user_message!r}"
+        )
+
+    def test_anchor_rejects_sustained_swap(self) -> None:
+        # 30 samples: first 10 anchored at x=0.5, last 20 at x=0.85 (different
+        # person sustained). Should fail — sustained off-anchor run + fraction > 30%.
+        samples = []
+        for i in range(30):
+            if i < 10:
+                samples.append(_frame_with_hips(0.48, 0.52))
+            else:
+                samples.append(_frame_with_hips(0.83, 0.87))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+
+    def test_skips_low_visibility_hips(self) -> None:
+        # 30 samples, even idx anchored high-vis, odd idx wild-x but low-vis
+        # (must be skipped). Should pass — low-vis frames don't influence the decision.
+        samples = []
+        for i in range(30):
+            if i % 2 == 0:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_HIGH_VIS))
+            else:
+                samples.append(_frame_with_hips(0.05, 0.95, vis=_LOW_VIS))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is True
+
+    def test_rejects_when_too_few_high_vis_samples(self) -> None:
+        # 30 samples, only 2 are high-vis. Cannot anchor — rejects with new message.
+        samples = []
+        for i in range(30):
+            if i < 2:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_HIGH_VIS))
+            else:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_LOW_VIS))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+        assert "track a single lifter" in result.user_message
+
+    def test_user_message_text_on_sustained_rejection(self) -> None:
+        # Force a sustained-swap rejection and check exact wording.
+        samples = []
+        for i in range(30):
+            samples.append(
+                _frame_with_hips(
+                    0.05 if i >= 10 else 0.50,
+                    0.10 if i >= 10 else 0.50,
+                )
+            )
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+        expected = (
+            "Could not consistently track a single lifter — try filming "
+            "side-on with your full body in frame."
+        )
+        assert result.user_message == expected
