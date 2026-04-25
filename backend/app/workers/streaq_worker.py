@@ -141,13 +141,18 @@ def _adapt_ctx(context: WorkerContext) -> dict[str, Any]:
     }
 
 
-# timeout=900 per ADR-060 (D-035 downscale-before-HoughCircles close).
-# Telemetry post-PR-#71 confirms a 22.8 s 1080p@59fps clip completes the full
-# pipeline in ~670 s (pose 260 s + barbell 120 s + annotation 150 s + rest <5 s),
-# well under the 900 s ceiling originally set in ADR-BRAIN-04. The 1800 s safety
-# net from ADR-058 is no longer justified now that barbell_tracking dropped from
-# 24.4 min → 2 min. Other tasks stay at 300 s — sub-second in the common case.
-@worker.task(timeout=900)
+# timeout=1800 restored 2026-04-24 after deadlift fixture E2E on prod (analysis
+# 435065d5-e6f1, 26.2 s @60fps, 1547 frames, streaq task e6d23bc3) hit the 900 s
+# ceiling during post-gate LLM coaching + CoVe verification and got killed —
+# `task process_analysis … timed out` in worker logs at exactly 900 s. The ADR-060
+# telemetry budget accounted for pose+barbell+annotation (670 s on a 22.8 s clip)
+# but NOT the CoVe iteration cost on longer coaching outputs — each rep adds
+# claim-extraction + verification LLM calls, and 26 s videos produce more reps +
+# more claims than the 22.8 s reference. Raising the ceiling back to the ADR-058
+# safety net (1800 s) is the conservative fix; splitting scoring and coaching into
+# separate streaq tasks is the architecturally correct long-term move (tracked
+# post-beta). Other tasks stay at 300 s — sub-second in the common case.
+@worker.task(timeout=1800)
 async def process_analysis(
     analysis_id: UUID,
     context: WorkerContext = WorkerDepends(),

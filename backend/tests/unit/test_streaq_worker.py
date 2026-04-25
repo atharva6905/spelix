@@ -57,6 +57,43 @@ def test_all_three_enqueued_tasks_are_registered() -> None:
         assert hasattr(task, "enqueue"), f"{task} is not a streaq task"
 
 
+def test_process_analysis_timeout_at_least_1800_seconds() -> None:
+    """Regression guard: process_analysis must have timeout >= 1800 s.
+
+    On 2026-04-24 the deadlift fixture (atharva-deadlift.mov, 26.2 s @60fps,
+    analysis 435065d5, streaq task e6d23bc3) hit the prior 900 s ceiling during
+    post-gate LLM coaching + CoVe verification and got killed in prod. The fix
+    raised the ceiling back to the ADR-058 safety net (1800 s). This test
+    string-checks the decorator so a future accidental reduction to <1800 is
+    caught at lint time, not in prod.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "app" / "workers" / "streaq_worker.py"
+    text = src.read_text(encoding="utf-8")
+
+    match = re.search(
+        r"@worker\.task\((?P<args>[^)]*)\)\s*\nasync def process_analysis\b",
+        text,
+    )
+    assert match is not None, (
+        "Could not locate @worker.task(...) decorator directly above "
+        "`async def process_analysis` in streaq_worker.py. Decorator layout changed?"
+    )
+
+    timeout_match = re.search(r"timeout\s*=\s*(\d+)", match.group("args"))
+    assert timeout_match is not None, (
+        f"No `timeout=N` in process_analysis decorator args: {match.group('args')!r}"
+    )
+
+    timeout_s = int(timeout_match.group(1))
+    assert timeout_s >= 1800, (
+        f"process_analysis timeout is {timeout_s} s; must be >= 1800 s to cover "
+        "full pipeline + CoVe coaching on longer videos."
+    )
+
+
 def test_both_cron_jobs_are_registered() -> None:
     """The 2 cron jobs must exist as module attrs."""
     from app.workers.streaq_worker import (
