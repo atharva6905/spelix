@@ -1123,3 +1123,25 @@ In both cases the investigator's pre-fix report had identified the true source a
 **Consequences:** E2E test accounts are (a) reproducible via the script, (b) traceable by email convention (`e2e-<role>@spelix.internal`), (c) cheap to re-create if revoked. Passwords are per-invocation and printed once — they are NOT persisted anywhere, so losing the session output means re-running the script to get new passwords. The 3 session-60 accounts (`e2e-regular`, `e2e-expert`, `e2e-admin2`) were left in place for future E2E sessions to reuse; delete them with `DELETE /auth/v1/admin/users/{id}` when no longer needed. For future roles (e.g. `biomechanics_reviewer` when Coach Brain compensation routing lands) extend `TEST_ACCOUNTS` in the script rather than forking it.
 
 **Related:** `backend/scripts/oneoff/e2e_fr_expv_08_test_accounts.py`. Previous practice documented in session 59 handoff §2 ("`app_metadata.role=admin + biomechanics_qualified=true` set on atharva6905@gmail.com via Supabase admin API"). Memory `feedback_rate_limit_testing` ("Use separate test accounts for E2E") — ADR-E2E-01 now codifies the "how".
+
+## ADR-QGATE-COMMERCIAL-GYM — Anchor-based single_person gate + visibility-gated bbox framing gate
+
+**Date:** 2026-04-24
+
+**Context:** Three private-beta fixture videos (`atharva-squat.mov`, `atharva-bench.mov`, `atharva-deadlift.mov` — 1080×1920 portrait, ~60fps, 20-26s, shot in a commercial gym at ~3-4 m camera distance) were all rejected by the upload quality gate on prod. Rejection reasons: `single_person` (hip-midpoint jumps when MediaPipe briefly re-acquires onto background bystanders during occlusion) and `framing` (bbox underestimated because hallucinated low-visibility landmarks pulled the bbox area below 0.30 lab-calibrated threshold). Neither rejection reflected a genuine problem with the video — the lifter was alone in frame and clearly visible throughout.
+
+**Decision:** Two coordinated changes to `backend/app/cv/quality_gates.py` only (no schema or API changes required):
+
+1. **`check_single_person` — anchor-based identity-jump detection.** Replace the naïve "any large hip jump across >2 of 30 sampled frames = multiple people" rule with an anchor-relative test. The anchor is the median hip-midpoint x from the first 3 high-visibility samples. Reject only if the tracker is off-anchor (`|midpoint_x − anchor| > 0.25`) for 4+ consecutive samples OR for >30% of total samples. This tolerates brief MediaPipe re-acquisition events (≤3 frames) while still catching genuine dual-lifter or sustained-swap scenarios.
+
+2. **`check_framing` — visibility-gated bbox + lower minimum fraction.** Skip any sample frame where fewer than 10 of 33 landmarks have `sigmoid(visibility) >= 0.50`. This prevents hallucinated off-body landmarks from inflating (or deflating) bbox estimates. Also lower `_FRAMING_MIN_FRACTION` from 0.30 to 0.20 to reflect real commercial-gym camera distances (3-4 m produces ~12-20% of portrait frame area vs ~30% in a lab at 1.5 m).
+
+**Rejected alternatives:**
+- Lowering thresholds globally without visibility gating: rejected — would allow genuinely bad videos (e.g. lifter at edge of frame) to pass framing gate.
+- Disabling the single_person gate entirely: rejected — dual-lifter uploads are a real failure mode; we just need a smarter rule that tolerates brief tracker blips.
+- Adding a per-user "commercial gym" flag that bypasses gates: rejected — adds UI surface area and a flag that is easy to forget to unset.
+- Raising `_MAX_JUMP_COUNT` to 5 or 10 (the previous incremental approach): rejected — this is a patch on a bad predicate; anchor-relative detection is correct by design.
+
+**Consequences:** The 3 private-beta fixtures now pass `run_quality_gates`. The framing and single_person gates remain meaningful for genuine quality issues (distant/partial shots, two lifters in frame). New constants documented in `backend/CLAUDE.md` "Quality gate" gotcha block. Integration test at `backend/tests/integration/test_quality_gates_atharva_fixtures.py` (marked `@pytest.mark.slow`) serves as the acceptance regression for all 3 fixtures.
+
+**Related:** `backend/app/cv/quality_gates.py`, `backend/tests/unit/test_quality_gates.py`, `backend/tests/integration/test_quality_gates_atharva_fixtures.py`. Design spec: `docs/superpowers/specs/2026-04-24-commercial-gym-quality-gate-design.md`. Implementation plan: `docs/superpowers/plans/2026-04-24-commercial-gym-quality-gate-fix.md`. SRS FR-CVPL-06 (single person), FR-CVPL-07 (framing).

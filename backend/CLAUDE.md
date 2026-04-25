@@ -455,6 +455,12 @@ If a function does `from X import Y` inline (not at module top), patch at `X.Y`,
 ### Quality gate predicate
 Runs in streaq worker (not FastAPI). Reject: `mean(visibility[frames=0:5][landmarks∈{11,12,13,14,23,24,25,26}]) < 0.30`. Gate results stored in `analyses.quality_gate_result` as JSONB.
 
+### Quality gate: single_person — anchor-based identity-jump detection (ADR-QGATE-COMMERCIAL-GYM)
+The old rule (`max hip-midpoint jump > 0.15 across >2 samples`) produced false positives on commercial-gym footage where MediaPipe momentarily re-acquires onto a bystander during occlusion events. The new rule (2026-04-24) establishes a per-video anchor from the first 3 high-visibility hip-midpoint samples and tolerates small departures. A video is rejected only if: (a) the tracker is off-anchor for 4+ **consecutive** sampled frames, OR (b) more than 30% of all sampled frames are off-anchor (threshold: `>0.25` normalized x-distance from anchor). Constants: `_ANCHOR_FROM_FIRST_N_SAMPLES=3`, `_OFF_ANCHOR_DISTANCE_FRAC=0.25`, `_MAX_CONSECUTIVE_OFF_ANCHOR=4`, `_MAX_OFF_ANCHOR_FRACTION=0.30`.
+
+### Quality gate: framing — visibility-gated bbox (ADR-QGATE-COMMERCIAL-GYM)
+The old rule included every landmark in the bbox regardless of visibility, producing inflated bbox areas when MediaPipe hallucinated low-confidence landmarks far off-body. The new rule (2026-04-24) skips any sample frame that has fewer than 10 landmarks with `sigmoid(visibility) >= 0.50`. `_FRAMING_MIN_FRACTION` was also lowered from 0.30 to 0.20 to match real commercial-gym footage at 3-4 m camera distance (portrait 1080x1920). Portrait scaling: when `aspect_ratio < 1.0`, effective threshold is `_FRAMING_MIN_FRACTION * aspect_ratio` (default floor: `0.20 * 0.5625 = 0.1125`).
+
 ### Exercise detection does NOT override
 `analyses.detection_result` is informational only for FR-XDET-07 display. User's `exercise_type` drives quality gates, rep detection, scoring. Never confuse the two (ADR-023).
 

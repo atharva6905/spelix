@@ -28,8 +28,15 @@ _VISIBILITY_LANDMARK_INDICES: list[int] = [11, 12, 13, 14, 23, 24, 25, 26]
 _BODY_VISIBILITY_THRESHOLD: float = 0.30
 
 # Framing gate — fraction of total frame area
-_FRAMING_MIN_FRACTION: float = 0.30
+# Calibrated 2026-04-24 against commercial-gym fixtures (atharva-{squat,bench,deadlift}).
+# Was 0.30 (lab fixtures, ~1.5 m camera distance). Real users at 3-4 m fill ~12-20 % of
+# portrait frame. See ADR-QGATE-COMMERCIAL-GYM.
+_FRAMING_MIN_FRACTION: float = 0.20
 _FRAMING_MAX_FRACTION: float = 0.80
+# Minimum number of post-sigmoid-visibility >= 0.5 landmarks needed to compute a
+# meaningful bbox. Below this, the sample is dropped (mirrors check_body_visibility's
+# NO_POSE skip pattern). Out of 33 BlazePose landmarks.
+_MIN_VISIBLE_LANDMARKS_FOR_BBOX: int = 10
 
 # Visibility threshold (post-sigmoid) for a landmark to count as "visible"
 # when computing the bounding box for the framing gate.
@@ -43,10 +50,17 @@ _COL_VISIBILITY = 3
 # Video file gate — maximum duration in seconds (FR-UPLD-02)
 _MAX_VIDEO_DURATION_S: float = 120.0
 
-# Single-person gate — hip landmark jump threshold as fraction of frame width
-_HIP_JUMP_THRESHOLD: float = 0.15
-_HIP_LANDMARKS: list[int] = [23, 24]  # left hip, right hip
-_MAX_JUMP_COUNT: int = 2
+# single_person gate (FR-CVPL-06) — anchor-based identity-jump detection.
+# See docs/superpowers/specs/2026-04-24-commercial-gym-quality-gate-design.md
+# and ADR-QGATE-COMMERCIAL-GYM. Replaces the prior "any large hip jump = multiple
+# people" rule, which produced false positives on commercial-gym videos where
+# MediaPipe re-acquires onto a clearly-visible bystander during tracking-loss
+# events.
+_HIP_LANDMARKS: list[int] = [23, 24]  # left hip, right hip (MediaPipe BlazePose)
+_ANCHOR_FROM_FIRST_N_SAMPLES: int = 3
+_OFF_ANCHOR_DISTANCE_FRAC: float = 0.25
+_MAX_CONSECUTIVE_OFF_ANCHOR: int = 4
+_MAX_OFF_ANCHOR_FRACTION: float = 0.30
 
 # Resolution gate — minimum dimension in pixels (FR-CVPL-07)
 _MIN_RESOLUTION_DIM: int = 720
@@ -263,7 +277,7 @@ def check_body_visibility(landmarks_per_frame: list[np.ndarray]) -> GateCheckRes
 
 _FRAMING_TOO_SMALL_MSG: str = (
     "You appear too far from the camera. Please move closer so your body "
-    "fills at least 30% of the frame."
+    "fills more of the frame."
 )
 _FRAMING_TOO_LARGE_MSG: str = (
     "You are too close to the camera. Please step back so your full body "
@@ -277,11 +291,14 @@ def check_framing(
     frame_width: int,
     frame_height: int,
 ) -> GateCheckResult:
-    """Gate P0-02: subject framing (ADR-053, ADR-054).
+    """Gate P0-02: subject framing (ADR-053, ADR-054, ADR-QGATE-COMMERCIAL-GYM).
 
     Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels,
-    computes bbox of all 33 landmarks, checks 90th-percentile area
-    fraction against [30 %, 80 %].
+    computes bbox from landmarks with sigmoid(visibility) >= 0.5 only
+    (hallucinated low-confidence landmarks cluster near body centre and
+    under-report the lifter's true frame coverage). Skips samples with
+    fewer than _MIN_VISIBLE_LANDMARKS_FOR_BBOX reliable landmarks.
+    Checks 90th-percentile area fraction against [20 %, 80 %].
     """
     indices = _sample_indices(len(landmarks_per_frame), _FRAMING_SAMPLE_COUNT)
 
@@ -291,8 +308,19 @@ def check_framing(
         if _is_no_pose_frame(frame):
             continue
 
-        xs = frame[:, _COL_X]
-        ys = frame[:, _COL_Y]
+        # Visibility-gated bbox (ADR-QGATE-COMMERCIAL-GYM).
+        # Hallucinated low-confidence landmarks cluster near body centre and
+        # under-report the lifter's true frame coverage. Use only landmarks
+        # with sigmoid(visibility) >= _LANDMARK_VISIBLE_THRESHOLD.
+        visibilities = np.array(
+            [sigmoid(float(v)) for v in frame[:, _COL_VISIBILITY]]
+        )
+        visible_mask = visibilities >= _LANDMARK_VISIBLE_THRESHOLD
+        if int(visible_mask.sum()) < _MIN_VISIBLE_LANDMARKS_FOR_BBOX:
+            continue
+
+        xs = frame[visible_mask, _COL_X]
+        ys = frame[visible_mask, _COL_Y]
         bbox_width = float(np.max(xs) - np.min(xs))
         bbox_height = float(np.max(ys) - np.min(ys))
         fractions.append(bbox_width * bbox_height)
@@ -346,10 +374,15 @@ def check_single_person(
     landmarks_per_frame: list[np.ndarray],
     frame_width: int,
 ) -> GateCheckResult:
-    """Reject if hip centroids show discontinuous jumps suggesting multiple people.
+    """Reject when MediaPipe is tracking different people across the clip.
 
-    Samples up to 30 evenly-spaced frames, skips NO_POSE sentinels, then
-    checks consecutive valid frames for large hip jumps.
+    Anchors on the lifter from the first 3 high-visibility samples (median hip
+    midpoint x), then counts samples whose hip midpoint drifts >25 % of frame
+    width from the anchor. Rejects if 4+ consecutive off-anchor samples or
+    >=30 % of valid samples are off-anchor. Skips samples where either hip's
+    post-sigmoid visibility is below ``_LANDMARK_VISIBLE_THRESHOLD`` — those
+    are MediaPipe guesses on occluded frames and would otherwise dominate the
+    decision (see ADR-QGATE-COMMERCIAL-GYM).
 
     Parameters
     ----------
@@ -364,31 +397,73 @@ def check_single_person(
     """
     indices = _sample_indices(len(landmarks_per_frame), _SINGLE_PERSON_SAMPLE_COUNT)
 
-    valid_frames = [
-        landmarks_per_frame[i]
-        for i in indices
-        if not _is_no_pose_frame(landmarks_per_frame[i])
+    midpoints: list[float] = []
+    for i in indices:
+        frame = landmarks_per_frame[i]
+        if _is_no_pose_frame(frame):
+            continue
+        left_vis = sigmoid(float(frame[_HIP_LANDMARKS[0], _COL_VISIBILITY]))
+        right_vis = sigmoid(float(frame[_HIP_LANDMARKS[1], _COL_VISIBILITY]))
+        if left_vis < _LANDMARK_VISIBLE_THRESHOLD or right_vis < _LANDMARK_VISIBLE_THRESHOLD:
+            continue
+        left_x = float(frame[_HIP_LANDMARKS[0], _COL_X])
+        right_x = float(frame[_HIP_LANDMARKS[1], _COL_X])
+        midpoints.append((left_x + right_x) / 2.0)
+
+    # Need at least N samples to anchor reliably. Fewer = cannot distinguish
+    # single-lifter-with-occlusion from genuinely-no-lifter.
+    if len(midpoints) < _ANCHOR_FROM_FIRST_N_SAMPLES:
+        return GateCheckResult(
+            passed=False,
+            name="single_person",
+            level="error",
+            metric_value=float(len(midpoints)),
+            threshold=float(_ANCHOR_FROM_FIRST_N_SAMPLES),
+            user_message=(
+                "Could not consistently track a single lifter — try filming "
+                "side-on with your full body in frame."
+            ),
+        )
+
+    anchor = float(np.median(midpoints[:_ANCHOR_FROM_FIRST_N_SAMPLES]))
+
+    off_anchor_flags = [
+        abs(m - anchor) > _OFF_ANCHOR_DISTANCE_FRAC for m in midpoints
     ]
 
-    jump_count = 0
-    for i in range(1, len(valid_frames)):
-        prev = valid_frames[i - 1]
-        curr = valid_frames[i]
-        for lm_idx in _HIP_LANDMARKS:
-            prev_x = prev[lm_idx, _COL_X] * frame_width
-            curr_x = curr[lm_idx, _COL_X] * frame_width
-            if abs(curr_x - prev_x) > _HIP_JUMP_THRESHOLD * frame_width:
-                jump_count += 1
-                break
+    # Longest consecutive run of off-anchor samples
+    longest_run = 0
+    current_run = 0
+    for flag in off_anchor_flags:
+        if flag:
+            current_run += 1
+            longest_run = max(longest_run, current_run)
+        else:
+            current_run = 0
 
-    passed = jump_count < _MAX_JUMP_COUNT
+    off_anchor_fraction = sum(off_anchor_flags) / len(off_anchor_flags)
+    rejected_by_run = longest_run >= _MAX_CONSECUTIVE_OFF_ANCHOR
+    rejected_by_fraction = off_anchor_fraction > _MAX_OFF_ANCHOR_FRACTION
+
+    passed = not (rejected_by_run or rejected_by_fraction)
+
+    # Report whichever metric drove the decision (or longest_run when passing
+    # — gives the operator a sense of margin). Threshold reported is the run
+    # threshold; the fraction threshold is informational and lives in the spec.
     return GateCheckResult(
         passed=passed,
         name="single_person",
         level="error",
-        metric_value=float(jump_count),
-        threshold=float(_MAX_JUMP_COUNT),
-        user_message="" if passed else "Multiple people detected — please film alone.",
+        metric_value=float(longest_run),
+        threshold=float(_MAX_CONSECUTIVE_OFF_ANCHOR),
+        user_message=(
+            ""
+            if passed
+            else (
+                "Could not consistently track a single lifter — try filming "
+                "side-on with your full body in frame."
+            )
+        ),
     )
 
 

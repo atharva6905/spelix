@@ -338,23 +338,33 @@ class TestFraming:
         result = check_framing(good + bad, FRAME_WIDTH, FRAME_HEIGHT)
         assert result.passed is True
 
-    def test_all_landmarks_contribute_to_bbox_regardless_of_visibility(self):
-        """All 33 landmarks contribute to bounding box — low-visibility
-        landmarks from plate occlusion are NOT excluded (D-032 fix)."""
+    def test_skips_samples_with_fewer_than_10_visible_landmarks(self):
+        """Samples with < _MIN_VISIBLE_LANDMARKS_FOR_BBOX (10) visible
+        landmarks are skipped. If all samples are skipped, metric_value=0.0
+        and the gate rejects.
+
+        Note: this supersedes the D-032 test that asserted ALL landmarks
+        contribute regardless of visibility. The ADR-QGATE-COMMERCIAL-GYM
+        design intentionally re-introduces visibility gating for the bbox
+        but with a minimum count threshold (10/33) to avoid false rejections
+        on frames with a few occluded landmarks."""
         frames = []
         for _ in range(5):
             frame = np.zeros((33, 5), dtype=np.float32)
             frame[:, 0] = 0.5
             frame[:, 1] = 0.5
-            frame[:, 3] = -10.0
+            frame[:, 3] = -10.0  # all very low vis → none visible
 
+            # Only 2 landmarks with corners — not enough for bbox (< 10)
             frame[0, 0] = 0.2
             frame[0, 1] = 0.1
             frame[32, 0] = 0.8
             frame[32, 1] = 0.9
             frames.append(frame)
         result = check_framing(frames, FRAME_WIDTH, FRAME_HEIGHT)
-        assert result.passed is True
+        # All samples skipped (< 10 visible landmarks each) → metric=0.0 → reject
+        assert result.passed is False
+        assert result.metric_value == 0.0
 
     def test_level_is_error(self):
         frames = _make_n_frames(visibility=0.9)
@@ -386,14 +396,25 @@ class TestFraming:
         result = check_framing(frames, frame_width=1080, frame_height=1920)
         assert result.passed is False
 
-    def test_landscape_threshold_unchanged(self):
-        """Landscape (16:9) framing threshold stays at 0.30 — no regression."""
-        frames = _make_framing_frames(
+    def test_landscape_threshold_is_0_20(self):
+        """Landscape (16:9) framing minimum threshold is 0.20 (lowered from 0.30
+        in ADR-QGATE-COMMERCIAL-GYM). A 0.21-area frame now passes; a truly
+        distant frame (area < 0.20) still rejects."""
+        # 0.30 × 0.70 = 0.21 area — now PASSES at the new landscape threshold (0.20)
+        frames_marginal = _make_framing_frames(
             x_min=0.35, y_min=0.10, x_max=0.65, y_max=0.80, visibility=0.9
         )
-        # 0.30 × 0.70 = 0.21 area — should still FAIL at 0.30 for landscape
-        result = check_framing(frames, frame_width=1920, frame_height=1080)
-        assert result.passed is False
+        result = check_framing(frames_marginal, frame_width=1920, frame_height=1080)
+        assert result.passed is True, (
+            f"Expected 0.21-area frame to pass at new 0.20 threshold, "
+            f"got metric={result.metric_value:.4f}"
+        )
+        # A genuinely distant subject (area = 0.09 × 0.09 = 0.0081) still rejects.
+        frames_distant = _make_framing_frames(
+            x_min=0.455, y_min=0.455, x_max=0.545, y_max=0.545, visibility=0.9
+        )
+        result2 = check_framing(frames_distant, frame_width=1920, frame_height=1080)
+        assert result2.passed is False
 
     def test_passes_when_early_frames_bad_but_later_good(self):
         """D-032 Bug 1: deadlift bent-over setup in early frames."""
@@ -877,3 +898,184 @@ class TestCameraStabilityGate:
         result = check_camera_stability([frame, frame])
         assert result.passed is True
         assert result.metric_value < 3.0
+
+
+# ---------------------------------------------------------------------------
+# check_single_person — anchor-based identity-jump detection
+# (ADR-QGATE-COMMERCIAL-GYM, FR-CVPL-06)
+# ---------------------------------------------------------------------------
+
+# Visibility raw values: any positive float gives sigmoid >= 0.5 (sigmoid(0)=0.5).
+# We use 4.0 for "high vis" (sigmoid ~0.98) and -4.0 for "low vis" (sigmoid ~0.02).
+_HIGH_VIS = 4.0
+_LOW_VIS = -4.0
+_FRAME_W = 1080
+_FRAME_H = 1920
+
+
+def _frame_with_hips(left_x: float, right_x: float, vis: float = _HIGH_VIS) -> np.ndarray:
+    """Build a 33x5 BlazePose-shaped frame with controlled hip x and visibility."""
+    frame = np.zeros((33, 5), dtype=np.float64)
+    # Set non-zero y on every landmark so _is_no_pose_frame returns False
+    # (sentinel = ALL x AND y are 0.0).
+    frame[:, 1] = 0.5
+    frame[:, 0] = 0.5  # default x for non-hip landmarks
+    frame[23, 0] = left_x
+    frame[23, 3] = vis
+    frame[23, 4] = vis  # presence (col 4 required for Tier 1 — do not omit)
+    frame[24, 0] = right_x
+    frame[24, 3] = vis
+    frame[24, 4] = vis
+    return frame
+
+
+class TestCheckSinglePersonAnchorRule:
+    """Tests for the anchor-based identity-jump detection introduced in
+    ADR-QGATE-COMMERCIAL-GYM. Anchor = median hip-midpoint x across first 3
+    high-visibility samples. Reject on >= 4 consecutive off-anchor or > 30 %
+    off-anchor fraction."""
+
+    def test_anchor_tolerates_brief_bystander_pickup(self) -> None:
+        # 30 samples: 27 anchored at hip x=0.5, 3 transient (idx 10,11,12) at
+        # x=0.85 (bystander), then back to anchor. Not sustained, not >30%.
+        samples = []
+        for i in range(30):
+            if i in (10, 11, 12):
+                samples.append(_frame_with_hips(0.83, 0.87))
+            else:
+                samples.append(_frame_with_hips(0.48, 0.52))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is True, (
+            f"Expected pass, got user_message={result.user_message!r}"
+        )
+
+    def test_anchor_rejects_sustained_swap(self) -> None:
+        # 30 samples: first 10 anchored at x=0.5, last 20 at x=0.85 (different
+        # person sustained). Should fail — sustained off-anchor run + fraction > 30%.
+        samples = []
+        for i in range(30):
+            if i < 10:
+                samples.append(_frame_with_hips(0.48, 0.52))
+            else:
+                samples.append(_frame_with_hips(0.83, 0.87))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+
+    def test_skips_low_visibility_hips(self) -> None:
+        # 30 samples, even idx anchored high-vis, odd idx wild-x but low-vis
+        # (must be skipped). Should pass — low-vis frames don't influence the decision.
+        samples = []
+        for i in range(30):
+            if i % 2 == 0:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_HIGH_VIS))
+            else:
+                samples.append(_frame_with_hips(0.05, 0.95, vis=_LOW_VIS))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is True
+
+    def test_rejects_when_too_few_high_vis_samples(self) -> None:
+        # 30 samples, only 2 are high-vis. Cannot anchor — rejects with new message.
+        samples = []
+        for i in range(30):
+            if i < 2:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_HIGH_VIS))
+            else:
+                samples.append(_frame_with_hips(0.48, 0.52, vis=_LOW_VIS))
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+        assert "track a single lifter" in result.user_message
+
+    def test_user_message_text_on_sustained_rejection(self) -> None:
+        # Force a sustained-swap rejection and check exact wording.
+        samples = []
+        for i in range(30):
+            samples.append(
+                _frame_with_hips(
+                    0.05 if i >= 10 else 0.50,
+                    0.10 if i >= 10 else 0.50,
+                )
+            )
+        result = check_single_person(samples, _FRAME_W)
+        assert result.passed is False
+        expected = (
+            "Could not consistently track a single lifter — try filming "
+            "side-on with your full body in frame."
+        )
+        assert result.user_message == expected
+
+
+# ---------------------------------------------------------------------------
+# check_framing — visibility-gated bbox (ADR-QGATE-COMMERCIAL-GYM)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckFramingVisibilityGate:
+    """Bbox in check_framing should only consider landmarks with
+    sigmoid(visibility) >= 0.5. Hallucinated low-confidence landmarks
+    clustered near the body centre would otherwise shrink the bbox and
+    cause false-negative framing rejections.
+
+    Also validates the new portrait floor of 0.20 * aspect = 0.1125 for
+    1080×1920 portrait video.
+    """
+
+    def _make_frame(self, visible_xs, low_vis_xs) -> np.ndarray:
+        """Frame where `visible_xs` landmarks span the full frame at high vis,
+        and `low_vis_xs` landmarks cluster at centre with low vis."""
+        frame = np.zeros((33, 5), dtype=np.float64)
+        # Ensure no NO_POSE sentinel: y always 0.5.
+        frame[:, 1] = 0.5
+        for slot, x in enumerate(visible_xs):
+            frame[slot, 0] = x
+            frame[slot, 1] = 0.05 + (slot % 10) * 0.09  # spread y
+            frame[slot, 3] = 4.0  # high vis (sigmoid ~0.98)
+            frame[slot, 4] = 4.0
+        n_high = len(visible_xs)
+        for slot, x in enumerate(low_vis_xs):
+            frame[n_high + slot, 0] = x  # all clustered at center
+            frame[n_high + slot, 1] = 0.5
+            frame[n_high + slot, 3] = -4.0  # low vis (sigmoid ~0.02)
+            frame[n_high + slot, 4] = -4.0
+        return frame
+
+    def test_bbox_uses_only_visible_landmarks(self) -> None:
+        """23 high-vis landmarks spanning x=[0.10, 0.90]; 10 low-vis at center.
+        Framing must reflect visible-only bbox, not all-33 bbox."""
+        visible_xs = list(np.linspace(0.10, 0.90, 23))
+        low_vis_xs = [0.50] * 10
+        frame = self._make_frame(visible_xs, low_vis_xs)
+        samples = [frame] * 30
+        result = check_framing(samples, frame_width=1080, frame_height=1920)
+        # 0.20 * 0.5625 = 0.1125 portrait floor.
+        # Visible-only bbox: x-span ~0.80, y-span wide → area >> 0.1125 → must pass.
+        assert result.passed is True, (
+            f"metric={result.metric_value:.4f} threshold={result.threshold:.4f} "
+            f"msg={result.user_message!r}"
+        )
+
+    def test_skip_samples_with_too_few_visible_landmarks(self) -> None:
+        """Only 5 high-vis landmarks (< _MIN_VISIBLE_LANDMARKS_FOR_BBOX=10).
+        All samples skipped → metric_value=0.0 → reject."""
+        visible_xs = list(np.linspace(0.10, 0.90, 5))
+        low_vis_xs = [0.50] * 28
+        frame = self._make_frame(visible_xs, low_vis_xs)
+        samples = [frame] * 30
+        result = check_framing(samples, frame_width=1080, frame_height=1920)
+        assert result.passed is False
+        assert result.metric_value == 0.0
+
+    def test_portrait_floor_is_0_1125(self) -> None:
+        """For 1080×1920 portrait, threshold should be 0.20 * (1080/1920) = 0.1125."""
+        # Force metric to be tiny: all 33 high-vis at same point → bbox area ~ 0.
+        frame = np.zeros((33, 5), dtype=np.float64)
+        frame[:, 0] = 0.50
+        frame[:, 1] = 0.50
+        frame[:, 3] = 4.0
+        frame[:, 4] = 4.0
+        # Avoid NO_POSE sentinel: one landmark off-center.
+        frame[0, 0] = 0.5001
+        frame[0, 1] = 0.5001
+        samples = [frame] * 30
+        result = check_framing(samples, frame_width=1080, frame_height=1920)
+        assert abs(result.threshold - (0.20 * (1080.0 / 1920.0))) < 1e-6
+        assert abs(result.threshold - 0.1125) < 1e-6
