@@ -30,8 +30,10 @@ _BODY_VISIBILITY_THRESHOLD: float = 0.30
 # Framing gate — fraction of total frame area
 # Calibrated 2026-04-24 against commercial-gym fixtures (atharva-{squat,bench,deadlift}).
 # Was 0.30 (lab fixtures, ~1.5 m camera distance). Real users at 3-4 m fill ~12-20 % of
-# portrait frame. See ADR-QGATE-COMMERCIAL-GYM.
-_FRAMING_MIN_FRACTION: float = 0.20
+# portrait frame. First lowered to 0.20; the squat fixture E2E on prod still missed by
+# 0.0009 (metric 0.1115 vs 0.1125 portrait floor), so further reduced to 0.18 (portrait
+# floor 0.10125). See ADR-QGATE-COMMERCIAL-GYM.
+_FRAMING_MIN_FRACTION: float = 0.18
 _FRAMING_MAX_FRACTION: float = 0.80
 # Minimum number of post-sigmoid-visibility >= 0.5 landmarks needed to compute a
 # meaningful bbox. Below this, the sample is dropped (mirrors check_body_visibility's
