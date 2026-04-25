@@ -277,7 +277,7 @@ def check_body_visibility(landmarks_per_frame: list[np.ndarray]) -> GateCheckRes
 
 _FRAMING_TOO_SMALL_MSG: str = (
     "You appear too far from the camera. Please move closer so your body "
-    "fills at least 30% of the frame."
+    "fills more of the frame."
 )
 _FRAMING_TOO_LARGE_MSG: str = (
     "You are too close to the camera. Please step back so your full body "
