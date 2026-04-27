@@ -2,11 +2,14 @@
 
 import os
 import uuid
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.models.coach_brain_candidate import CoachBrainCandidate as CoachBrainCandidateRow
+from app.models.coach_brain_entry import CoachBrainEntry
 from app.repositories.coach_brain_candidate import CoachBrainCandidateRepository
 from app.schemas.coach_brain_candidate import CoachBrainCandidateCreate
 
@@ -153,3 +156,62 @@ async def test_get_by_id_for_update_returns_orm_row(db_session: AsyncSession) ->
     refetched = await repo.get_by_id(created.id)
     assert refetched is not None
     assert refetched.review_status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_list_pending_with_nearest_confirmation_count_joins_count(
+    db_session: AsyncSession,
+) -> None:
+    """FR-ADMN-12 H-02: repo joins coach_brain_entries.confirmation_count
+    for each pending candidate via nearest_entry_id, returning
+    (CoachBrainCandidate, int | None) tuples."""
+    seed_entry = CoachBrainEntry(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="seed",
+        trigger_tags=["knee_cave"],
+        confirmation_count=7,
+        source_analysis_ids=[],
+        status="active",
+    )
+    db_session.add(seed_entry)
+    await db_session.flush()
+
+    update_candidate = CoachBrainCandidateRow(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="Drive knees out aggressively.",
+        source_analysis_ids=[uuid.uuid4()],
+        eval_scores={"overall": 0.9},
+        lifecycle_decision="UPDATE",
+        nearest_entry_id=seed_entry.id,
+        nearest_cosine_sim=Decimal("0.81"),
+        review_status="pending",
+    )
+    add_candidate_no_nearest = CoachBrainCandidateRow(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="Brand new cue with no near match.",
+        source_analysis_ids=[uuid.uuid4()],
+        eval_scores={"overall": 0.88},
+        lifecycle_decision="ADD",
+        nearest_entry_id=None,
+        review_status="pending",
+    )
+    db_session.add_all([update_candidate, add_candidate_no_nearest])
+    await db_session.flush()
+
+    repo = CoachBrainCandidateRepository(db_session)
+    our_ids = {update_candidate.id, add_candidate_no_nearest.id}
+    all_rows = await repo.list_pending_with_nearest_confirmation_count(limit=1000)
+    rows = [r for r in all_rows if r[0].id in our_ids]
+
+    assert len(rows) == 2
+    by_id = {row[0].id: row for row in rows}
+    update_row = by_id[update_candidate.id]
+    add_row = by_id[add_candidate_no_nearest.id]
+    assert update_row[1] == 7
+    assert add_row[1] is None

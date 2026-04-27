@@ -114,7 +114,9 @@ class TestListPendingCandidates:
         rows = [_candidate_schema(), _candidate_schema()]
         with patch("app.api.v1.admin.CoachBrainCandidateRepository") as RepoCls:
             repo = RepoCls.return_value
-            repo.list_pending_ordered = AsyncMock(return_value=rows)
+            repo.list_pending_with_nearest_confirmation_count = AsyncMock(
+                return_value=[(r, None) for r in rows]
+            )
             repo.count_pending = AsyncMock(return_value=2)
 
             resp = admin_client.get("/api/v1/admin/coach-brain/candidates")
@@ -128,7 +130,9 @@ class TestListPendingCandidates:
     def test_honours_limit_and_offset(self, admin_client):
         with patch("app.api.v1.admin.CoachBrainCandidateRepository") as RepoCls:
             repo = RepoCls.return_value
-            repo.list_pending_ordered = AsyncMock(return_value=[])
+            repo.list_pending_with_nearest_confirmation_count = AsyncMock(
+                return_value=[]
+            )
             repo.count_pending = AsyncMock(return_value=0)
 
             resp = admin_client.get(
@@ -136,7 +140,9 @@ class TestListPendingCandidates:
             )
 
         assert resp.status_code == 200
-        repo.list_pending_ordered.assert_awaited_once_with(limit=10, offset=5)
+        repo.list_pending_with_nearest_confirmation_count.assert_awaited_once_with(
+            limit=10, offset=5
+        )
 
     def test_stats_endpoint_returns_pending_count(self, admin_client):
         with patch("app.api.v1.admin.CoachBrainCandidateRepository") as RepoCls:
@@ -380,3 +386,41 @@ class TestListSimilarEntries:
             f"/api/v1/admin/coach-brain/candidates/{uuid.uuid4()}/similar?limit=6",
         )
         assert resp.status_code == 422
+
+
+class TestListCandidatesNearestConfirmationCount:
+    """FR-ADMN-12 H-02: endpoint surfaces nearest_entry_confirmation_count."""
+
+    def test_returns_count_for_update_candidate(self, admin_client):
+        update_cand = _candidate_schema(
+            nearest_entry_id=uuid.uuid4(),
+            lifecycle_decision="UPDATE",
+        )
+        with patch("app.api.v1.admin.CoachBrainCandidateRepository") as RepoCls:
+            repo = RepoCls.return_value
+            repo.list_pending_with_nearest_confirmation_count = AsyncMock(
+                return_value=[(update_cand, 4)]
+            )
+
+            resp = admin_client.get("/api/v1/admin/coach-brain/candidates")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["nearest_entry_confirmation_count"] == 4
+
+    def test_returns_null_for_add_candidate_no_nearest(self, admin_client):
+        add_cand = _candidate_schema(
+            nearest_entry_id=None,
+            lifecycle_decision="ADD",
+        )
+        with patch("app.api.v1.admin.CoachBrainCandidateRepository") as RepoCls:
+            repo = RepoCls.return_value
+            repo.list_pending_with_nearest_confirmation_count = AsyncMock(
+                return_value=[(add_cand, None)]
+            )
+
+            resp = admin_client.get("/api/v1/admin/coach-brain/candidates")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["nearest_entry_confirmation_count"] is None

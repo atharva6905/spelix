@@ -43,6 +43,7 @@ class CandidateListItem(BaseModel):
     lifecycle_decision: LifecycleLiteral
     nearest_entry_id: uuid.UUID | None
     nearest_cosine_sim: float | None
+    nearest_entry_confirmation_count: int | None = None
     contradiction_flag: bool
     requires_technical_review: bool = False
     review_status: ReviewStatusLiteral
