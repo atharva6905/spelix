@@ -1145,3 +1145,32 @@ In both cases the investigator's pre-fix report had identified the true source a
 **Consequences:** The 3 private-beta fixtures now pass `run_quality_gates`. The framing and single_person gates remain meaningful for genuine quality issues (distant/partial shots, two lifters in frame). New constants documented in `backend/CLAUDE.md` "Quality gate" gotcha block. Integration test at `backend/tests/integration/test_quality_gates_atharva_fixtures.py` (marked `@pytest.mark.slow`) serves as the acceptance regression for all 3 fixtures.
 
 **Related:** `backend/app/cv/quality_gates.py`, `backend/tests/unit/test_quality_gates.py`, `backend/tests/integration/test_quality_gates_atharva_fixtures.py`. Design spec: `docs/superpowers/specs/2026-04-24-commercial-gym-quality-gate-design.md`. Implementation plan: `docs/superpowers/plans/2026-04-24-commercial-gym-quality-gate-fix.md`. SRS FR-CVPL-06 (single person), FR-CVPL-07 (framing).
+
+## ADR-QGATE-COMMERCIAL-GYM-CALIBRATION-01 — `_FRAMING_MIN_FRACTION` 0.20 → 0.18 follow-up
+
+**Date:** 2026-04-25
+
+**Context:** ADR-QGATE-COMMERCIAL-GYM lowered `_FRAMING_MIN_FRACTION` from 0.30 to 0.20 (portrait floor 0.1125) under the hypothesis that the visibility-gated bbox would also raise the metric for genuine commercial-gym videos. Empirically that hypothesis only partially held: the squat fixture (`atharva-squat.mov`, analysis `1b6a1312`) post-PR-#121 still failed framing at metric=0.1115 vs threshold=0.1125 — short by **0.0009**. Visibility gating barely shifted the squat metric because most landmarks on a commercial-gym lifter at 3-4 m have `sigmoid(visibility) ≥ 0.5`; the bbox-shrinkage pathology only dominates the 90th-percentile in deeply-occluded clips. The spec authorised an empirical follow-up: "If the visibility-gated metric still falls under 0.1125, the floor is reduced further as a follow-up commit."
+
+**Decision:** Lower `_FRAMING_MIN_FRACTION` from 0.20 to 0.18 in `backend/app/cv/quality_gates.py:34`. Portrait floor becomes `0.18 × 0.5625 = 0.10125`. Updates 2 unit tests (`test_landscape_threshold_is_0_18`, `test_portrait_floor_is_0_10125`). Single constant change; no logic change to anchor algorithm or visibility-gating bbox logic from ADR-QGATE-COMMERCIAL-GYM.
+
+**Consequences:** Squat fixture now passes prod E2E with framing=0.1116 (0.001 margin over 0.10125). Bench (0.2479) and deadlift (0.1673) remain comfortably above threshold. Lower bound makes the framing gate less discriminating against very-distant subjects, but the visibility-gated bbox skip (≥10 visible landmarks required) prevents truly absent subjects from passing. Future user reports of inflated/false-positive completion may need the gate revisited.
+
+**Related:** PR #122 (`b5b9d80f`). `backend/app/cv/quality_gates.py`, `backend/tests/unit/test_quality_gates.py`. Supersedes the 0.20 calibration in ADR-QGATE-COMMERCIAL-GYM.
+
+## ADR-STREAQ-TIMEOUT-01 — `process_analysis` per-task timeout 900 → 1800 s
+
+**Date:** 2026-04-25
+
+**Context:** ADR-060 lowered `process_analysis` streaq per-task timeout from 1800 s (the ADR-058 safety net) to 900 s after D-035 dropped barbell-tracking from 24.4 min to 2 min — the 670 s telemetry budget for a 22.8 s reference clip suggested 900 s was sufficient. That budget did NOT account for **CoVe verification iterations** in the LLM coaching phase: each rep adds claim-extraction + verification calls, so longer videos produce more reps and more claims linearly. Prod E2E of `atharva-deadlift.mov` (26.2 s, 1547 frames, 4 reps; analysis `435065d5`, streaq task `e6d23bc3`) hit the 900 s ceiling exactly during post-gate coaching — `task process_analysis … timed out` at `02:56:55 UTC` after starting `02:41:55 UTC`. DB row stuck at `status='processing'`, quality gate had passed cleanly (framing 0.1673, single_person 0.0).
+
+**Decision:** Raise the `@worker.task(timeout=…)` decorator on `process_analysis` in `backend/app/workers/streaq_worker.py:150` from 900 → 1800 s. Restores the ADR-058 safety net. Adds regression test `test_process_analysis_timeout_at_least_1800_seconds` in `backend/tests/unit/test_streaq_worker.py` that string-checks the decorator (avoids streaq version coupling) — accidental future reduction below 1800 s fails CI rather than prod.
+
+**Rejected alternatives:**
+- Splitting scoring + coaching into separate streaq tasks (architecturally cleaner — each phase gets its own budget + retry semantics): rejected for L2 sprint; tracked as post-beta follow-up. Single-line bump unblocks beta launch immediately.
+- Streaming coaching to bypass the per-task timeout: rejected — instructor's stream-then-reparse already doubles token cost (ADR-021); deeper refactor needed first.
+- Per-video adaptive timeout: rejected — adds complexity without removing the underlying CoVe iteration cost.
+
+**Consequences:** Long-video analyses (≥25 s with multiple reps) no longer time out mid-coaching. Concurrency=1 means a single 30-min task blocks the queue, so latency for the next user grows. Acceptable at current beta volume (<10 analyses/day). Verified end-to-end on prod: deadlift `0ac10ed6` reached `status=completed` in ~18 min.
+
+**Related:** PR #124 (`2d62f108`). `backend/app/workers/streaq_worker.py`, `backend/tests/unit/test_streaq_worker.py`. Supersedes the 900 s value from ADR-060. Future: split `process_analysis` into pose+gate+score (CV-bound, fast) + coach+CoVe (LLM-bound, slow) tasks with independent budgets.

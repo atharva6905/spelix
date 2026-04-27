@@ -38,6 +38,21 @@ All 3 fixtures now pass every gate check as filmed, unblocking private-beta laun
 
 **Related:** ADR-QGATE-COMMERCIAL-GYM in `decisions.md`. Design spec: `docs/superpowers/specs/2026-04-24-commercial-gym-quality-gate-design.md`. Plan: `docs/superpowers/plans/2026-04-24-commercial-gym-quality-gate-fix.md`. Post-beta follow-up: YOLOv8 multi-person → primary-lifter crop (architectural correctness, deferred out of L2 sprint scope).
 
+## Completed — L2 Sprint Day 17 — `process_analysis` streaq timeout fix (2026-04-25, session 61 follow-up)
+
+While verifying the commercial-gym quality-gate fix end-to-end, the deadlift fixture's first prod run (analysis `435065d5`, streaq task `e6d23bc3`) revealed an unrelated pre-existing issue: `process_analysis` hit the 900 s per-task timeout exactly during post-gate LLM coaching + CoVe verification — `task process_analysis … timed out` in worker logs at `02:56:55 UTC` after starting `02:41:55 UTC`. DB stuck at `status='processing'`, quality gate had passed cleanly. Root cause: ADR-060's 670 s telemetry budget on a 22.8 s reference clip didn't account for CoVe iteration cost on longer outputs (each rep adds claim-extraction + verification LLM calls). Restored the ADR-058 safety net (1800 s) + added a string-check regression test guarding against future reductions.
+
+**Prod E2E verification:** Re-uploaded `atharva-deadlift.mov` post-deploy via Playwright MCP. Analysis `0ac10ed6` reached `status=completed` in **~18 min** total (3 min queue+gate, 3 min processing-start, 10 min coaching+CoVe), well under the new 1800 s budget. Screenshot: `quality-gate-fix-prod-deadlift.png` showing "Analysis complete / Deadlift — conventional".
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-STREAQ-TIMEOUT-01 | **Raise `process_analysis` streaq timeout 900 → 1800 s.** Single-line decorator bump in `backend/app/workers/streaq_worker.py:150` plus 12-line comment update with the empirical history. New regression test `test_process_analysis_timeout_at_least_1800_seconds` reads `streaq_worker.py` source and regex-asserts `timeout >= 1800` on the `process_analysis` decorator — guards against future accidental reductions below the documented minimum. Red-green verified locally before push. No user-facing strings, no auth surface — `spelix-security-reviewer` not invoked. | done | S | L2-QGATE-COMMERCIAL-GYM-03 (surfaced the bug) | NFR-RELI-01 | `2d62f108` (PR #124) | `backend/app/workers/streaq_worker.py`, `backend/tests/unit/test_streaq_worker.py` |
+| L2-STREAQ-TIMEOUT-02 | **Prod E2E verification — deadlift fixture `0ac10ed6` reaches `status=completed`.** Re-upload via Playwright MCP after PR #124 deploy. Total runtime ~18 min (well under new 1800 s budget). Same fixture timed out at exactly 900 s on prior run. Confirms timeout fix end-to-end. | done | S | L2-STREAQ-TIMEOUT-01 | — | `2d62f108` (Playwright on prod) | `quality-gate-fix-prod-deadlift.png` (local capture) |
+
+**Retro:** Cost of the original ADR-060 reduction surfaced 2 weeks later under the L2-sprint deadlift fixture — the kind of latent breakage that only shows up on edge cases (longest video + most reps + multi-paragraph CoVe). Mitigation forward: when raising/lowering a per-task timeout, also write the regression test that codifies the new floor — `test_process_analysis_timeout_at_least_1800_seconds` would have flagged the ADR-060 reduction as a regression. Pattern adopted for future per-task budget changes.
+
+**Related:** ADR-STREAQ-TIMEOUT-01 in `decisions.md` (supersedes ADR-060 timeout value). Post-beta follow-up: split `process_analysis` into separate streaq tasks for pose+gate+score (CV-bound) and coach+CoVe (LLM-bound) so each phase has its own budget + retry semantics — tracked as P3-FOLLOWUP-streaq-split.
+
 ## Completed — L2 Sprint — FR-EXPV-08 E2E walkthrough + reusable per-role test-account script (2026-04-22, session 60)
 
 Post-merge 3-role Playwright MCP verification on https://spelix.app against merge commit `4455ca1`. Walked logged-out → regular user → expert_reviewer → admin → back-to-expert. Full flag lifecycle verified: expert submits flag → auto-switch to My Flags tab → admin GETs list + PATCH-resolves → expert sees `status=resolved` on re-fetch. 0 console errors, 0 4xx/5xx network calls on the happy path.
