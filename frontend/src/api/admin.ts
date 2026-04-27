@@ -259,6 +259,7 @@ export interface CoachBrainCandidate {
   lifecycle_decision: "ADD" | "UPDATE" | "NOOP";
   nearest_entry_id: string | null;
   nearest_cosine_sim: number | null;
+  nearest_entry_confirmation_count: number | null;
   contradiction_flag: boolean;
   requires_technical_review: boolean;
   review_status: "pending" | "approved" | "rejected" | "superseded";

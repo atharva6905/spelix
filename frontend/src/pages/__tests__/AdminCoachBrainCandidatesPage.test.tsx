@@ -48,6 +48,7 @@ const candidate: CoachBrainCandidate = {
   lifecycle_decision: "ADD",
   nearest_entry_id: null,
   nearest_cosine_sim: null,
+  nearest_entry_confirmation_count: null,
   contradiction_flag: false,
   requires_technical_review: false,
   review_status: "pending",
@@ -391,5 +392,42 @@ describe("AdminCoachBrainCandidatesPage - SimilarEntriesList", () => {
       expect(screen.getByText(/tuck elbows at 45 degrees/i)).toBeTruthy(),
     );
     expect(screen.queryByText(/similar existing entries/i)).toBeNull();
+  });
+});
+
+describe("AdminCoachBrainCandidatesPage - confirmation count badge", () => {
+  it("renders 'Confirms #N' when nearest_entry_confirmation_count is set", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValueOnce([
+      {
+        ...candidate,
+        id: "00000000-0000-0000-0000-000000000001",
+        lifecycle_decision: "UPDATE",
+        nearest_entry_id: "00000000-0000-0000-0000-000000000099",
+        nearest_cosine_sim: 0.81,
+        nearest_entry_confirmation_count: 7,
+      },
+    ]);
+    apiMock.getCoachBrainCandidateStats.mockResolvedValueOnce({ total_pending: 1 });
+
+    renderPage();
+
+    expect(await screen.findByText("Confirms #7")).toBeTruthy();
+  });
+
+  it("renders 'New (no near match)' when nearest_entry_id is null", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValueOnce([
+      {
+        ...candidate,
+        id: "00000000-0000-0000-0000-000000000002",
+        nearest_entry_id: null,
+        nearest_cosine_sim: null,
+        nearest_entry_confirmation_count: null,
+      },
+    ]);
+    apiMock.getCoachBrainCandidateStats.mockResolvedValueOnce({ total_pending: 1 });
+
+    renderPage();
+
+    expect(await screen.findByText("New (no near match)")).toBeTruthy();
   });
 });
