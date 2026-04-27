@@ -32,6 +32,7 @@ const fakeCandidate: CoachBrainCandidate = {
   lifecycle_decision: "ADD",
   nearest_entry_id: null,
   nearest_cosine_sim: null,
+  nearest_entry_confirmation_count: null,
   contradiction_flag: false,
   requires_technical_review: false,
   review_status: "pending",

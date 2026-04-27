@@ -556,8 +556,16 @@ async def list_coach_brain_candidates(
     user: CurrentUser = Depends(get_admin_user),
     repo: CoachBrainCandidateRepository = Depends(_get_candidate_repo),
 ) -> list[Any]:
-    rows = await repo.list_pending_ordered(limit=limit, offset=offset)
-    return [CandidateListItem.model_validate(r.model_dump()) for r in rows]
+    # FR-ADMN-12 H-02: show nearest matched entry's confirmation_count on the card.
+    rows = await repo.list_pending_with_nearest_confirmation_count(
+        limit=limit, offset=offset
+    )
+    out: list[CandidateListItem] = []
+    for candidate, count in rows:
+        payload = candidate.model_dump()
+        payload["nearest_entry_confirmation_count"] = count
+        out.append(CandidateListItem.model_validate(payload))
+    return out
 
 
 @router.get(

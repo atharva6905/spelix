@@ -207,6 +207,10 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
         {candidate.phase && <Badge tone="gray">{candidate.phase}</Badge>}
         <Badge tone="purple">{candidate.entry_type}</Badge>
         <Badge tone="amber">{candidate.lifecycle_decision}</Badge>
+        <ConfirmationCountBadge
+          count={candidate.nearest_entry_confirmation_count}
+          hasNearest={candidate.nearest_entry_id !== null}
+        />
       </header>
 
       <p className="mb-3 text-xs text-gray-500">
@@ -398,6 +402,25 @@ function Badge({ tone, children }: { tone: Tone; children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+function ConfirmationCountBadge({
+  count,
+  hasNearest,
+}: {
+  count: number | null;
+  hasNearest: boolean;
+}) {
+  // FR-ADMN-12: shows the nearest matched coach_brain_entries.confirmation_count
+  // so reviewers can judge whether a candidate reinforces high-confidence
+  // existing knowledge or proposes a net-new cue.
+  if (count !== null) {
+    return <Badge tone="green">Confirms #{count}</Badge>;
+  }
+  if (hasNearest) {
+    return <Badge tone="gray">New (no count)</Badge>;
+  }
+  return <Badge tone="gray">New (no near match)</Badge>;
 }
 
 function EvalScoreCard({ scores }: { scores: Record<string, number> }) {

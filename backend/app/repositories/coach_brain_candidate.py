@@ -14,6 +14,7 @@ from sqlalchemy import func, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.coach_brain_candidate import CoachBrainCandidate as CoachBrainCandidateRow
+from app.models.coach_brain_entry import CoachBrainEntry
 from app.schemas.coach_brain_candidate import (
     CoachBrainCandidate,
     CoachBrainCandidateCreate,
@@ -98,6 +99,53 @@ class CoachBrainCandidateRepository:
         )
         result = await self._db.execute(stmt)
         return [CoachBrainCandidate.model_validate(r) for r in result.scalars().all()]
+
+    async def list_pending_with_nearest_confirmation_count(
+        self, *, limit: int = 50, offset: int = 0
+    ) -> Sequence[tuple[CoachBrainCandidate, int | None]]:
+        """Pending candidates + nearest entry's confirmation_count.
+
+        FR-ADMN-12 H-02: the review card shows the nearest matched entry's
+        confirmation_count so reviewers can judge whether a candidate
+        reinforces high-confidence existing knowledge or proposes a net-new
+        cue. LEFT OUTER JOIN so ADD-path candidates with no nearest_entry_id
+        still appear with count=None.
+
+        Sort precedence matches list_pending_ordered:
+          1. eval_scores->>'overall' DESC NULLS LAST
+          2. eval_scores->>'faithfulness' DESC NULLS LAST
+          3. created_at DESC
+        """
+        overall_sort = (
+            literal_column("(eval_scores->>'overall')::float").desc().nulls_last()
+        )
+        faith_sort = (
+            literal_column("(eval_scores->>'faithfulness')::float").desc().nulls_last()
+        )
+        stmt = (
+            select(CoachBrainCandidateRow, CoachBrainEntry.confirmation_count)
+            .outerjoin(
+                CoachBrainEntry,
+                CoachBrainEntry.id == CoachBrainCandidateRow.nearest_entry_id,
+            )
+            .where(CoachBrainCandidateRow.review_status == "pending")
+            .order_by(
+                overall_sort, faith_sort, CoachBrainCandidateRow.created_at.desc()
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self._db.execute(stmt)
+        out: list[tuple[CoachBrainCandidate, int | None]] = []
+        for row in result.all():
+            candidate_row, count = row
+            out.append(
+                (
+                    CoachBrainCandidate.model_validate(candidate_row),
+                    int(count) if count is not None else None,
+                )
+            )
+        return out
 
     async def count_pending(self) -> int:
         stmt = select(func.count(CoachBrainCandidateRow.id)).where(
