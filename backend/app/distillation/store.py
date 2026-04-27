@@ -74,11 +74,22 @@ async def store_entry(
                     candidate_row.id,
                 )
                 continue
-            existing.confirmation_count = (existing.confirmation_count or 0) + 1
-            # array_append via list assignment — SQLAlchemy serialises as ARRAY literal.
-            existing.source_analysis_ids = list(existing.source_analysis_ids or []) + list(
-                row.source_analysis_ids
-            )
+            if row.contradiction_flag:
+                # FR-BRAIN-17: contradicted entries must not accumulate
+                # confirmation evidence. Tombstone via the FR-BRAIN-16
+                # established pattern — status CHECK allows only
+                # seed/active/deprecated, so the contradiction reason
+                # lives in extra_metadata as a JSONB merge.
+                existing.status = "deprecated"
+                merged_metadata = dict(existing.extra_metadata or {})
+                merged_metadata["rejected_reason"] = f"contradicted_by_{candidate_row.id}"
+                existing.extra_metadata = merged_metadata
+            else:
+                existing.confirmation_count = (existing.confirmation_count or 0) + 1
+                # array_append via list assignment — SQLAlchemy serialises as ARRAY literal.
+                existing.source_analysis_ids = list(existing.source_analysis_ids or []) + list(
+                    row.source_analysis_ids
+                )
             await db_session.flush()
 
     return {"stored_ids": stored_ids}
