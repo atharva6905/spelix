@@ -1191,3 +1191,11 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 - No code change required.
 
 **Supersedes.** SRS v2.1 FR-BRAIN-06 5-node sequence (clarifies; does not contradict the rest of the row).
+
+## ADR-BRAIN-11: Coach Brain tombstone pattern — `status='deprecated'` + `extra_metadata.rejected_reason` JSONB (Session 62)
+
+**Context.** Two SRS Must rows soft-delete `coach_brain_entries` rows: FR-BRAIN-16 (consent withdrawal cascade) and FR-BRAIN-17 (contradicted-by-new-evidence). Both SRS rows literally specify `status='rejected'` + a `rejected_reason` column. But `coach_brain_entries.status` has a CHECK constraint allowing only `('seed','active','deprecated')` — and there is no `rejected_reason` column on the model. Phase 2 shipped FR-BRAIN-16 with a workaround (`backend/app/repositories/coach_brain.py:soft_delete_empty_unconfirmed`) using `status='deprecated'` + a `metadata || jsonb '{...}'` merge. The 2026-04-27 spelix-auditor sweep proposed adding `'rejected'` to the CHECK + a new column for FR-BRAIN-17 — that would have required a migration on a 6-day gate window AND introduced two distinct soft-delete paths.
+
+**Decision.** All Coach Brain entry tombstones use the same pattern: `existing.status = 'deprecated'` + `existing.extra_metadata = {**existing.extra_metadata, 'rejected_reason': '<reason_string>'}`. Reasons are convention-driven free strings: `'source_consent_withdrawn'` (FR-BRAIN-16), `'contradicted_by_<candidate_uuid>'` (FR-BRAIN-17). Used in `backend/app/repositories/coach_brain.py:soft_delete_empty_unconfirmed` and `backend/app/distillation/store.py:store_entry`. No migration. No new column. SRS prose is the bug; the runtime invariant is canonical.
+
+**Consequences.** New tombstone reasons are 1-line additions to either function — no migration, no model change. Consumers querying for "rejected" entries must filter by `status='deprecated'` AND `extra_metadata->>'rejected_reason' = ?` — there is no clean SQL boolean column for this. Adding `'rejected'` to the CHECK or a `rejected_reason` column at any future point requires migrating both call sites and rewriting downstream queries. If a Phase 4 reporting need surfaces and the JSONB query becomes hot, **then** consider promoting `rejected_reason` to a real column behind a feature flag; until that need is concrete, the JSONB convention stays.
