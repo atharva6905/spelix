@@ -1174,3 +1174,20 @@ In both cases the investigator's pre-fix report had identified the true source a
 **Consequences:** Long-video analyses (≥25 s with multiple reps) no longer time out mid-coaching. Concurrency=1 means a single 30-min task blocks the queue, so latency for the next user grows. Acceptable at current beta volume (<10 analyses/day). Verified end-to-end on prod: deadlift `0ac10ed6` reached `status=completed` in ~18 min.
 
 **Related:** PR #124 (`2d62f108`). `backend/app/workers/streaq_worker.py`, `backend/tests/unit/test_streaq_worker.py`. Supersedes the 900 s value from ADR-060. Future: split `process_analysis` into pose+gate+score (CV-bound, fast) + coach+CoVe (LLM-bound, slow) tasks with independent budgets.
+
+## ADR-BRAIN-10: FR-BRAIN-06 distillation graph has 7 nodes, not 5 (Session 62)
+
+**Context.** SRS v2.1 FR-BRAIN-06 (2026-04-12) specifies the distillation graph as five nodes: `extract_insights → validate_quality → format_entry → store_entry → END`. Implementation (PRs #79–#100, Phase 3) added two more nodes between `validate_quality` and `format_entry`:
+1. `lifecycle_decision` — FR-BRAIN-17 ADD/UPDATE/NOOP cosine-similarity routing.
+2. `cove_verify` — FR-BRAIN-14 brain-side CoVe contradiction guard for UPDATE-path candidates.
+
+The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (auditor finding H-03).
+
+**Decision.** Update SRS FR-BRAIN-06 row to reflect the runtime: seven nodes, `extract_insights → validate_quality → lifecycle_decision → cove_verify → format_entry → store_entry → END`. The added nodes are required to satisfy independent SRS requirements: FR-BRAIN-14 (Should) for `cove_verify` and FR-BRAIN-17 (Must) for `lifecycle_decision`. Both rows are gate-relevant for Phase 3. Removing them to "match the spec" would violate independent SRS requirements. The SRS text is the bug, not the implementation.
+
+**Consequences.**
+- Phase 3 transition gate uses the corrected SRS row.
+- Future ADRs that touch FR-BRAIN-06 nodes must update both the row and the implementation in lockstep.
+- No code change required.
+
+**Supersedes.** SRS v2.1 FR-BRAIN-06 5-node sequence (clarifies; does not contradict the rest of the row).

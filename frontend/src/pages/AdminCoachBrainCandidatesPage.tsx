@@ -171,6 +171,13 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
       }
       if (e.key === "a") {
         e.preventDefault();
+        // M-04 (auditor finding, 2026-04-27): premise was that `void` swallows
+        // errors. handleApprove already has an internal try/catch that calls
+        // setActionError on any API failure — the returned promise always
+        // resolves. `void` here is the standard TS no-floating-promises
+        // suppressor on a promise that never rejects to the caller. No outer
+        // .catch needed; generic "Approve failed. Please retry." is already
+        // surfaced via the inner catch. Auditor finding rejected — covered.
         void handleApprove(false);
       } else if (e.key === "r") {
         e.preventDefault();

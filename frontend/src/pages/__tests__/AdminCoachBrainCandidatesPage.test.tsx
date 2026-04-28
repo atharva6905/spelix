@@ -344,6 +344,7 @@ describe("AdminCoachBrainCandidatesPage - keyboard shortcuts", () => {
 
     expect(apiMock.approveCoachBrainCandidate).not.toHaveBeenCalled();
   });
+
 });
 
 describe("AdminCoachBrainCandidatesPage - SimilarEntriesList", () => {

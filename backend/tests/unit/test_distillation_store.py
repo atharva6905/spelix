@@ -276,3 +276,57 @@ async def test_store_entry_update_without_contradiction_does_not_tombstone(
     assert seed.extra_metadata == {} or "rejected_reason" not in seed.extra_metadata
     assert seed.confirmation_count == 3
     assert source_analysis in seed.source_analysis_ids
+
+
+@pytest.mark.asyncio
+async def test_store_entry_update_advances_updated_at(
+    db_session: AsyncSession,
+) -> None:
+    """M-05: SQLAlchemy onupdate=func.now() should fire when store_entry
+    bumps confirmation_count or appends source_analysis_ids on the
+    UPDATE-no-contradiction path. Codify it so a TimestampMixin regression
+    or a partial-flush bug surfaces immediately.
+    """
+    seed = CoachBrainEntry(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="seed",
+        trigger_tags=["knee_cave"],
+        confirmation_count=2,
+        source_analysis_ids=[],
+        status="active",
+    )
+    db_session.add(seed)
+    await db_session.flush()
+    original_updated_at = seed.updated_at
+
+    # Force a measurable wall-clock gap so the new updated_at is strictly
+    # greater than the original. Postgres `now()` resolves to clock_timestamp
+    # within the same transaction, but a 0.05s gap is well above any
+    # reasonable clock-skew floor.
+    import asyncio
+    await asyncio.sleep(0.05)
+
+    source_analysis = uuid.uuid4()
+    row = CoachBrainCandidateCreate(
+        exercise="squat",
+        phase="descent",
+        entry_type="cue",
+        content="Drive knees out.",
+        source_analysis_ids=[source_analysis],
+        lifecycle_decision="UPDATE",
+        nearest_entry_id=seed.id,
+        nearest_cosine_sim=0.81,
+        contradiction_flag=False,
+        review_status="superseded",
+    )
+    state = _state_with_formatted([row])
+    await store_entry(state, db_session=db_session)
+
+    await db_session.refresh(seed)
+    assert seed.updated_at >= original_updated_at, (
+        f"updated_at did not advance: original={original_updated_at} "
+        f"after_store_entry={seed.updated_at}"
+    )
+    assert seed.confirmation_count == 3

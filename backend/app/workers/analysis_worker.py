@@ -37,6 +37,21 @@ _TERMINAL_STATES = frozenset({"completed", "quality_gate_rejected"})
 # Heartbeat key and TTL (seconds)
 _HEARTBEAT_KEY = "spelix:worker:heartbeat"
 
+# M-03: UserProfile body-stats fields surfaced to coaching prompts.
+# Mirrored in the imperative path and the graph path.
+# Adding a new column to UserProfile requires updating this set in one
+# place and re-running the body_stats tests so coaching prompts pick it up.
+_USER_PROFILE_BODY_STATS_FIELDS: frozenset[str] = frozenset(
+    {
+        "height_cm",
+        "weight_kg",
+        "age",
+        "experience_level",
+        "arm_span_cm",
+        "femur_length_cm",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Internal pipeline
@@ -258,18 +273,11 @@ async def _run_coaching_imperative(
         profile_repo = UserProfileRepository(repo.db)
         profile = await profile_repo.get_by_user_id(analysis.user_id)
         if profile:
-            body_stats = {}
-            for attr in (
-                "height_cm",
-                "weight_kg",
-                "age",
-                "experience_level",
-                "arm_span_cm",
-                "femur_length_cm",
-            ):
-                val = getattr(profile, attr, None)
-                if val is not None:
-                    body_stats[attr] = val
+            body_stats = {
+                attr: getattr(profile, attr)
+                for attr in _USER_PROFILE_BODY_STATS_FIELDS
+                if getattr(profile, attr, None) is not None
+            }
             if not body_stats:
                 body_stats = None
     except Exception:
@@ -651,18 +659,11 @@ async def _run_coaching_graph(
     profile = await profile_repo.get_by_user_id(analysis.user_id)
     body_stats: dict | None = None
     if profile:
-        body_stats = {}
-        for attr in (
-            "height_cm",
-            "weight_kg",
-            "age",
-            "experience_level",
-            "arm_span_cm",
-            "femur_length_cm",
-        ):
-            val = getattr(profile, attr, None)
-            if val is not None:
-                body_stats[attr] = val
+        body_stats = {
+            attr: getattr(profile, attr)
+            for attr in _USER_PROFILE_BODY_STATS_FIELDS
+            if getattr(profile, attr, None) is not None
+        }
         body_stats = body_stats or None
 
     # Keyframe analysis — best-effort

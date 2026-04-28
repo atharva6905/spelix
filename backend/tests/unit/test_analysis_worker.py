@@ -833,3 +833,27 @@ async def test_generate_and_upload_pdf_upload_failure_keeps_local_path():
 
     # Exception is caught; analysis not failed
     assert analysis.status != "failed"
+
+
+# ---------------------------------------------------------------------------
+# M-03: body-stats constant structural test
+# ---------------------------------------------------------------------------
+
+
+def test_user_profile_body_stats_constant_covers_all_relevant_fields() -> None:
+    """M-03: the module constant must enumerate all UserProfile fields the
+    coaching prompt cares about, so adding a new body-stat to UserProfile
+    is a one-line update here rather than a silent omission."""
+    from app.workers.analysis_worker import _USER_PROFILE_BODY_STATS_FIELDS
+
+    expected = frozenset(
+        {
+            "height_cm",
+            "weight_kg",
+            "age",
+            "experience_level",
+            "arm_span_cm",
+            "femur_length_cm",
+        }
+    )
+    assert _USER_PROFILE_BODY_STATS_FIELDS == expected
