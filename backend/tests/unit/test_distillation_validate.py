@@ -101,3 +101,63 @@ def _stub_coaching_output():
         raw_prompt_tokens=0,
         raw_completion_tokens=0,
     )
+
+
+def _state(eval_scores: dict) -> dict:
+    return make_initial_distillation_state(
+        analysis_id=uuid.uuid4(),
+        exercise_type="squat",
+        coaching_output=_stub_coaching_output(),
+        retrieved_papers_contexts=[],
+        eval_scores=eval_scores,
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_pass_when_overall_and_correctness_above_thresholds() -> None:
+    """M-02: regression guard for the `pass` path. SRS FR-BRAIN-06 says
+    overall >= 0.85 AND correctness >= 0.8 must yield 'pass'. Phase 2 only
+    populates faithfulness; this test exercises the full Phase 4 path so a
+    silent regression cannot ship."""
+    state = _state({"overall": 0.90, "correctness": 0.85})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "pass"
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_review_when_correctness_below_threshold() -> None:
+    """M-02: companion. overall above the pass floor but correctness below
+    the sub-gate must route to review (not pass)."""
+    state = _state({"overall": 0.90, "correctness": 0.75})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_review_when_overall_between_floors() -> None:
+    """M-02: review-band check (0.6 <= overall < 0.85)."""
+    state = _state({"overall": 0.70, "correctness": 0.85})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "review"
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_reject_when_overall_below_review_floor() -> None:
+    """M-02: reject-band check."""
+    state = _state({"overall": 0.40})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "reject"
+
+
+@pytest.mark.asyncio
+async def test_validate_quality_phase2_fallback_uses_faithfulness_for_overall() -> None:
+    """M-02: Phase 2 fallback — overall is None, faithfulness is the
+    overall-style score; correctness is missing so the pass sub-gate cannot
+    fire, but review/reject still work."""
+    state = _state({"faithfulness": 0.70})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "review"
+
+    state = _state({"faithfulness": 0.40})
+    out = await validate_quality(state)
+    assert out["validation_decision"] == "reject"
