@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import AdminCoachBrainCandidatesPage from "@/pages/AdminCoachBrainCandidatesPage";
@@ -343,6 +343,22 @@ describe("AdminCoachBrainCandidatesPage - keyboard shortcuts", () => {
     await userEvent.type(textarea, "a");
 
     expect(apiMock.approveCoachBrainCandidate).not.toHaveBeenCalled();
+  });
+
+  it("surfaces approval errors triggered via keyboard shortcut 'a' (M-04)", async () => {
+    apiMock.listCoachBrainCandidates.mockResolvedValueOnce([candidate]);
+    apiMock.getCoachBrainCandidateStats.mockResolvedValueOnce({ total_pending: 1 });
+    // handleApprove has an internal try/catch that sets the generic error message;
+    // the keyboard .catch() is a safety net. Either path must surface an error —
+    // not silently swallow it via void (the M-04 bug).
+    apiMock.approveCoachBrainCandidate.mockRejectedValueOnce(new Error("503 service unavailable"));
+
+    renderPage();
+    await screen.findByText(/tuck elbows at 45 degrees/i);
+
+    fireEvent.keyDown(window, { key: "a" });
+
+    expect(await screen.findByText(/approve failed/i)).toBeInTheDocument();
   });
 });
 

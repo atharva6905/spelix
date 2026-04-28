@@ -171,7 +171,13 @@ function CandidateCard({ candidate, onAdvance, onRefresh }: CandidateCardProps) 
       }
       if (e.key === "a") {
         e.preventDefault();
-        void handleApprove(false);
+        // M-04: void on async swallows errors silently. Surface failures via
+        // setActionError so reviewers see why the keyboard shortcut didn't
+        // approve.
+        handleApprove(false).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "Approve failed. Please retry.";
+          setActionError(msg);
+        });
       } else if (e.key === "r") {
         e.preventDefault();
         setMode("reject");
