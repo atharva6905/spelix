@@ -175,7 +175,7 @@ Phase 0 path: `config/thresholds_v0.json` with hardcoded named constants (FR-SCO
 Entry point: `app/workers/streaq_worker.py::worker` (a `streaq.Worker` instance). Launch with `streaq app.workers.streaq_worker:worker`.
 
 Config:
-- `queue_name="spelix"`, `concurrency=1` (MediaPipe peak ~350 MB on 2 GB droplet; same shape as ARQ's `max_jobs=1`), per-task `timeout=300s`.
+- `queue_name="spelix"`, `concurrency=1` (MediaPipe peak ~350 MB on 4 GB droplet; concurrency stays at 1 to leave headroom for FastAPI + Redis + Caddy on the same box; same shape as ARQ's `max_jobs=1`), per-task `timeout=300s`.
 - `lifespan()` context manager opens a dedicated `redis.asyncio` client, launches the heartbeat loop, yields a `WorkerContext` with `redis`, `paper_storage`, `db_session_maker`. FastAPI-style DI via `WorkerDepends()` injects this into every task.
 - Heartbeat: key `spelix:worker:heartbeat`, TTL 90s, refreshed every 30s (NFR-OPER-02). Preserved from ARQ.
 - Task bodies in `analysis_worker.py`, `consent_cascade.py`, `paper_ingestion.py`, `cleanup.py`, `keepalive.py` keep their ARQ-style `ctx: dict` signatures — `_adapt_ctx()` in `streaq_worker.py` converts `WorkerContext` to the dict shape.
@@ -428,7 +428,7 @@ Always add imports inline with the code that uses them in the same edit operatio
 - Set `DATABASE_URL` env var. PgBouncer transaction mode requires `statement_cache_size=0` in asyncpg `connect_args`.
 
 ### streaq
-- `concurrency=1` on 2GB droplet (MediaPipe peak ~350MB RAM). Same semantics as the old ARQ `max_jobs=1`.
+- `concurrency=1` on 4GB droplet (MediaPipe peak ~350MB RAM; co-tenant with FastAPI + Redis + Caddy). Same semantics as the old ARQ `max_jobs=1`.
 - Per-task `timeout=300s` applied via `@worker.task(timeout=300)` decorator (matches ARQ's former global `job_timeout=300`).
 - CLI: `streaq app.workers.streaq_worker:worker` (note the colon between module and attr — streaq convention).
 - Queue stored as Redis **stream** at `streaq:spelix:queues:` — query via `XLEN`, NOT `LLEN`. `LLEN` on the key silently returns 0 because streaq doesn't store a list there (see ADR-BRAIN-04-reversal post-fix).
