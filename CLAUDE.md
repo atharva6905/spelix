@@ -15,7 +15,7 @@ Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at mi
 - **Storage/Auth/Realtime**: Supabase (Storage for artifacts, Auth for JWT, Realtime for status push)
 - **AI (Phase 1)**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching with prompt caching; OpenAI GPT-4o (`gpt-4o`) for keyframe analysis + exercise auto-detect fallback
 - **Frontend**: React 19, Vite 8, TypeScript strict, Tailwind CSS 4, shadcn/ui, Recharts. See `frontend/CLAUDE.md`.
-- **Infra**: DigitalOcean 2GB droplet behind Caddy, Vercel for frontend, Qdrant Cloud (Phase 2+)
+- **Infra**: DigitalOcean 4GB droplet behind Caddy, Vercel for frontend, Qdrant Cloud (Phase 2+)
 
 ## Structure
 
