@@ -608,6 +608,7 @@ async def _run_coaching_imperative(
             else None
         ),
         agent_trace_json=agent_trace,
+        eval_scores_json=analysis.eval_scores,
     )
     await coaching_repo.create(coaching_result)
 
@@ -808,6 +809,7 @@ async def _run_coaching_graph(
     eval_scores = final_state.get("eval_scores") or {}
     if eval_scores:
         analysis.eval_scores = eval_scores
+        coaching_result.eval_scores_json = eval_scores
         if eval_scores.get("faithfulness_passed") is False:
             analysis.flagged_for_review = True
         await repo.update(analysis)
