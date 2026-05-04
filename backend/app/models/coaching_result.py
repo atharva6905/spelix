@@ -22,6 +22,7 @@ class CoachingResult(Base):
     structured_output_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     retrieved_sources_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     agent_trace_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    eval_scores_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     stream_complete: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     cove_verified: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

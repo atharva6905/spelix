@@ -12,6 +12,27 @@ from app.agents.graph import build_adaptive_graph
 from app.agents.state import make_initial_state
 
 
+def test_adaptive_graph_accepts_checkpointer():
+    """build_adaptive_graph should pass checkpointer to compile when provided."""
+    fake_llm = MagicMock()
+    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
+
+    mock_saver = MagicMock()
+    deps = {
+        "rep_metric_repo": MagicMock(),
+        "retrieval_svc": MagicMock(),
+        "thresholds": MagicMock(),
+        "analysis_repo": MagicMock(),
+        "coaching_svc": MagicMock(),
+        "cove_svc": MagicMock(),
+        "fg_svc": MagicMock(),
+        "pubsub_redis": MagicMock(),
+        "reasoner_llm": fake_llm,
+    }
+    graph = build_adaptive_graph(**deps, checkpointer=mock_saver)
+    assert graph is not None
+
+
 @pytest.mark.asyncio
 async def test_adaptive_graph_compiles_and_accepts_state():
     # The reasoner LLM is fully mocked — we only verify the graph compiles

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -180,6 +180,14 @@ async def test_wrap_trace_records_failed_node_in_state_trace():
     assert state["trace"][0]["node"] == "failing_node"
     assert state["trace"][0]["error"] == "synthetic failure"
     assert state["trace"][0]["output_keys"] == []
+
+
+def test_deterministic_graph_accepts_checkpointer():
+    """build_deterministic_graph should pass checkpointer to compile when provided."""
+    mock_saver = MagicMock()
+    deps = _make_deps()
+    graph = build_deterministic_graph(**deps, checkpointer=mock_saver)
+    assert graph is not None
 
 
 def _run_graph_kwargs():

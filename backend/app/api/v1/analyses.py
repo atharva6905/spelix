@@ -20,7 +20,7 @@ import os
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_current_user
@@ -38,10 +38,22 @@ from app.schemas.analysis import (
 )
 from app.services.analysis import AnalysisService
 from app.services.storage import StorageService
+from app.services.storage_quota import StorageQuotaService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["analyses"])
+
+_quota_service = StorageQuotaService()
+
+
+def _raise_if_storage_full(quota_status: str, message: str | None) -> None:
+    """Raise 507 if storage is full. HTTPException used here to keep it in scope."""
+    if quota_status == "full":
+        raise HTTPException(
+            status_code=507,
+            detail={"error": {"code": "STORAGE_FULL", "message": message}},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -174,14 +186,16 @@ async def create_analysis(
     body: AnalysisCreate,
     user: CurrentUser = Depends(get_current_user),
     service: AnalysisService = Depends(_get_service),
+    db: AsyncSession = Depends(get_db),
 ) -> AnalysisCreateResponse:
-    """Create a new analysis record and return a TUS signed upload URL.
+    """Create a new analysis record and return a signed upload URL.
 
-    The client uses the returned ``upload_url`` to upload the video directly
-    to Supabase Storage (TUS protocol). FastAPI never handles video bytes.
-
-    After uploading, call ``POST /analyses/{id}/start`` to begin processing.
+    Checks storage quota before proceeding (FR-UPLD-13). Rejects with 507
+    when storage is full; warns at 95%.
     """
+    quota = await _quota_service.check(db)
+    _raise_if_storage_full(quota.status, quota.message)
+
     result = await service.create_analysis(
         user_id=user["id"],
         exercise_type=body.exercise_type,
