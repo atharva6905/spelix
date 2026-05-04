@@ -751,6 +751,23 @@ async def _run_coaching_graph(
             stop=None,
         )
 
+    # NFR-RELI-09: wire PostgresSaver checkpointer when DATABASE_URL is available.
+    # Falls back gracefully to None (no checkpointing) if the package or DB URL
+    # is absent so that the graph still runs without crash-recovery support.
+    _checkpointer = None
+    _db_url = os.environ.get("DATABASE_URL")
+    if _db_url:
+        try:
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+            _checkpointer = AsyncPostgresSaver.from_conn_string(_db_url)
+        except Exception:
+            logger.warning(
+                "NFR-RELI-09: PostgresSaver init failed for %s — continuing without checkpointer",
+                analysis_id,
+                exc_info=True,
+            )
+
     try:
         final_state, trace_payload, coaching_output = await run_coaching_graph(
             analysis_id=analysis_id,
@@ -770,6 +787,7 @@ async def _run_coaching_graph(
             fg_svc=fg_svc,
             pubsub_redis=pubsub_redis,
             reasoner_llm=reasoner_llm,
+            checkpointer=_checkpointer,
         )
     finally:
         await pubsub_redis.aclose()

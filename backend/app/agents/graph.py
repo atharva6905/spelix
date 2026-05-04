@@ -111,6 +111,7 @@ def build_deterministic_graph(
     cove_svc: Any,
     fg_svc: Any,
     pubsub_redis: Any,
+    checkpointer: Any = None,
 ) -> Any:
     """Build + compile the deterministic coaching graph.
 
@@ -189,7 +190,7 @@ def build_deterministic_graph(
     builder.add_edge("safety_filter", "faithfulness_gate")
     builder.add_edge("faithfulness_gate", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +209,7 @@ def build_adaptive_graph(
     fg_svc: Any,
     pubsub_redis: Any,
     reasoner_llm: Any,
+    checkpointer: Any = None,
 ) -> Any:
     """Build + compile the adaptive-reasoning graph (FR-AICP-19).
 
@@ -390,7 +392,7 @@ def build_adaptive_graph(
     builder.add_edge("safety_filter", "faithfulness_gate")
     builder.add_edge("faithfulness_gate", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)
 
 
 async def run_coaching_graph(
@@ -412,6 +414,7 @@ async def run_coaching_graph(
     fg_svc: Any,
     pubsub_redis: Any,
     reasoner_llm: Any | None = None,
+    checkpointer: Any | None = None,
 ) -> tuple[AgentState, dict[str, Any], Any]:
     """Entry-point called from the worker.
 
@@ -448,6 +451,7 @@ async def run_coaching_graph(
             fg_svc=fg_svc,
             pubsub_redis=pubsub_redis,
             reasoner_llm=reasoner_llm,
+            checkpointer=checkpointer,
         )
     else:
         graph = build_deterministic_graph(
@@ -459,6 +463,7 @@ async def run_coaching_graph(
             cove_svc=cove_svc,
             fg_svc=fg_svc,
             pubsub_redis=pubsub_redis,
+            checkpointer=checkpointer,
         )
 
     config = run_config_for_analysis(
