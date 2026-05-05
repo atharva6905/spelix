@@ -1,10 +1,26 @@
 @import "tailwindcss";
+@import "./landing.css";
 
 @theme {
-  /* Brand — landing page only. Product routes keep existing slate/blue palette. */
-  --color-brand-primary:       #d5ff45;
-  --color-brand-primary-soft:  #e8ff9c;
-  --color-brand-primary-glow:  rgba(213, 255, 69, 0.2);
+  /* ── Accent (shared — landing + product) ── */
+  --color-brand-primary:      #d5ff45;
+  --color-brand-primary-soft: rgba(213, 255, 69, 0.09);
+  --color-brand-primary-bdr:  rgba(213, 255, 69, 0.25);
+  --color-brand-primary-glow: rgba(213, 255, 69, 0.06);
+
+  /* ── Landing page — dark editorial palette ── */
+  /* Scoped via .landing-root on LandingPage root div */
+  --color-landing-bg:          #141210;
+  --color-landing-bg-2:        #1c1917;
+  --color-landing-surface:     #211f1c;
+  --color-landing-surface-hi:  #2a2722;
+  --color-landing-text:        #ede8df;
+  --color-landing-text-dim:    #a09080;
+  --color-landing-text-muted:  #504840;
+  --color-landing-border:      rgba(255, 255, 255, 0.07);
+  --color-landing-border-vis:  rgba(255, 255, 255, 0.12);
+
+  /* ── Product routes — slate/blue palette (untouched) ── */
   --color-surface-page:        #fafafa;
   --color-surface-dark:        #121212;
   --color-ink-primary:         #000000;
@@ -13,10 +29,21 @@
   --color-ink-on-dark-muted:   #ebebeb;
   --color-border-subtle:       rgba(0, 0, 0, 0.16);
 
-  /* Typography */
+  /* ── Typography ── */
   --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-sans:    "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-landing-serif: Georgia, "Times New Roman", serif;
+  --font-landing-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Landing container width */
+  /* ── Layout ── */
   --container-landing: 1128px;
+
+  /* ── Landing breakpoint ── */
+  --breakpoint-landing-sm: 880px;
+}
+
+/* Landing root — isolates dark palette from product routes */
+.landing-root {
+  background: var(--color-landing-bg);
+  color: var(--color-landing-text);
 }

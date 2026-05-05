@@ -1,0 +1,220 @@
+/* ── Keyframes ── */
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: .055; }
+  50%      { opacity: .08; }
+}
+
+@keyframes sway {
+  0%, 100% { transform: translateY(-50%) rotate(-2deg); }
+  50%      { transform: translateY(-50%) rotate(2deg); }
+}
+
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes dotPulse {
+  0%   { transform: translate(-50%, -50%) scale(1); }
+  50%  { transform: translate(-50%, -50%) scale(1.8); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* ── Hero entrance ── */
+
+.landing-hero-enter {
+  opacity: 0;
+  animation: fadeUp 650ms ease forwards;
+}
+.he-0 { animation-delay: 0ms; }
+.he-1 { animation-delay: 120ms; }
+.he-2 { animation-delay: 240ms; }
+.he-3 { animation-delay: 360ms; }
+.he-4 { animation-delay: 480ms; }
+.he-5 { animation-delay: 560ms; }
+
+/* ── Scroll reveal ── */
+
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity .6s ease-out, transform .6s ease-out;
+}
+.landing-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+.landing-reveal > * {
+  transition: opacity .6s ease-out, transform .6s ease-out;
+}
+
+/* ── Nav scroll state ── */
+
+.landing-nav {
+  transition: background .3s ease, border-color .3s ease, backdrop-filter .3s ease;
+}
+.landing-nav.is-scrolled {
+  background: rgba(20, 18, 16, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+/* ── Process step rule ── */
+
+.landing-step-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--color-brand-primary);
+  opacity: .55;
+  width: 0;
+  transition: width .5s ease-out;
+}
+.landing-step.is-in .landing-step-rule {
+  width: 100%;
+}
+
+/* ── Spark bars (report dimension hover) ── */
+
+.landing-spark-bar {
+  height: 0;
+  transition: height .35s cubic-bezier(.2, .8, .2, 1);
+}
+.landing-dim:hover .landing-spark-bar {
+  height: var(--spark-h, 50%);
+}
+.landing-spark {
+  opacity: 0;
+  transition: opacity .25s ease;
+}
+.landing-dim:hover .landing-spark {
+  opacity: 1;
+}
+
+/* ── Dimension card hover ── */
+
+.landing-dim {
+  transition: background .2s ease, border-top-color .15s ease;
+}
+.landing-dim:hover {
+  background: var(--color-landing-surface-hi);
+  border-top-color: var(--color-brand-primary);
+}
+
+/* ── Snippet cursor ── */
+
+.landing-snippet-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--color-brand-primary);
+  transform: translateY(3px);
+  margin-left: 1px;
+  animation: blink 1s steps(2) infinite;
+}
+
+/* ── Snippet citation fade ── */
+
+.landing-snippet-cite {
+  opacity: 0;
+  transition: opacity .5s ease;
+}
+.landing-snippet-cite.is-visible {
+  opacity: 1;
+}
+
+/* ── Stat suffix reveal ── */
+
+.landing-stat-suffix {
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.landing-stat.is-done .landing-stat-suffix {
+  opacity: 1;
+}
+
+/* ── Sticky bar ── */
+
+.landing-sticky {
+  transform: translateY(60px);
+  transition: transform .3s ease-out;
+}
+.landing-sticky.is-on {
+  transform: translateY(0);
+}
+
+/* ── Card tag hover ── */
+
+.landing-card-tag {
+  transition: color .3s ease;
+}
+.landing-card:hover .landing-card-tag {
+  color: var(--color-brand-primary);
+}
+
+/* ── Grain overlay ── */
+
+.landing-grain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 300;
+  opacity: .025;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ── Selection ── */
+
+.landing-root ::selection {
+  background: var(--color-brand-primary);
+  color: #141210;
+}
+
+/* ── Reduced motion ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-hero-enter,
+  .landing-reveal,
+  .landing-nav,
+  .landing-step-rule,
+  .landing-spark-bar,
+  .landing-spark,
+  .landing-dim,
+  .landing-snippet-cursor,
+  .landing-snippet-cite,
+  .landing-stat-suffix,
+  .landing-sticky,
+  .landing-card-tag {
+    animation: none !important;
+    transition: none !important;
+  }
+  .landing-hero-enter {
+    opacity: 1;
+  }
+  .landing-reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .landing-step-rule {
+    width: 100% !important;
+  }
+}
+
+/* ── Responsive: hide hero bg elements below 880px ── */
+
+@media (max-width: 880px) {
+  .landing-hero-skel,
+  .landing-barpath {
+    display: none;
+  }
+}
