@@ -82,6 +82,47 @@ async def test_create_flag_rejects_unknown_key():
     repo.create.assert_not_awaited()
 
 
+async def test_get_listing_skips_underscore_keys() -> None:
+    """Keys starting with _ (comment/metadata) are skipped in the listing."""
+    from unittest.mock import MagicMock
+
+    mock_config = MagicMock()
+    mock_config.version = "v1"
+    # Return a section with one underscore key (should be skipped) and one valid key
+    mock_config.get_section.return_value = {
+        "_comment": "This is a comment",
+        "some_threshold": {"value": 5.0, "unit": "degrees"},
+        "_metadata": {"author": "test"},
+    }
+
+    svc = ThresholdFlagService(repo=AsyncMock(), config=mock_config)
+    listing = svc.get_listing()
+
+    for rows in listing.sections.values():
+        for row in rows:
+            assert not row.key.startswith("_")
+
+
+async def test_get_listing_skips_non_dict_entries() -> None:
+    """Entries that are not dicts or lack 'value' key are skipped."""
+    from unittest.mock import MagicMock
+
+    mock_config = MagicMock()
+    mock_config.version = "v1"
+    mock_config.get_section.return_value = {
+        "valid_key": {"value": 5.0, "unit": "degrees"},
+        "bad_string_entry": "not a dict",
+        "bad_list_entry": [1, 2, 3],
+        "missing_value_dict": {"unit": "degrees"},  # no 'value' key
+    }
+
+    svc = ThresholdFlagService(repo=AsyncMock(), config=mock_config)
+    listing = svc.get_listing()
+
+    for rows in listing.sections.values():
+        assert all(row.key == "valid_key" for row in rows)
+
+
 async def test_resolve_flag_updates_status_and_resolver():
     repo = AsyncMock()
     flag_id = uuid4()

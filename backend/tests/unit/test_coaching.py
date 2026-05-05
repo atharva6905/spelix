@@ -1649,3 +1649,117 @@ class TestSourceLabelsInPrompt:
         )
         assert "[COACHING]" not in prompt, "No [COACHING] label in papers_only_fallback"
         assert "[RESEARCH]" in prompt, "papers_rag items must have [RESEARCH] label"
+
+
+# ---------------------------------------------------------------------------
+# Additional branch-coverage tests for coaching.py missed lines
+# ---------------------------------------------------------------------------
+
+
+class TestCoachingBranchCoverage:
+    """Extra tests targeting specific missed branches (lines 200-201, 298, 535, 623, 649-656)."""
+
+    def test_build_user_prompt_keyerror_in_thresholds_falls_back_to_empty(self) -> None:
+        """When thresholds.all_for_exercise raises KeyError, threshold_summary defaults to '{}' (lines 200-201)."""
+
+        class _RaisingThresholds:
+            version = "test"
+            def all_for_exercise(self, exercise_type: str) -> dict:
+                raise KeyError(exercise_type)
+
+        prompt = _build_user_prompt(
+            exercise_type="unknown_exercise",
+            exercise_variant=None,
+            rep_metrics=[{"rep_number": 1, "depth_angle": 90.0}],
+            confidence_score=0.80,
+            thresholds=_RaisingThresholds(),
+        )
+        # Prompt must still be built — just without threshold data
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+    def test_is_retryable_returns_false_for_generic_error(self) -> None:
+        """_is_retryable returns False for non-rate-limit, non-timeout errors (line 298)."""
+        from app.services.coaching import _is_retryable
+
+        generic_err = ValueError("some random error")
+        assert _is_retryable(generic_err) is False
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_streaming_raises_when_instructor_client_none(self) -> None:
+        """generate_coaching_streaming raises ValueError when _instructor_client is None (line 535)."""
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = None
+
+            service = CoachingService(anthropic_client=MagicMock())
+            # Force _instructor_client to None to simulate the guarded path
+            service._instructor_client = None
+
+            with pytest.raises(ValueError, match="anthropic_client=None"):
+                await service.generate_coaching_streaming(
+                    exercise_type="squat",
+                    exercise_variant=None,
+                    rep_metrics=[],
+                    confidence_score=0.80,
+                    thresholds=ThresholdConfig(),
+                    pubsub_redis=None,
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_streaming_raises_when_final_result_none(self) -> None:
+        """When create_partial yields nothing, ValueError is raised (line 623)."""
+        mock_client = MagicMock()
+
+        async def mock_create_partial_empty(**kwargs: Any) -> Any:
+            return
+            yield  # make it an async generator
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial_empty
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            with pytest.raises(ValueError, match="yielded no results"):
+                await service.generate_coaching_streaming(
+                    exercise_type="bench",
+                    exercise_variant="flat",
+                    rep_metrics=_make_sample_rep_metrics(),
+                    confidence_score=0.85,
+                    thresholds=ThresholdConfig(),
+                    pubsub_redis=None,
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_coaching_streaming_raises_non_retryable_error(self) -> None:
+        """Non-retryable, non-auth errors are logged and re-raised (lines 649-656)."""
+        import anthropic
+        mock_client = MagicMock()
+
+        non_retryable_error = anthropic.BadRequestError(
+            message="Bad request",
+            response=MagicMock(status_code=400),
+            body={"error": {"type": "invalid_request_error", "message": "Bad request"}},
+        )
+
+        async def mock_create_partial_bad_request(**kwargs: Any) -> Any:
+            raise non_retryable_error
+            yield
+
+        mock_instructor = MagicMock()
+        mock_instructor.chat.completions.create_partial = mock_create_partial_bad_request
+
+        with patch("app.services.coaching.instructor") as mock_instructor_module:
+            mock_instructor_module.from_anthropic.return_value = mock_instructor
+
+            service = CoachingService(anthropic_client=mock_client)
+            with pytest.raises(anthropic.BadRequestError):
+                await service.generate_coaching_streaming(
+                    exercise_type="deadlift",
+                    exercise_variant="conventional",
+                    rep_metrics=_make_sample_rep_metrics(),
+                    confidence_score=0.85,
+                    thresholds=ThresholdConfig(),
+                    pubsub_redis=None,
+                )

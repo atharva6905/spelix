@@ -219,3 +219,57 @@ class TestFaithfulnessGateService:
         assert result.flagged_for_review is True
         assert result.reasoning == "no_retrieved_contexts"
         mock_instructor_client.chat.completions.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_issues_and_recommended_cues_included_in_prompt(self) -> None:
+        """When coaching_output has issues and recommended_cues, both appear in the prompt."""
+        from app.schemas.coaching import Issue
+
+        captured: list = []
+
+        async def _capture_call(**kwargs):
+            captured.append(kwargs.get("messages", []))
+            return FaithfulnessScore(
+                score=0.9,
+                reasoning="all supported",
+                unsupported_claims=[],
+            )
+
+        anthropic_client = MagicMock()
+        mock_instructor_client = MagicMock()
+        mock_instructor_client.chat.completions.create = AsyncMock(side_effect=_capture_call)
+
+        with patch("instructor.from_anthropic", return_value=mock_instructor_client):
+            svc = FaithfulnessGateService(anthropic_client=anthropic_client)
+
+        svc._instructor_client = mock_instructor_client
+
+        output_with_issues = CoachingOutput(
+            summary="Good depth.",
+            strengths=["Good bracing"],
+            issues=[
+                Issue(
+                    rep_number=1,
+                    joint="knee",
+                    description="Valgus collapse noted",
+                    severity="Medium",
+                )
+            ],
+            correction_plan=["Drive knees out"],
+            recommended_cues=["Knees out cue"],
+            disclaimer=MANDATORY_DISCLAIMER,
+            raw_prompt_tokens=100,
+            raw_completion_tokens=200,
+        )
+
+        result = await svc.evaluate(
+            coaching_output=output_with_issues,
+            retrieved_contexts=_make_contexts(2),
+        )
+
+        assert result.score == pytest.approx(0.9)
+        # Verify the prompt contained issue and cue information
+        assert len(captured) == 1
+        user_prompt_text = captured[0][0]["content"]
+        assert "Valgus collapse" in user_prompt_text
+        assert "Knees out cue" in user_prompt_text

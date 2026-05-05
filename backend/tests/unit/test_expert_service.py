@@ -317,3 +317,66 @@ async def test_set_golden_label_can_unset_flag():
 
     assert mock_analysis.is_golden_dataset is False
     assert result["is_golden_dataset"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_review_queue_first_run_calls_get_first_run_analyses():
+    """queue_type='first_run' calls _get_first_run_analyses (covers line 51, 165-173)."""
+    service, analysis_repo, review_repo, _ = _make_service()
+    # _get_first_run_analyses calls list_all then filters by count=0
+    mock_analysis_no_annotations = _make_mock_analysis()
+    mock_analysis_with_annotations = _make_mock_analysis()
+
+    analysis_repo.list_all.return_value = [
+        mock_analysis_no_annotations,
+        mock_analysis_with_annotations,
+    ]
+    # First analysis has 0 annotations, second has 2
+    review_repo.count_by_analysis.side_effect = [
+        0,  # for the inner loop in _get_first_run_analyses
+        2,  # for the inner loop in _get_first_run_analyses
+        0,  # for the outer loop in get_review_queue (annotation_count)
+    ]
+
+    items = await service.get_review_queue(queue_type="first_run", limit=20, offset=0)
+
+    # list_all should be called (for the 200-limit scan in _get_first_run_analyses)
+    analysis_repo.list_all.assert_awaited()
+    # Only the analysis with 0 annotations passes the filter
+    assert len(items) == 1
+    assert items[0].analysis_id == mock_analysis_no_annotations.id
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_detail_includes_rep_metrics_and_coaching_result():
+    """When analysis has rep_metrics and coaching_result, they appear in the detail (lines 85-86, 94-95)."""
+    service, analysis_repo, _, _ = _make_service()
+
+    # Create rep metrics with real values
+    mock_rm = MagicMock()
+    mock_rm.rep_index = 0
+    mock_rm.metrics_json = {"depth_angle": 92.0}
+    mock_rm.confidence_score = 0.88
+
+    # Create coaching result
+    mock_cr = MagicMock()
+    mock_cr.structured_output_json = {"summary": "good squat"}
+    mock_cr.agent_trace_json = {"mode": "deterministic"}
+
+    mock_analysis = _make_mock_analysis(
+        rep_metrics=[mock_rm],
+        coaching_result=mock_cr,
+    )
+    analysis_repo.get_by_id_with_relations.return_value = mock_analysis
+
+    detail = await service.get_analysis_detail(mock_analysis.id)
+
+    assert detail is not None
+    # rep_metrics should be populated
+    assert len(detail.rep_metrics) == 1
+    assert detail.rep_metrics[0]["rep_index"] == 0
+    assert detail.rep_metrics[0]["metrics_json"] == {"depth_angle": 92.0}
+    # coaching_result should be populated
+    assert detail.coaching_result is not None
+    assert detail.coaching_result["structured_output_json"] == {"summary": "good squat"}
+    assert detail.coaching_result["agent_trace_json"] == {"mode": "deterministic"}

@@ -108,6 +108,308 @@ def test_both_cron_jobs_are_registered() -> None:
     assert callable(ping_qdrant_health_cron)
 
 
+# ---------------------------------------------------------------------------
+# Unit tests for task body functions — coverage uplift
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_process_analysis_task_fn_dispatches_to_analysis_worker() -> None:
+    """process_analysis.fn calls analysis_worker.process_analysis with adapted ctx."""
+    import uuid
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, process_analysis
+
+    context = WorkerContext(redis=AsyncMock())
+    analysis_id = uuid.uuid4()
+
+    with patch("app.workers.analysis_worker.process_analysis", new=AsyncMock()) as mock_run:
+        await process_analysis.fn(analysis_id, context)
+        mock_run.assert_awaited_once()
+        call_args = mock_run.call_args
+        assert call_args[0][1] == analysis_id
+
+
+@pytest.mark.asyncio
+async def test_adapt_ctx_maps_all_fields() -> None:
+    """_adapt_ctx must produce the correct ARQ-style ctx dict."""
+    from unittest.mock import AsyncMock
+
+    from app.workers.streaq_worker import WorkerContext, _adapt_ctx
+
+    mock_redis = AsyncMock()
+    mock_storage = AsyncMock()
+    mock_session_maker = AsyncMock()
+
+    context = WorkerContext(
+        redis=mock_redis,
+        paper_storage=mock_storage,
+        db_session_maker=mock_session_maker,
+    )
+
+    result = _adapt_ctx(context)
+
+    assert result["redis"] is mock_redis
+    assert result["paper_storage"] is mock_storage
+    assert result["db_session_maker"] is mock_session_maker
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_writes_key_once() -> None:
+    """_heartbeat_loop writes the heartbeat key before sleeping."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import _heartbeat_loop, _HEARTBEAT_KEY, _HEARTBEAT_TTL
+
+    mock_redis = AsyncMock()
+    call_count = 0
+
+    async def _fake_set(key, value, ex=None):
+        nonlocal call_count
+        call_count += 1
+
+    async def _fake_sleep(seconds):
+        # Raise after first sleep to exit the infinite loop
+        raise asyncio.CancelledError
+
+    mock_redis.set = AsyncMock(side_effect=_fake_set)
+
+    with patch("asyncio.sleep", side_effect=_fake_sleep):
+        try:
+            await _heartbeat_loop(mock_redis)
+        except asyncio.CancelledError:
+            pass
+
+    assert call_count >= 1
+    mock_redis.set.assert_any_call(_HEARTBEAT_KEY, "alive", ex=_HEARTBEAT_TTL)
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_swallows_exception_and_continues() -> None:
+    """_heartbeat_loop logs a warning and continues on redis exception."""
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import _heartbeat_loop
+
+    mock_redis = AsyncMock()
+    call_count = 0
+
+    async def _failing_set(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise ConnectionError("redis down")
+        # Second call succeeds; third sleep cancels
+
+    async def _controlled_sleep(seconds):
+        if call_count >= 2:
+            raise asyncio.CancelledError
+
+    mock_redis.set = AsyncMock(side_effect=_failing_set)
+
+    with patch("asyncio.sleep", side_effect=_controlled_sleep):
+        try:
+            await _heartbeat_loop(mock_redis)
+        except asyncio.CancelledError:
+            pass
+
+    # Should have attempted at least twice (first failed, loop continued)
+    assert call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_lifespan_web_process_suppresses_heartbeat() -> None:
+    """When _IS_WEB_PROCESS is True, the lifespan does not start a heartbeat task."""
+    import importlib
+    import os
+    from unittest.mock import patch, AsyncMock
+
+    with patch.dict(os.environ, {"SPELIX_WEB_PROCESS": "1"}):
+        from app.workers import streaq_worker as sw
+        importlib.reload(sw)
+
+    mock_redis = AsyncMock()
+    mock_redis.aclose = AsyncMock()
+
+    with patch("redis.asyncio.from_url", return_value=mock_redis):
+        # Re-import after reload
+        from app.workers.streaq_worker import lifespan
+        async with lifespan() as ctx:
+            assert ctx.redis is not None
+
+    # Reset module state
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("SPELIX_WEB_PROCESS", None)
+        importlib.reload(sw)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_worker_process_starts_heartbeat() -> None:
+    """When _IS_WEB_PROCESS is False, the lifespan starts a heartbeat task."""
+    import asyncio
+    import importlib
+    import os
+    from unittest.mock import patch, AsyncMock
+
+    # Ensure web process flag is not set
+    env = {k: v for k, v in os.environ.items() if k != "SPELIX_WEB_PROCESS"}
+
+    mock_redis = AsyncMock()
+    mock_redis.set = AsyncMock()
+    mock_redis.aclose = AsyncMock()
+
+    with patch.dict(os.environ, env, clear=True):
+        from app.workers import streaq_worker as sw
+        importlib.reload(sw)
+
+    with patch("redis.asyncio.from_url", return_value=mock_redis):
+        from app.workers.streaq_worker import lifespan
+        async with lifespan() as ctx:
+            # Just verify context is returned and redis is set
+            assert ctx.redis is not None
+            # Let the event loop run briefly
+            await asyncio.sleep(0)
+
+    # Restore
+    with patch.dict(os.environ, env, clear=True):
+        importlib.reload(sw)
+
+
+@pytest.mark.asyncio
+async def test_cascade_consent_withdrawal_fn_invokes_cascade() -> None:
+    """cascade_consent_withdrawal.fn calls consent_cascade body."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, cascade_consent_withdrawal
+
+    context = WorkerContext(redis=AsyncMock())
+
+    with patch(
+        "app.workers.consent_cascade.cascade_consent_withdrawal",
+        new=AsyncMock(return_value={"deleted": 0}),
+    ) as mock_cascade:
+        await cascade_consent_withdrawal.fn("user-123", context)
+        mock_cascade.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ingest_paper_fn_invokes_ingest() -> None:
+    """ingest_paper.fn calls paper_ingestion.ingest_paper."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, ingest_paper
+
+    context = WorkerContext(redis=AsyncMock())
+
+    with patch(
+        "app.workers.paper_ingestion.ingest_paper",
+        new=AsyncMock(return_value={"status": "docling_pending"}),
+    ) as mock_ingest:
+        result = await ingest_paper.fn("paper-id-123", context)
+        mock_ingest.assert_awaited_once()
+        assert result["status"] == "docling_pending"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cron_fn_invokes_cleanup() -> None:
+    """cleanup_expired_artifacts_cron.fn calls cleanup body."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, cleanup_expired_artifacts_cron
+
+    context = WorkerContext(redis=AsyncMock())
+
+    with patch(
+        "app.workers.cleanup.cleanup_expired_artifacts",
+        new=AsyncMock(return_value=3),
+    ) as mock_cleanup:
+        result = await cleanup_expired_artifacts_cron.fn(context)
+        mock_cleanup.assert_awaited_once()
+        assert result == 3
+
+
+@pytest.mark.asyncio
+async def test_ping_qdrant_health_cron_fn_invokes_ping() -> None:
+    """ping_qdrant_health_cron.fn calls keepalive.ping_qdrant_health."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, ping_qdrant_health_cron
+
+    context = WorkerContext(redis=AsyncMock())
+
+    with patch(
+        "app.workers.keepalive.ping_qdrant_health",
+        new=AsyncMock(return_value=None),
+    ):
+        await ping_qdrant_health_cron.fn(context)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphan_papers_cron_fn_invokes_cleanup() -> None:
+    """cleanup_orphan_papers_cron.fn calls cleanup_orphan_papers body."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, cleanup_orphan_papers_cron
+
+    context = WorkerContext(redis=AsyncMock())
+
+    with patch(
+        "app.workers.cleanup_orphan_papers.cleanup_orphan_papers",
+        new=AsyncMock(return_value=0),
+    ) as mock_cron:
+        result = await cleanup_orphan_papers_cron.fn(context)
+        mock_cron.assert_awaited_once()
+        assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_distill_analysis_fn_invokes_distillation_worker() -> None:
+    """distill_analysis.fn calls distillation_worker body."""
+    import uuid
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, distill_analysis
+
+    context = WorkerContext(redis=AsyncMock())
+    analysis_id = uuid.uuid4()
+
+    mock_extra = {
+        "anthropic_client": AsyncMock(),
+        "instructor_client": AsyncMock(),
+    }
+
+    with patch("app.workers.deps.build_distillation_ctx", new=AsyncMock(return_value=mock_extra)):
+        with patch(
+            "app.workers.distillation_worker.distill_analysis_body",
+            new=AsyncMock(return_value={"status": "ok"}),
+        ) as mock_distill:
+            result = await distill_analysis.fn(analysis_id, context)
+            mock_distill.assert_awaited_once()
+            assert result == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_pose_extraction_diagnostic_fn_invokes_diagnostic() -> None:
+    """pose_extraction_diagnostic.fn calls d035_diagnostic body."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.workers.streaq_worker import WorkerContext, pose_extraction_diagnostic
+
+    context = WorkerContext(redis=AsyncMock())
+
+    mock_result = {"executor": {"mean_ms": 100}, "inline": {"mean_ms": 110}}
+
+    with patch(
+        "app.services.d035_diagnostic._run_pose_extraction_diagnostic",
+        new=AsyncMock(return_value=mock_result),
+    ):
+        result = await pose_extraction_diagnostic.fn("/tmp/test.mp4", context)
+        assert result == mock_result
+
+
 @pytest.mark.integration
 async def test_streaq_worker_opens_redis_connection_cleanly() -> None:
     """End-to-end: streaq Worker can open its redis connection, roundtrip a

@@ -521,3 +521,173 @@ async def test_generate_correction_plan_stamps_degraded_mode_flag():
     )
 
     assert update["coaching_output"].degraded_mode is True
+
+
+@pytest.mark.asyncio
+async def test_retrieve_coach_brain_exception_returns_fallback():
+    """Exception in retrieve_coach_brain returns empty brain_contexts + papers_only_fallback."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+
+    async def boom(*_a, **_kw):
+        raise RuntimeError("qdrant unavailable")
+
+    retrieval_svc = SimpleNamespace(hybrid_search=boom)
+
+    update = await retrieve_coach_brain(state, retrieval_svc=retrieval_svc)
+
+    assert update == {"brain_contexts": [], "retrieval_source": "papers_only_fallback"}
+
+
+@pytest.mark.asyncio
+async def test_flag_form_deviation_keyerror_returns_empty():
+    """When thresholds.all_for_exercise raises KeyError, returns empty flagged list."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="unknown_exercise",
+        exercise_variant="x",
+        confidence_score=0.8,
+    )
+    state["rep_metrics"] = [{"rep_number": 1, "depth_angle": 98.0}]
+
+    class _RaisingThresholds:
+        def all_for_exercise(self, exercise_type: str):
+            raise KeyError(exercise_type)
+
+    update = await flag_form_deviation(state, thresholds=_RaisingThresholds())
+
+    assert update == {"flagged_deviations": []}
+
+
+@pytest.mark.asyncio
+async def test_flag_form_deviation_skips_non_numeric_metric():
+    """Metrics that can't be coerced to float are skipped (TypeError/ValueError branch)."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.8,
+    )
+    state["rep_metrics"] = [
+        {"rep_number": 1, "depth_angle": "not_a_number"},  # can't float() → skip
+        {"rep_number": 2, "depth_angle": 98.0},  # valid and above threshold
+    ]
+
+    update = await flag_form_deviation(state, thresholds=_FakeThresholds())
+
+    flagged = update["flagged_deviations"]
+    # Only rep 2 should be flagged (rep 1 skipped due to non-numeric)
+    rep_numbers = [f["rep_number"] for f in flagged]
+    assert 1 not in rep_numbers
+    assert 2 in rep_numbers
+
+
+@pytest.mark.asyncio
+async def test_compare_to_user_history_trend_improving():
+    """When oldest overall score is lower, trend should be improving."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+
+    # First entry (most recent) has score 7.5, last has 6.0 → delta = 1.5 → improving
+    recent = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            form_score_overall=7.5,
+            form_score_safety=8.0,
+            created_at="2026-04-15",
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            form_score_overall=6.0,
+            form_score_safety=6.5,
+            created_at="2026-04-10",
+        ),
+    ]
+    analysis_repo = SimpleNamespace(list_recent_by_user=AsyncMock(return_value=recent))
+
+    update = await compare_to_user_history(state, analysis_repo=analysis_repo)
+
+    summary = update["user_history_summary"]
+    assert "improving" in summary
+
+
+@pytest.mark.asyncio
+async def test_compare_to_user_history_trend_declining():
+    """When oldest overall score is higher, trend should be declining."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+
+    # First entry (most recent) score is lower than last → declining
+    recent = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            form_score_overall=5.0,
+            form_score_safety=5.5,
+            created_at="2026-04-15",
+        ),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            form_score_overall=6.5,
+            form_score_safety=7.0,
+            created_at="2026-04-10",
+        ),
+    ]
+    analysis_repo = SimpleNamespace(list_recent_by_user=AsyncMock(return_value=recent))
+
+    update = await compare_to_user_history(state, analysis_repo=analysis_repo)
+
+    summary = update["user_history_summary"]
+    assert "declining" in summary
+
+
+@pytest.mark.asyncio
+async def test_compare_to_user_history_no_scores_in_rows():
+    """When all rows have None form_score_overall, mean is not included in summary."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+    )
+
+    # Rows with no form scores at all
+    recent = [
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            exercise_type="squat",
+            form_score_overall=None,
+            form_score_safety=None,
+            created_at="2026-04-15",
+        ),
+    ]
+    analysis_repo = SimpleNamespace(list_recent_by_user=AsyncMock(return_value=recent))
+
+    update = await compare_to_user_history(state, analysis_repo=analysis_repo)
+
+    summary = update["user_history_summary"]
+    assert summary is not None
+    assert "1 recent squat" in summary
+    # Without scores, mean overall and mean safety are not present
+    assert "mean overall" not in summary

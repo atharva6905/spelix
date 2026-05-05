@@ -1321,3 +1321,226 @@ def test_is_degenerate_scoring_input_boundary_050_not_degenerate():
 def test_is_degenerate_scoring_input_good_input():
     from app.services.pipeline import _is_degenerate_scoring_input
     assert _is_degenerate_scoring_input([object()], 0.85) is False
+
+
+# ---------------------------------------------------------------------------
+# Additional branch-coverage tests for pipeline.py missed lines
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_rep_metrics_empty_returns_confidence_only() -> None:
+    """_aggregate_rep_metrics with empty rep_metrics returns dict with only confidence_score (line 217)."""
+    from app.services.pipeline import _aggregate_rep_metrics
+
+    result = _aggregate_rep_metrics([], [], session_confidence=0.72)
+    assert result == {"confidence_score": 0.72}
+
+
+def test_aggregate_rep_metrics_std_dev_computed_for_multi_rep() -> None:
+    """_aggregate_rep_metrics computes rep_duration_std and depth_angle_std when multiple reps (lines 233-235, 240-242)."""
+    from app.services.pipeline import _aggregate_rep_metrics
+
+    rm1 = RepMetrics(rep_index=0, start_frame=0, end_frame=10, metrics={"rep_duration_s": 1.0, "depth_angle": 90.0})
+    rm2 = RepMetrics(rep_index=1, start_frame=11, end_frame=20, metrics={"rep_duration_s": 1.5, "depth_angle": 85.0})
+
+    result = _aggregate_rep_metrics([rm1, rm2], [], session_confidence=0.85)
+
+    assert "rep_duration_std" in result
+    assert "depth_angle_std" in result
+    assert result["confidence_score"] == 0.85
+
+
+def test_aggregate_rep_metrics_skips_non_numeric_values() -> None:
+    """_aggregate_rep_metrics skips non-numeric metric values like strings (line 223->222)."""
+    from app.services.pipeline import _aggregate_rep_metrics
+
+    rm1 = RepMetrics(rep_index=0, start_frame=0, end_frame=10, metrics={"phase": "descent", "depth_angle": 90.0})
+
+    result = _aggregate_rep_metrics([rm1], [], session_confidence=0.80)
+    # "phase" is a string — it should be skipped
+    assert "phase" not in result
+    assert "depth_angle" in result
+
+
+@pytest.mark.asyncio
+async def test_download_video_calls_storage_and_writes_file(tmp_path) -> None:
+    """download_video calls storage client and writes data to local path (lines 158-162)."""
+    from app.services.pipeline import download_video
+
+    video_data = b"fake video bytes"
+
+    mock_storage_client = MagicMock()
+    mock_storage_client.storage.from_("videos").download = AsyncMock(return_value=video_data)
+    # Properly chain the mock calls
+    mock_from_result = AsyncMock()
+    mock_from_result.download = AsyncMock(return_value=video_data)
+    mock_storage_client.storage.from_ = MagicMock(return_value=mock_from_result)
+
+    local_path = str(tmp_path / "test_video.mp4")
+
+    result = await download_video(
+        storage_client=mock_storage_client,
+        bucket="videos",
+        video_path="artifacts/123/test.mp4",
+        local_path=local_path,
+    )
+
+    assert result == local_path
+    import os
+    assert os.path.isfile(local_path)
+    with open(local_path, "rb") as f:
+        assert f.read() == video_data
+
+
+@pytest.mark.asyncio
+async def test_local_video_path_used_when_no_storage_client_and_file_exists(tmp_path) -> None:
+    """When storage_client=None and video_path is a local file, video_local is set to it (line 364)."""
+    # Create a real local video file so os.path.isfile returns True
+    local_video = str(tmp_path / "local_video.mp4")
+    with open(local_video, "wb") as f:
+        f.write(b"fake video")
+
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    analysis.video_path = local_video  # set as local path
+
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value=str(tmp_path)),
+        # Do NOT mock os.path.isfile — we use a real file
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,  # no storage client
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+        )
+
+    assert isinstance(result, PipelineResult)
+
+
+@pytest.mark.asyncio
+async def test_storage_client_with_video_path_downloads_and_deletes(tmp_path) -> None:
+    """When storage_client is provided and video_path is set, video is downloaded and deleted (lines 358-362, 815-818)."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = _make_angle_timeseries()
+
+    analysis = _make_analysis()
+    analysis.video_path = "storage/path/video.mp4"  # triggers download
+
+    # Mock the storage client
+    fake_video_data = b"fake video content"
+    mock_from = MagicMock()
+    mock_from.download = AsyncMock(return_value=fake_video_data)
+    mock_from.remove = AsyncMock(return_value=None)
+    storage_mock = MagicMock()
+    storage_mock.storage.from_ = MagicMock(return_value=mock_from)
+
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    video_local = str(tmp_path / f"{_ANALYSIS_ID}.mp4")
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps),
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value=str(tmp_path / "annotated.mp4")),
+        patch(f"{_PKG}.generate_angle_plot", return_value=str(tmp_path / "angles.png")),
+        patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock, return_value="ok"),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value=str(tmp_path)),
+        patch("os.path.isfile", return_value=False),
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=storage_mock,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+        )
+
+    assert isinstance(result, PipelineResult)
+    # Storage download should have been called
+    mock_from.download.assert_called_once_with("storage/path/video.mp4")
+    # Storage delete should have been called for source video
+    mock_from.remove.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bench_exercise_uses_elbow_angle_for_rep_detection() -> None:
+    """Bench exercise uses elbow_angle (not hip_angle) for primary rep detection series (line 566)."""
+    landmarks = _make_landmarks()
+    reps = _make_reps()
+    rep_metrics = _make_rep_metrics(reps)
+    angle_ts = {
+        "hip_angle": np.linspace(160, 80, _NUM_FRAMES, dtype=np.float32),
+        "elbow_angle": np.linspace(160, 90, _NUM_FRAMES, dtype=np.float32),
+    }
+
+    analysis = _make_analysis()
+    analysis.exercise_type = "bench"  # bench triggers elbow_angle primary key
+    repo = AsyncMock()
+    rep_metric_repo = AsyncMock()
+    redis = MagicMock()
+    write_heartbeat = AsyncMock()
+
+    with (
+        patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
+        patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
+        patch(f"{_PKG}.compute_angle_timeseries", return_value=angle_ts),
+        patch(f"{_PKG}.detect_reps", return_value=reps) as mock_detect_reps,
+        patch(f"{_PKG}.extract_rep_metrics", return_value=rep_metrics),
+        patch(f"{_PKG}.compute_session_confidence", return_value=0.8),
+        patch(f"{_PKG}.compute_bar_path_from_landmarks", return_value=_make_bar_path()),
+        patch(f"{_PKG}.generate_annotated_video", return_value="/tmp/annotated.mp4"),
+        patch(f"{_PKG}.generate_angle_plot", return_value="/tmp/angles.png"),
+        patch(f"{_PKG}.upload_artifact", new_callable=AsyncMock),
+        patch(f"{_PKG}.get_artifact_storage_path", side_effect=lambda aid, fn: f"artifacts/{aid}/{fn}"),
+        patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
+        patch("os.path.isfile", return_value=False),
+    ):
+        result = await run_cv_pipeline(
+            analysis=analysis,
+            repo=repo,
+            rep_metric_repo=rep_metric_repo,
+            storage_client=None,
+            redis=redis,
+            write_heartbeat=write_heartbeat,
+        )
+
+    # detect_reps should have been called with the elbow_angle series
+    assert mock_detect_reps.call_count == 1
+    call_args = mock_detect_reps.call_args
+    primary_series_arg = call_args[0][0]  # first positional arg is the primary series
+    np.testing.assert_array_equal(primary_series_arg, angle_ts["elbow_angle"])

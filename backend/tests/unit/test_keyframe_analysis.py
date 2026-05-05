@@ -452,3 +452,184 @@ class TestClassifyExercise:
         svc = KeyframeAnalysisService(openai_client=None)
         with pytest.raises(ValueError):
             await svc.classify_exercise(frame_images_b64=[_TINY_JPEG_B64])
+
+    @pytest.mark.asyncio
+    async def test_classify_non_retryable_error_raises_immediately(self) -> None:
+        """Non-retryable exceptions in classify_exercise propagate without retry."""
+
+        mock_client = MagicMock()
+        value_error = ValueError("unexpected response format")
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=value_error)
+
+        sleep_count = 0
+
+        async def mock_sleep(seconds: float) -> None:
+            nonlocal sleep_count
+            sleep_count += 1
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+            with patch("app.services.keyframe_analysis.asyncio.sleep", side_effect=mock_sleep):
+                svc = KeyframeAnalysisService(openai_client=mock_client)
+                with pytest.raises(ValueError, match="unexpected response format"):
+                    await svc.classify_exercise(frame_images_b64=[_TINY_JPEG_B64])
+
+        # Should not retry on non-retryable errors
+        assert sleep_count == 0
+        assert mock_instructor.chat.completions.create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_classify_401_fails_immediately(self) -> None:
+        """401 auth error in classify_exercise → no retries."""
+        import openai
+
+        mock_client = MagicMock()
+        auth_error = openai.AuthenticationError(
+            message="Invalid API key",
+            response=MagicMock(status_code=401),
+            body={"error": {"message": "Invalid API key"}},
+        )
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=auth_error)
+
+        sleep_count = 0
+
+        async def mock_sleep(seconds: float) -> None:
+            nonlocal sleep_count
+            sleep_count += 1
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+            with patch("app.services.keyframe_analysis.asyncio.sleep", side_effect=mock_sleep):
+                svc = KeyframeAnalysisService(openai_client=mock_client)
+                with pytest.raises(openai.AuthenticationError):
+                    await svc.classify_exercise(frame_images_b64=[_TINY_JPEG_B64])
+
+        assert sleep_count == 0
+        assert mock_instructor.chat.completions.create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_classify_429_retries_with_backoff(self) -> None:
+        """429 rate limit in classify_exercise → retries 3 times then raises."""
+        import openai
+
+        mock_client = MagicMock()
+        rate_limit_error = openai.RateLimitError(
+            message="Rate limit exceeded",
+            response=MagicMock(status_code=429),
+            body={"error": {"message": "Rate limit exceeded"}},
+        )
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=rate_limit_error)
+
+        sleep_calls: list[float] = []
+
+        async def mock_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+            with patch("app.services.keyframe_analysis.asyncio.sleep", side_effect=mock_sleep):
+                svc = KeyframeAnalysisService(openai_client=mock_client)
+                with pytest.raises(openai.RateLimitError):
+                    await svc.classify_exercise(frame_images_b64=[_TINY_JPEG_B64])
+
+        assert sleep_calls == [1.0, 2.0, 4.0]
+        assert mock_instructor.chat.completions.create.call_count == 4
+
+
+# ---------------------------------------------------------------------------
+# _is_retryable helper — branch coverage
+# ---------------------------------------------------------------------------
+
+
+class TestIsRetryable:
+    def test_rate_limit_error_is_retryable(self) -> None:
+        import openai
+
+        from app.services.keyframe_analysis import _is_retryable
+
+        exc = openai.RateLimitError(
+            message="too many requests",
+            response=MagicMock(status_code=429),
+            body={},
+        )
+        assert _is_retryable(exc) is True
+
+    def test_api_status_529_is_retryable(self) -> None:
+        import openai
+
+        from app.services.keyframe_analysis import _is_retryable
+
+        exc = openai.APIStatusError(
+            message="Overloaded",
+            response=MagicMock(status_code=529),
+            body={},
+        )
+        assert _is_retryable(exc) is True
+
+    def test_api_status_500_is_not_retryable(self) -> None:
+        import openai
+
+        from app.services.keyframe_analysis import _is_retryable
+
+        exc = openai.APIStatusError(
+            message="Internal server error",
+            response=MagicMock(status_code=500),
+            body={},
+        )
+        assert _is_retryable(exc) is False
+
+    def test_timeout_error_is_retryable(self) -> None:
+        from app.services.keyframe_analysis import _is_retryable
+
+        assert _is_retryable(TimeoutError()) is True
+
+    def test_api_timeout_error_is_retryable(self) -> None:
+        import openai
+
+        from app.services.keyframe_analysis import _is_retryable
+
+        exc = openai.APITimeoutError(request=MagicMock())
+        assert _is_retryable(exc) is True
+
+    def test_value_error_is_not_retryable(self) -> None:
+        from app.services.keyframe_analysis import _is_retryable
+
+        assert _is_retryable(ValueError("nope")) is False
+
+
+class TestAnalyzeKeyframesNonRetryable:
+    @pytest.mark.asyncio
+    async def test_non_retryable_error_raises_immediately(self) -> None:
+        """Non-retryable exceptions in analyze_keyframes propagate without retry."""
+        mock_client = MagicMock()
+        value_error = ValueError("unexpected response format")
+
+        mock_instructor = AsyncMock()
+        mock_instructor.chat.completions.create = AsyncMock(side_effect=value_error)
+
+        sleep_count = 0
+
+        async def mock_sleep(seconds: float) -> None:
+            nonlocal sleep_count
+            sleep_count += 1
+
+        with patch("app.services.keyframe_analysis.instructor") as mock_mod:
+            mock_mod.from_openai.return_value = mock_instructor
+            with patch("app.services.keyframe_analysis.asyncio.sleep", side_effect=mock_sleep):
+                svc = KeyframeAnalysisService(openai_client=mock_client)
+                with pytest.raises(ValueError, match="unexpected response format"):
+                    await svc.analyze_keyframes(
+                        keyframes=_make_keyframes(1),
+                        exercise_type="squat",
+                        exercise_variant="high_bar",
+                        rep_metrics=_make_rep_metrics(1),
+                    )
+
+        assert sleep_count == 0
+        assert mock_instructor.chat.completions.create.call_count == 1

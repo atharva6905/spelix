@@ -49,3 +49,43 @@ class TestCreateAnalysisQuotaReject:
         # Just verify the service returns the right status
         assert full.status == "full"
         assert full.message == "Storage full — contact admin."
+
+
+class TestGetUsedBytes:
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_db_is_none(self, quota_service):
+        """_get_used_bytes returns 0 immediately when no DB session is provided."""
+        result = await quota_service._get_used_bytes(db=None)
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_queries_db_when_session_provided(self, quota_service):
+        """_get_used_bytes executes a SQL query when a real AsyncSession is injected."""
+        from unittest.mock import MagicMock
+
+        mock_row = MagicMock()
+        mock_row.scalar_one.return_value = 512_000_000
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_row)
+
+        result = await quota_service._get_used_bytes(db=mock_db)
+
+        assert result == 512_000_000
+        mock_db.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_check_uses_db_session_when_provided(self, quota_service):
+        """check() passes the db session through to _get_used_bytes."""
+        from unittest.mock import MagicMock
+
+        mock_row = MagicMock()
+        mock_row.scalar_one.return_value = 200_000_000
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=mock_row)
+
+        result = await quota_service.check(db=mock_db)
+
+        assert result.status == "ok"
+        assert result.used_bytes == 200_000_000

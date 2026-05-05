@@ -425,3 +425,60 @@ async def test_returns_correct_count():
         count = await cleanup_expired_artifacts(make_ctx())
 
     assert count == 5
+
+
+# ---------------------------------------------------------------------------
+# _build_supabase_client: ImportError and general Exception branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_import_error_returns_none():
+    """_build_supabase_client returns None gracefully when supabase package is not installed."""
+    import builtins
+    import os
+
+    real_import = builtins.__import__
+
+    def _block_supabase(name, *args, **kwargs):
+        if name == "supabase":
+            raise ImportError("No module named 'supabase'")
+        return real_import(name, *args, **kwargs)
+
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://test.supabase.co", "SUPABASE_SERVICE_ROLE_KEY": "secret"}), \
+         patch("builtins.__import__", side_effect=_block_supabase):
+        from app.workers import cleanup
+        result = await cleanup._build_supabase_client()
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_exception_returns_none():
+    """_build_supabase_client returns None gracefully when acreate_client raises a runtime error."""
+    import os
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("connection refused")
+
+    # Patch supabase.acreate_client — the deferred import resolves to this attribute
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://test.supabase.co", "SUPABASE_SERVICE_ROLE_KEY": "secret"}), \
+         patch("supabase.acreate_client", new=_raise):
+        from app.workers import cleanup
+        result = await cleanup._build_supabase_client()
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_returns_none_when_env_missing():
+    """_build_supabase_client returns None and logs a warning when SUPABASE_URL or key is not set (lines 182-186)."""
+    import os
+    # Ensure both env vars are absent
+    env = {k: v for k, v in os.environ.items() if k not in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY")}
+
+    with patch.dict(os.environ, env, clear=True):
+        from app.workers import cleanup
+        result = await cleanup._build_supabase_client()
+
+    assert result is None

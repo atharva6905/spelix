@@ -269,3 +269,26 @@ def test_validator_scans_strengths_for_citation_markers() -> None:
     # The [5] in strengths is invalid — the validator must catch it.
     assert result.has_invalid_citations is True
     assert 5 in result.invalid_indices
+
+
+def test_validator_scans_recommended_cues_for_citation_markers() -> None:
+    """recommended_cues[] items with [N] markers must be scanned.
+
+    An out-of-range [9] marker ONLY in recommended_cues must be caught.
+    """
+    from app.services.validate_output import ValidateOutputTool
+
+    output = _make_coaching_output(
+        summary="Good squat session.",
+        issues=[
+            Issue(rep_number=1, joint="knee", description="No citation.", severity="Low"),
+        ],
+        correction_plan=["No citation here."],
+        recommended_cues=["Focus on knee drive [9]."],
+    )
+    # Only 2 citation blocks — [9] is out of range.
+    blocks = _make_citation_blocks(2)
+    result = ValidateOutputTool.validate(output, blocks)
+
+    assert result.has_invalid_citations is True
+    assert 9 in result.invalid_indices

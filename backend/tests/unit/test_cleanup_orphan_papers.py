@@ -238,3 +238,69 @@ def test_cron_wrapper_registered_in_streaq_worker() -> None:
     from app.workers.streaq_worker import cleanup_orphan_papers_cron
 
     assert callable(cleanup_orphan_papers_cron)
+
+
+# ---------------------------------------------------------------------------
+# _build_supabase_client: ImportError and general Exception branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_no_env_vars_returns_none() -> None:
+    """_build_supabase_client returns None when env vars are missing."""
+    import os
+
+    with patch.dict(os.environ, {}, clear=False):
+        # Unset both vars temporarily
+        saved_url = os.environ.pop("SUPABASE_URL", None)
+        saved_key = os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+        try:
+            from app.workers.cleanup_orphan_papers import _build_supabase_client
+
+            result = await _build_supabase_client()
+        finally:
+            if saved_url is not None:
+                os.environ["SUPABASE_URL"] = saved_url
+            if saved_key is not None:
+                os.environ["SUPABASE_SERVICE_ROLE_KEY"] = saved_key
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_import_error_returns_none() -> None:
+    """_build_supabase_client returns None gracefully when supabase package is not importable."""
+    import builtins
+    import os
+
+    real_import = builtins.__import__
+
+    def _block_supabase(name, *args, **kwargs):
+        if name == "supabase":
+            raise ImportError("No module named 'supabase'")
+        return real_import(name, *args, **kwargs)
+
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://test.supabase.co", "SUPABASE_SERVICE_ROLE_KEY": "secret"}), \
+         patch("builtins.__import__", side_effect=_block_supabase):
+        from app.workers import cleanup_orphan_papers
+
+        result = await cleanup_orphan_papers._build_supabase_client()
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_exception_returns_none() -> None:
+    """_build_supabase_client returns None gracefully when acreate_client raises a runtime error."""
+    import os
+
+    async def _raise(*args, **kwargs):
+        raise RuntimeError("network error")
+
+    with patch.dict(os.environ, {"SUPABASE_URL": "https://test.supabase.co", "SUPABASE_SERVICE_ROLE_KEY": "secret"}), \
+         patch("supabase.acreate_client", new=_raise):
+        from app.workers import cleanup_orphan_papers
+
+        result = await cleanup_orphan_papers._build_supabase_client()
+
+    assert result is None

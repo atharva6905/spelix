@@ -94,7 +94,7 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: backend
-        run: uv run pytest tests/ --cov=app --cov-branch --cov-report=term-missing --cov-fail-under=90 -x -q
+        run: uv run pytest tests/ --cov=app --cov-branch --cov-report=term-missing --cov-fail-under=95 -x -q
 
   frontend-lint:
     name: Frontend Lint & Type Check
