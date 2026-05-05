@@ -1,19 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { supabase } from "@/lib/supabase";
 import { capture } from "@/lib/posthog";
-import NavBar from "@/components/landing/NavBar";
-import Hero from "@/components/landing/Hero";
-import ProblemSection from "@/components/landing/ProblemSection";
-import HowItWorksSection from "@/components/landing/HowItWorksSection";
-import DifferentiatorsSection from "@/components/landing/DifferentiatorsSection";
-import PrivacySection from "@/components/landing/PrivacySection";
-import FinalCtaSection from "@/components/landing/FinalCtaSection";
-import Footer from "@/components/landing/Footer";
+import LandingNav from "@/components/landing/LandingNav";
+import LandingHero from "@/components/landing/LandingHero";
+import LandingProblem from "@/components/landing/LandingProblem";
+import LandingProcess from "@/components/landing/LandingProcess";
+import LandingReport from "@/components/landing/LandingReport";
+import LandingScience from "@/components/landing/LandingScience";
+import LandingPrivacy from "@/components/landing/LandingPrivacy";
+import LandingCTA from "@/components/landing/LandingCTA";
+import LandingFooter from "@/components/landing/LandingFooter";
+import LandingChrome from "@/components/landing/LandingChrome";
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
+  const finalRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -30,22 +33,25 @@ export default function LandingPage() {
 
   if (checking) {
     return (
-      <p className="flex min-h-screen items-center justify-center bg-surface-page text-sm text-ink-muted">
+      <p className="flex min-h-screen items-center justify-center bg-landing-bg text-sm text-landing-text-muted">
         Loading…
       </p>
     );
   }
 
   return (
-    <main className="bg-surface-page">
-      <NavBar />
-      <Hero />
-      <ProblemSection />
-      <HowItWorksSection />
-      <DifferentiatorsSection />
-      <PrivacySection />
-      <FinalCtaSection />
-      <Footer />
-    </main>
+    <div className="landing-root">
+      <div className="landing-grain" aria-hidden="true" />
+      <LandingChrome finalRef={finalRef} />
+      <LandingNav />
+      <LandingHero />
+      <LandingProblem />
+      <LandingProcess />
+      <LandingReport />
+      <LandingScience />
+      <LandingPrivacy />
+      <LandingCTA ref={finalRef} />
+      <LandingFooter />
+    </div>
   );
 }

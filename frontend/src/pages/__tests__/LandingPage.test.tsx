@@ -11,7 +11,7 @@ vi.mock("@/lib/supabase", () => ({
 }));
 
 vi.mock("@/api/beta", () => ({
-  submitBetaRequest: vi.fn(),
+  requestBetaAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/posthog", () => ({ capture: vi.fn() }));
@@ -62,53 +62,15 @@ describe("LandingPage", () => {
     );
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("heading", {
-          level: 1,
-          name: /barbell form coaching where every piece of feedback cites its source/i,
-        }),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Every rep,")).toBeInTheDocument();
     });
 
-    // Problem section
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /you've watched yourself lift/i,
-      }),
-    ).toBeInTheDocument();
-
-    // HowItWorks section
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /three steps, one lift at a time/i,
-      }),
-    ).toBeInTheDocument();
-
-    // Differentiators section
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /three things no other app does/i,
-      }),
-    ).toBeInTheDocument();
-
-    // Privacy section
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /what spelix does with your video/i,
-      }),
-    ).toBeInTheDocument();
-
-    // FinalCta section
-    expect(
-      screen.getByRole("heading", {
-        level: 2,
-        name: /you have filmed your lifts/i,
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("01 / Problem")).toBeInTheDocument();
+    expect(screen.getByText("02 / Process")).toBeInTheDocument();
+    expect(screen.getByText("03 / Report")).toBeInTheDocument();
+    expect(screen.getByText("04 / The Science Layer")).toBeInTheDocument();
+    expect(screen.getByText("05 / Your Data")).toBeInTheDocument();
+    expect(screen.getByText("© 2026 Spelix")).toBeInTheDocument();
 
     expect(mockNavigate).not.toHaveBeenCalled();
   });
