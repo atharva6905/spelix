@@ -115,7 +115,7 @@ describe("ScrollReveal", () => {
     if (capturedCallback) {
       act(() => {
         capturedCallback!(
-          [{ isIntersecting: true, target: wrapper } as IntersectionObserverEntry],
+          [{ isIntersecting: true, target: wrapper } as unknown as IntersectionObserverEntry],
           {} as IntersectionObserver,
         );
       });
@@ -166,7 +166,7 @@ describe("ScrollReveal", () => {
     if (capturedCallback) {
       act(() => {
         capturedCallback!(
-          [{ isIntersecting: false, target: wrapper } as IntersectionObserverEntry],
+          [{ isIntersecting: false, target: wrapper } as unknown as IntersectionObserverEntry],
           {} as IntersectionObserver,
         );
       });

@@ -104,7 +104,6 @@ class TestSanitizePdfFilename:
         from unittest.mock import patch
 
         # len(safe) = 256, stem = "a" → overflow = 1, truncated_stem = "" → rejected
-        long_stem = "a"  # 1 char
         with patch(
             "app.utils.pdf_upload._MAX_FILENAME_CHARS",
             4,  # force len("a.pdf") = 5 > 4

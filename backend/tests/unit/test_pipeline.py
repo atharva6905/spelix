@@ -1464,8 +1464,6 @@ async def test_storage_client_with_video_path_downloads_and_deletes(tmp_path) ->
     redis = MagicMock()
     write_heartbeat = AsyncMock()
 
-    video_local = str(tmp_path / f"{_ANALYSIS_ID}.mp4")
-
     with (
         patch(f"{_PKG}.extract_landmarks", return_value=(landmarks, _FPS, _FRAME_WIDTH, _FRAME_HEIGHT)),
         patch(f"{_PKG}.run_quality_gates", return_value=_make_gate_result(passed=True)),
@@ -1530,7 +1528,7 @@ async def test_bench_exercise_uses_elbow_angle_for_rep_detection() -> None:
         patch(f"{_PKG}.get_temp_dir", return_value="/tmp/spelix/test"),
         patch("os.path.isfile", return_value=False),
     ):
-        result = await run_cv_pipeline(
+        await run_cv_pipeline(
             analysis=analysis,
             repo=repo,
             rep_metric_repo=rep_metric_repo,
