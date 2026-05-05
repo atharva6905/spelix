@@ -101,4 +101,30 @@ describe("buildTraceGraph", () => {
       "node-1->node-2",
     ]);
   });
+
+  it("treats undefined error as no error (hasError=false)", () => {
+    const trace = makeTrace(["get_rep_metrics"]);
+    // Explicitly set error to undefined (not null)
+    trace.nodes_executed![0].error = undefined as unknown as null;
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.hasError).toBe(false);
+    expect(nodes[0].data.error).toBeUndefined();
+  });
+
+  it("handles missing nodes_executed by treating as empty array", () => {
+    const trace = makeTrace([]);
+    // Simulate missing nodes_executed field
+    const traceWithout = { ...trace, nodes_executed: undefined } as unknown as AgentTracePayload;
+    const { nodes, edges } = buildTraceGraph(traceWithout);
+    expect(nodes).toEqual([]);
+    expect(edges).toEqual([]);
+  });
+
+  it("sets default empty array for missing output_keys", () => {
+    const trace = makeTrace(["get_rep_metrics"]);
+    // Remove output_keys to test ?? [] fallback
+    trace.nodes_executed![0].output_keys = undefined as unknown as string[];
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.outputKeys).toEqual([]);
+  });
 });

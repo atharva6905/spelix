@@ -27,7 +27,7 @@ describe("AccordionItem", () => {
   });
 
   test("clicking toggles open/closed", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(
       <AccordionItem title="T">
         <p>body text</p>
@@ -43,7 +43,7 @@ describe("AccordionItem", () => {
   });
 
   test("Enter key toggles open/closed", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(
       <AccordionItem title="T">
         <p>body text</p>
@@ -56,7 +56,7 @@ describe("AccordionItem", () => {
   });
 
   test("Space key toggles open/closed", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(
       <AccordionItem title="T">
         <p>body text</p>

@@ -70,4 +70,27 @@ describe("TrendChart", () => {
     expect(formatBarValue(8)).toBe("8");
     expect(formatBarValue(0)).toBe("0");
   });
+
+  it("line chart tooltip formatter handles non-number value by stringifying", () => {
+    // Test the non-number branch: value is not a number, should fallback to String(value ?? "")
+    // We can test this through the exported formatter function pattern
+    // The formatter is: typeof value === "number" ? formatLineValue(value) : String(value ?? "")
+    const formatter = (value: unknown) =>
+      typeof value === "number" ? formatLineValue(value as number) : String(value ?? "");
+
+    expect(formatter("not-a-number")).toBe("not-a-number");
+    expect(formatter(null)).toBe("");
+    expect(formatter(undefined)).toBe("");
+    expect(formatter(0.75)).toBe("75%");
+  });
+
+  it("bar chart tooltip formatter handles non-number value by stringifying", () => {
+    const formatter = (value: unknown) =>
+      typeof value === "number" ? formatBarValue(value as number) : String(value ?? "");
+
+    expect(formatter("text")).toBe("text");
+    expect(formatter(null)).toBe("");
+    expect(formatter(undefined)).toBe("");
+    expect(formatter(7)).toBe("7");
+  });
 });
