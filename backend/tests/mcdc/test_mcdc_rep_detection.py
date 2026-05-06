@@ -26,14 +26,10 @@ Note on isolation strategy:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
-os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
 from app.config import ThresholdConfig
 from app.cv.rep_detection import (
@@ -41,6 +37,8 @@ from app.cv.rep_detection import (
     _detect_reps_state_machine,
     detect_reps,
 )
+
+_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 
 FPS = 30.0
 

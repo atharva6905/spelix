@@ -17,16 +17,14 @@ Priority: if depth_frame == first frame (offset=0, depth=0), high_occlusion wins
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
-_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
-os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
-
 from app.config import ThresholdConfig
 from app.cv.confidence import _tier4_phase_adjusted
+
+_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 
 
 @pytest.fixture()

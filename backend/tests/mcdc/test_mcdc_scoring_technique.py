@@ -7,16 +7,14 @@ Conditions tested
 3. TechniqueScore._score_bench — two-tier flare: elbow_flare > high / elif elbow_flare > caution
 """
 
-import os
 from pathlib import Path
-
-_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
-os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
 import pytest
 
 from app.config import ThresholdConfig
 from app.cv.scoring import TechniqueScore
+
+_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 
 
 @pytest.fixture()

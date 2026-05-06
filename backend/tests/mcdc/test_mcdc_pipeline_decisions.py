@@ -23,13 +23,7 @@ Decision 2: GPT-4o fallback AND condition (FR-XDET-04)
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from unittest.mock import MagicMock
-
-
-_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
-os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
 from app.services.pipeline import _is_degenerate_scoring_input
 

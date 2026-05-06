@@ -12,16 +12,14 @@ Conditions tested
      AND lockout_angle < min_lockout  (min_lockout = 150.0)
 """
 
-import os
 from pathlib import Path
-
-_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
-os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
 import pytest
 
 from app.config import ThresholdConfig
 from app.cv.scoring import ControlScore
+
+_V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 
 
 @pytest.fixture()

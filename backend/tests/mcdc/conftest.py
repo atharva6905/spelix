@@ -11,7 +11,7 @@ import pytest
 _V1_PATH = Path(__file__).parent.parent.parent.parent / "config" / "thresholds_v1.json"
 os.environ.setdefault("THRESHOLD_CONFIG_PATH", str(_V1_PATH))
 
-from app.config import ThresholdConfig
+from app.config import ThresholdConfig  # noqa: E402
 
 
 @pytest.fixture()
