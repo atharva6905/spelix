@@ -289,3 +289,18 @@ async def test_lifecycle_decision_logs_transient_error_at_warning_level(caplog) 
         "Transient ConnectionError must NOT be logged at ERROR level, "
         f"but found: {[(r.levelname, r.message) for r in error_records]}"
     )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_decision_empty_candidates_returns_empty_decisions() -> None:
+    """When state has no candidates, lifecycle_decision returns empty decisions (line 86)."""
+    state = _state_with_candidates([])
+
+    update = await lifecycle_decision(
+        state,
+        cohere_client=_mock_cohere([0.0] * 1024),
+        qdrant_client=_mock_qdrant(None, 0.0),
+        brain_embedding_svc=_mock_brain_embedding([0.0] * 1024),
+    )
+
+    assert update == {"decisions": []}

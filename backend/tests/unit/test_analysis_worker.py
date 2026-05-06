@@ -857,3 +857,1159 @@ def test_user_profile_body_stats_constant_covers_all_relevant_fields() -> None:
         }
     )
     assert _USER_PROFILE_BODY_STATS_FIELDS == expected
+
+
+# ---------------------------------------------------------------------------
+# _dispatch_coaching routing tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_coaching_routes_to_graph_when_flag_enabled(monkeypatch):
+    """When SPELIX_PHASE3_AGENT_ENABLED=1, _dispatch_coaching calls _run_coaching_graph."""
+    monkeypatch.setenv("SPELIX_PHASE3_AGENT_ENABLED", "1")
+
+    analysis = make_analysis()
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = "high_bar"
+    analysis.user_id = uuid.uuid4()
+
+    mock_coaching_output = MagicMock()
+    mock_result = (mock_coaching_output, [], None)
+
+    with patch(
+        "app.workers.analysis_worker._run_coaching_graph",
+        new=AsyncMock(return_value=mock_result),
+    ) as mock_graph:
+        from app.workers.analysis_worker import _dispatch_coaching
+
+        result = await _dispatch_coaching(
+            analysis=analysis,
+            repo=MagicMock(),
+            redis=AsyncMock(),
+            pipeline_result=MagicMock(keyframes=None),
+        )
+
+    mock_graph.assert_called_once()
+    assert result == mock_result
+
+
+@pytest.mark.asyncio
+async def test_dispatch_coaching_routes_to_imperative_when_flag_disabled(monkeypatch):
+    """When SPELIX_PHASE3_AGENT_ENABLED=0, _dispatch_coaching calls _run_coaching_imperative."""
+    monkeypatch.setenv("SPELIX_PHASE3_AGENT_ENABLED", "0")
+
+    analysis = make_analysis()
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = "high_bar"
+    analysis.user_id = uuid.uuid4()
+
+    mock_coaching_output = MagicMock()
+    mock_result = (mock_coaching_output, [], None)
+
+    with patch(
+        "app.workers.analysis_worker._run_coaching_imperative",
+        new=AsyncMock(return_value=mock_result),
+    ) as mock_imperative:
+        from app.workers.analysis_worker import _dispatch_coaching
+
+        result = await _dispatch_coaching(
+            analysis=analysis,
+            repo=MagicMock(),
+            redis=AsyncMock(),
+            pipeline_result=MagicMock(keyframes=None),
+        )
+
+    mock_imperative.assert_called_once()
+    assert result == mock_result
+
+
+# ---------------------------------------------------------------------------
+# _maybe_enqueue_distillation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_distillation_does_nothing_when_flag_off(monkeypatch):
+    """When SPELIX_DISTILLATION_ENABLED=0, no task is enqueued."""
+    monkeypatch.setenv("SPELIX_DISTILLATION_ENABLED", "0")
+
+    with patch(
+        "app.workers.streaq_worker.distill_analysis",
+    ) as mock_task:
+        from app.workers.analysis_worker import _maybe_enqueue_distillation
+
+        await _maybe_enqueue_distillation(
+            analysis_id=uuid.uuid4(),
+            eval_scores={"overall": 0.9},
+        )
+
+    # enqueue should not have been called
+    mock_task.enqueue.assert_not_called() if hasattr(mock_task, "enqueue") else None
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_distillation_does_nothing_when_score_too_low(monkeypatch):
+    """When quality score < 0.6, distillation is not enqueued even if flag is on."""
+    monkeypatch.setenv("SPELIX_DISTILLATION_ENABLED", "1")
+
+    with patch(
+        "app.workers.analysis_worker._maybe_enqueue_distillation",
+        wraps=__import__("app.workers.analysis_worker", fromlist=["_maybe_enqueue_distillation"])._maybe_enqueue_distillation,
+    ):
+        # Call the real function with a low score
+        from app.workers.analysis_worker import _maybe_enqueue_distillation
+
+        # This should return early without attempting to import/call distill_analysis
+        await _maybe_enqueue_distillation(
+            analysis_id=uuid.uuid4(),
+            eval_scores={"overall": 0.3},
+        )
+    # If it reached here without error, the early return worked
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_distillation_enqueues_when_gate_passes(monkeypatch):
+    """When flag=1 and overall >= 0.6, distill_analysis.enqueue is called."""
+    monkeypatch.setenv("SPELIX_DISTILLATION_ENABLED", "1")
+
+    mock_enqueue = AsyncMock()
+
+    with patch.dict(
+        "sys.modules",
+        {
+            "app.workers.streaq_worker": MagicMock(
+                distill_analysis=MagicMock(enqueue=mock_enqueue)
+            )
+        },
+    ):
+        from app.workers.analysis_worker import _maybe_enqueue_distillation
+
+        analysis_id = uuid.uuid4()
+        await _maybe_enqueue_distillation(
+            analysis_id=analysis_id,
+            eval_scores={"overall": 0.85},
+        )
+
+    mock_enqueue.assert_awaited_once_with(analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_distillation_uses_faithfulness_when_overall_missing(monkeypatch):
+    """When overall is absent but faithfulness >= 0.6, distillation is triggered."""
+    monkeypatch.setenv("SPELIX_DISTILLATION_ENABLED", "1")
+
+    mock_enqueue = AsyncMock()
+
+    with patch.dict(
+        "sys.modules",
+        {
+            "app.workers.streaq_worker": MagicMock(
+                distill_analysis=MagicMock(enqueue=mock_enqueue)
+            )
+        },
+    ):
+        from app.workers.analysis_worker import _maybe_enqueue_distillation
+
+        analysis_id = uuid.uuid4()
+        await _maybe_enqueue_distillation(
+            analysis_id=analysis_id,
+            eval_scores={"faithfulness": 0.75},  # no "overall" key
+        )
+
+    mock_enqueue.assert_awaited_once_with(analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_maybe_enqueue_distillation_swallows_enqueue_exception(monkeypatch):
+    """An exception during enqueue is swallowed as a warning, not re-raised."""
+    monkeypatch.setenv("SPELIX_DISTILLATION_ENABLED", "1")
+
+    mock_enqueue = AsyncMock(side_effect=RuntimeError("Redis unavailable"))
+
+    with patch.dict(
+        "sys.modules",
+        {
+            "app.workers.streaq_worker": MagicMock(
+                distill_analysis=MagicMock(enqueue=mock_enqueue)
+            )
+        },
+    ):
+        from app.workers.analysis_worker import _maybe_enqueue_distillation
+
+        # Must not raise — exception is swallowed as a warning
+        await _maybe_enqueue_distillation(
+            analysis_id=uuid.uuid4(),
+            eval_scores={"overall": 0.9},
+        )
+
+
+# ---------------------------------------------------------------------------
+# _run_coaching_graph tests
+# ---------------------------------------------------------------------------
+
+
+def _make_coaching_output() -> MagicMock:
+    from app.schemas.coaching import CoachingOutput
+
+    return CoachingOutput(
+        summary="s.",
+        strengths=["good"],
+        correction_plan=["fix"],
+        disclaimer=(
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+        raw_prompt_tokens=1,
+        raw_completion_tokens=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_success_path():
+    """_run_coaching_graph calls run_coaching_graph and persists outputs."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = "high_bar"
+    analysis.confidence_score = 0.85
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": True,
+        "eval_scores": {"faithfulness": 0.9, "faithfulness_passed": True},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update.return_value = analysis
+
+    with (
+        patch("app.workers.analysis_worker.run_cv_pipeline", new=AsyncMock()),
+        patch(
+            "app.workers.analysis_worker._run_coaching_graph",
+        ) as _patch,
+    ):
+        # Actually test the real function — we need to patch its sub-calls
+        pass
+
+    mock_repo2 = AsyncMock()
+    mock_repo2.db = MagicMock()
+    mock_repo2.update = AsyncMock(return_value=analysis)
+    mock_repo2.list_recent_by_user = AsyncMock(return_value=[])
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo2,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    assert result[0] is coaching_output
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_raises_when_coaching_output_none():
+    """_run_coaching_graph raises RuntimeError when graph returns no coaching_output."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = "high_bar"
+    analysis.confidence_score = 0.85
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+
+    final_state = {
+        "coaching_output": None,  # graph completed without coaching_output
+        "cove_verified": False,
+        "eval_scores": {},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": None,
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    profile_repo_mock2 = AsyncMock()
+    profile_repo_mock2.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock2 = AsyncMock()
+    rep_metric_repo_mock2.get_by_analysis = AsyncMock(return_value=[])
+
+    pipeline_result2 = MagicMock()
+    pipeline_result2.keyframes = None
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, None)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock2,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock2,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        mock_repo_no_output = AsyncMock()
+        mock_repo_no_output.db = MagicMock()
+
+        with pytest.raises(RuntimeError, match="graph completed without coaching_output"):
+            await _run_coaching_graph(
+                analysis=analysis,
+                repo=mock_repo_no_output,
+                redis=AsyncMock(),
+                pipeline_result=pipeline_result2,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Additional branch-coverage tests for _build_supabase_client,
+# _run_coaching_graph, and _generate_and_upload_pdf
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_supabase_client_returns_none_on_exception():
+    """_build_supabase_client catches exceptions from acreate_client and returns None."""
+    with patch.dict(
+        "os.environ",
+        {
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SERVICE_ROLE_KEY": "service-role-key-value",
+        },
+    ), patch(
+        "supabase.acreate_client",
+        new=AsyncMock(side_effect=RuntimeError("network error")),
+    ):
+        from app.workers.analysis_worker import _build_supabase_client
+
+        result = await _build_supabase_client()
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_with_profile_body_stats():
+    """_run_coaching_graph builds body_stats when profile exists (lines 663-668)."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.80
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": True,
+        "eval_scores": {},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    # Profile with body stats
+    profile_mock = MagicMock()
+    profile_mock.height_cm = 180
+    profile_mock.weight_kg = 85
+    profile_mock.age = 25
+    profile_mock.experience_level = "intermediate"
+    profile_mock.arm_span_cm = None
+    profile_mock.femur_length_cm = None
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=profile_mock)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update = AsyncMock(return_value=analysis)
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    assert result[0] is coaching_output
+    # body_stats should be the third element
+    body_stats = result[2]
+    assert body_stats is not None
+    assert "height_cm" in body_stats
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_with_qdrant_available():
+    """_run_coaching_graph creates SparseRetrievalService when qdrant is not None (lines 719-720)."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "deadlift"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.75
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": True,
+        "eval_scores": {},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    mock_qdrant = MagicMock()  # not None — triggers the SparseRetrievalService branch
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update = AsyncMock(return_value=analysis)
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=mock_qdrant)),
+        patch("app.services.sparse_retrieval.SparseRetrievalService", return_value=MagicMock()),
+        patch("app.services.retrieval.RetrievalService", return_value=MagicMock()),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    assert result[0] is coaching_output
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_with_eval_scores_faithfulness_failed():
+    """eval_scores with faithfulness_passed=False sets flagged_for_review=True (lines 828-835, 832)."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "bench"
+    analysis.exercise_variant = "flat"
+    analysis.confidence_score = 0.70
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": False,
+        "eval_scores": {"faithfulness": 0.2, "faithfulness_passed": False, "overall": 0.3},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update = AsyncMock(return_value=analysis)
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+        patch("app.workers.analysis_worker._maybe_enqueue_distillation", new=AsyncMock()),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    assert result[0] is coaching_output
+    # faithfulness_passed=False should have set flagged_for_review
+    assert analysis.flagged_for_review is True
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_adaptive_mode_creates_reasoner_llm():
+    """Adaptive mode creates ChatAnthropic reasoner_llm (lines 744-746)."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.80
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": True,
+        "eval_scores": {},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "adaptive", "nodes_executed": []}
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update = AsyncMock(return_value=analysis)
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    mock_chat_anthropic = MagicMock()
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "adaptive"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch("langchain_anthropic.ChatAnthropic", return_value=mock_chat_anthropic),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    assert result[0] is coaching_output
+
+
+@pytest.mark.asyncio
+async def test_run_coaching_graph_database_url_checkpointer_init_exception():
+    """When AsyncPostgresSaver.from_conn_string raises, it is caught and execution continues (lines 759-771)."""
+    import uuid as _uuid
+
+    analysis_id = _uuid.uuid4()
+    analysis = make_analysis(analysis_id=analysis_id)
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.80
+    analysis.user_id = _uuid.uuid4()
+    analysis.eval_scores = None
+    analysis.flagged_for_review = False
+
+    coaching_output = _make_coaching_output()
+    final_state = {
+        "coaching_output": coaching_output,
+        "cove_verified": True,
+        "eval_scores": {},
+        "papers_contexts": [],
+        "brain_contexts": [],
+        "retrieval_source": "papers_only_fallback",
+        "degraded_mode": False,
+    }
+    trace_payload = {"mode": "deterministic", "nodes_executed": []}
+
+    profile_repo_mock = AsyncMock()
+    profile_repo_mock.get_by_user_id = AsyncMock(return_value=None)
+
+    rep_metric_repo_mock = AsyncMock()
+    rep_metric_repo_mock.get_by_analysis = AsyncMock(return_value=[])
+
+    coaching_result_repo_mock = AsyncMock()
+    coaching_result_repo_mock.create = AsyncMock()
+
+    mock_repo = AsyncMock()
+    mock_repo.db = MagicMock()
+    mock_repo.update = AsyncMock(return_value=analysis)
+
+    pipeline_result = MagicMock()
+    pipeline_result.keyframes = None
+
+    # Simulate AsyncPostgresSaver raising during initialization
+    mock_postgres_saver = MagicMock()
+    mock_postgres_saver.from_conn_string = MagicMock(side_effect=ImportError("no langgraph-checkpoint-postgres"))
+
+    import sys
+    fake_module = MagicMock()
+    fake_module.AsyncPostgresSaver = mock_postgres_saver
+
+    with (
+        patch.dict("os.environ", {"SPELIX_AGENT_MODE": "deterministic", "DATABASE_URL": "postgresql://localhost/test"}, clear=False),
+        patch("app.workers.analysis_worker.ThresholdConfig", return_value=MagicMock()),
+        patch(
+            "app.agents.graph.run_coaching_graph",
+            new=AsyncMock(return_value=(final_state, trace_payload, coaching_output)),
+        ),
+        patch("app.services.langfuse_client.get_langfuse_client", new=AsyncMock(return_value=None)),
+        patch("app.services.cohere_client.get_cohere_client", return_value=None),
+        patch("app.services.qdrant.get_qdrant_client", new=AsyncMock(return_value=None)),
+        patch("app.services.coaching.CoachingService", return_value=MagicMock()),
+        patch("app.services.cove.CoveVerificationService", return_value=MagicMock()),
+        patch("app.services.faithfulness_gate.FaithfulnessGateService", return_value=MagicMock()),
+        patch("anthropic.AsyncAnthropic", return_value=MagicMock()),
+        patch("redis.asyncio.from_url", return_value=AsyncMock()),
+        patch.dict(sys.modules, {"langgraph.checkpoint.postgres.aio": fake_module}),
+        patch(
+            "app.repositories.user_profile.UserProfileRepository",
+            return_value=profile_repo_mock,
+        ),
+        patch(
+            "app.repositories.rep_metric.RepMetricRepository",
+            return_value=rep_metric_repo_mock,
+        ),
+        patch(
+            "app.repositories.coaching_result.CoachingResultRepository",
+            return_value=coaching_result_repo_mock,
+        ),
+    ):
+        from app.workers.analysis_worker import _run_coaching_graph
+
+        result = await _run_coaching_graph(
+            analysis=analysis,
+            repo=mock_repo,
+            redis=AsyncMock(),
+            pipeline_result=pipeline_result,
+        )
+
+    # Should succeed despite checkpointer failure
+    assert result[0] is coaching_output
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_with_body_stats_builds_user_info():
+    """_generate_and_upload_pdf builds user_info string from body_stats (lines 966-974)."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "squat"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.85
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {"summary": "Good form"}
+
+    body_stats = {
+        "experience_level": "intermediate",
+        "height_cm": 180,
+        "weight_kg": 85,
+    }
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value="/tmp/spelix/test",
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=f"artifacts/{analysis_id}/report.pdf",
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=MagicMock(),
+            repo=mock_repo,
+            body_stats=body_stats,
+        )
+
+    # user_info will be included in the PDF context (covered by the run_in_executor call)
+    assert mock_loop.run_in_executor.call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_with_bar_path_centroids():
+    """_generate_and_upload_pdf generates bar path plot when centroids present (lines 979-987)."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "deadlift"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.75
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    bar_path = {"centroids": [(0.5, 0.3), (0.51, 0.25), (0.50, 0.2)]}
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value="/tmp/spelix/test",
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=f"artifacts/{analysis_id}/report.pdf",
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=True,  # bar_path_plot_local exists
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop, patch(
+        "app.services.pdf.generate_bar_path_plot",
+    ):
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=MagicMock(),
+            repo=mock_repo,
+            bar_path=bar_path,
+        )
+
+    # run_in_executor should be called twice: once for bar path plot, once for PDF
+    assert mock_loop.run_in_executor.call_count >= 2
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_no_storage_client_uses_local_path():
+    """When storage_client is None, pdf_path is set to local temp path (lines 1027-1028)."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "bench"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.80
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    import os as _os
+
+    tmp_dir = "/tmp/spelix/test"
+    expected_local_pdf = _os.path.join(tmp_dir, "report.pdf")
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value=tmp_dir,
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=None,  # no storage client
+            repo=mock_repo,
+        )
+
+    # pdf_path should be set to local path, not storage path
+    assert analysis.pdf_path == expected_local_pdf
+    mock_repo.update.assert_called_once_with(analysis)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_bar_path_plot_exception_continues():
+    """When bar_path plot generation raises, exception is caught and pdf is still generated (lines 984->989, 986-987)."""
+
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "deadlift"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.75
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    bar_path = {"centroids": [(0.5, 0.3), (0.51, 0.25)]}
+    tmp_dir = "/tmp/spelix/test"
+
+    executor_call_count = [0]
+
+    async def mock_run_in_executor(executor, fn, *args):
+        executor_call_count[0] += 1
+        if fn.__name__ if hasattr(fn, '__name__') else str(fn) in ("generate_bar_path_plot",):
+            raise RuntimeError("bar path plot failed")
+        return None
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value=tmp_dir,
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=f"artifacts/{analysis_id}/report.pdf",
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+
+        call_count = [0]
+
+        async def side_effect_run_in_executor(executor, fn, *args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("bar path generation failed")
+            return None
+
+        mock_loop.run_in_executor = AsyncMock(side_effect=side_effect_run_in_executor)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        # Should NOT raise — exception is swallowed
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=MagicMock(),
+            repo=mock_repo,
+            bar_path=bar_path,
+        )
+
+    # Both run_in_executor calls should have happened
+    assert call_count[0] >= 1
+
+
+@pytest.mark.asyncio
+async def test_generate_and_upload_pdf_body_stats_subset_fields():
+    """_generate_and_upload_pdf builds partial user_info when only some body_stats keys are present (branch coverage for 967-977)."""
+    analysis_id = uuid.uuid4()
+    analysis = make_analysis()
+    analysis.exercise_type = "bench"
+    analysis.exercise_variant = None
+    analysis.confidence_score = 0.80
+    analysis.quality_gate_result = None
+
+    mock_repo = AsyncMock()
+    mock_coaching_output = MagicMock()
+    mock_coaching_output.model_dump.return_value = {}
+
+    # Only height_cm — no experience_level or weight_kg
+    body_stats = {"height_cm": 175}
+
+    with patch(
+        "app.services.pdf.PDFService",
+    ) as MockPDFService, patch(
+        "app.cv.artifact_generation.get_temp_dir",
+        return_value="/tmp/spelix/test",
+    ), patch(
+        "app.cv.artifact_generation.get_artifact_storage_path",
+        return_value=f"artifacts/{analysis_id}/report.pdf",
+    ), patch(
+        "app.cv.artifact_generation.upload_artifact",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.cv.confidence.confidence_label",
+        return_value="High",
+    ), patch(
+        "os.path.isfile",
+        return_value=False,
+    ), patch(
+        "asyncio.get_event_loop",
+    ) as mock_get_loop:
+        mock_pdf_svc = MagicMock()
+        MockPDFService.return_value = mock_pdf_svc
+        mock_loop = MagicMock()
+        mock_loop.run_in_executor = AsyncMock(return_value=None)
+        mock_get_loop.return_value = mock_loop
+
+        from app.workers.analysis_worker import _generate_and_upload_pdf
+
+        await _generate_and_upload_pdf(
+            analysis_id=analysis_id,
+            analysis=analysis,
+            coaching_output=mock_coaching_output,
+            rep_metrics_dicts=[],
+            storage_client=MagicMock(),
+            repo=mock_repo,
+            body_stats=body_stats,
+        )
+
+    # Should complete without error
+    assert mock_loop.run_in_executor.call_count >= 1

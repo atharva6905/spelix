@@ -484,3 +484,6 @@ A test like assert set(body.keys()) == {"id", "status", "updated_at"} must be up
 
 ### Hardcoded attribute loops drift when models grow
 The Phase 1 body-stats injection missed arm_span_cm and femur_length_cm because the worker used for attr in ("height_cm", "weight_kg", "age", "experience_level"). When a model gains fields, the loop doesn't. Prefer profile.model_dump(include=COACHING_FIELDS) with an explicit COACHING_FIELDS: frozenset constant at the top of the file, updated whenever UserProfile grows.
+
+### MC/DC traceability maintenance
+When modifying a compound boolean condition in any of the 16 MC/DC-targeted functions (scoring.py, quality_gates.py, rep_detection.py, confidence.py, pipeline.py decision points), update the corresponding truth table in `docs/mcdc/traceability.md` and MC/DC test in `backend/tests/mcdc/` in the same PR. Run MC/DC tests: `uv run pytest tests/mcdc/ -xvs`.

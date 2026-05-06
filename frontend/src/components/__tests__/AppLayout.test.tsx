@@ -134,7 +134,7 @@ describe("AppLayout", () => {
   });
 
   it("calls supabase.auth.signOut when Sign out is clicked", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     mockSignOut.mockResolvedValue({ error: null });
 
     // jsdom does not support window.location.href assignment — stub it

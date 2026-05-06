@@ -49,4 +49,28 @@ describe("BetaTermsPage", () => {
       );
     });
   });
+
+  it("shows error when response is not ok (non-200 status)", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve("Not found"),
+    } as unknown as Response);
+
+    render(<BetaTermsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Could not load beta terms",
+      );
+    });
+  });
+
+  it("shows loading state initially", () => {
+    // Delay the fetch response indefinitely
+    globalThis.fetch = vi.fn().mockReturnValue(new Promise(() => {}));
+
+    render(<BetaTermsPage />);
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  });
 });

@@ -148,4 +148,35 @@ describe("useChat", () => {
       });
     });
   });
+
+  it("does not update state after unmount (cancelled history load)", async () => {
+    let resolveFn!: (val: { messages: unknown[] }) => void;
+    const pending = new Promise<{ messages: unknown[] }>((res) => { resolveFn = res; });
+    mockGetChatHistory.mockReturnValue(pending);
+
+    const { unmount, result } = renderHook(() => useChat(ANALYSIS_ID));
+
+    // Unmount before history load resolves
+    unmount();
+
+    // Resolve after unmount — should not throw or update state
+    resolveFn({ messages: [{ id: "m1", role: "user", content: "hi", created_at: "2026-04-12T10:00:00Z" }] });
+    await Promise.resolve();
+
+    // Messages should remain empty (cancelled)
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("sets error as fallback message when non-Error is thrown in sendMessage", async () => {
+    mockSendChatMessage.mockRejectedValue("plain string error");
+
+    const { result } = renderHook(() => useChat(ANALYSIS_ID));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.sendMessage("hello");
+    });
+
+    expect(result.current.error).toBe("Failed to send message");
+  });
 });

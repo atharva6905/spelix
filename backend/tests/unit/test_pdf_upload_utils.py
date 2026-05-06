@@ -87,6 +87,31 @@ class TestSanitizePdfFilename:
         assert len(result) == 255
 
 
+    def test_rejects_name_resolving_to_dot(self):
+        """PurePosixPath('.') resolves to '' name which is caught by the directory-ref check."""
+        # A raw value of "." after stripping leads to directory-reference rejection.
+        with pytest.raises(FilenameValidationError, match="directory reference"):
+            sanitize_pdf_filename(".")
+
+    def test_truncation_overflow_leaves_empty_stem_is_rejected(self):
+        """When truncation would produce an empty stem (overflow >= len(stem)), raise."""
+        # Construct: stem is 1 char, but total length makes len(safe) > 255.
+        # stem = "a", extension = ".pdf" → safe = "a.pdf" (5 chars) — does NOT exceed 255.
+        # We need a stem that, after extension, is > 255.
+        # Build a stem where the overflow equals the stem length exactly.
+        # stem of length 1, len(safe) = 1 + 4 = 5 — never triggers without > 255 total.
+        # Use monkeypatching to simulate the condition instead:
+        from unittest.mock import patch
+
+        # len(safe) = 256, stem = "a" → overflow = 1, truncated_stem = "" → rejected
+        with patch(
+            "app.utils.pdf_upload._MAX_FILENAME_CHARS",
+            4,  # force len("a.pdf") = 5 > 4
+        ):
+            with pytest.raises(FilenameValidationError, match="truncate safely"):
+                sanitize_pdf_filename("a.pdf")
+
+
 class TestConstants:
     def test_max_pdf_bytes_is_50mib(self):
         assert MAX_PDF_BYTES == 52_428_800

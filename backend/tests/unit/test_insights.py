@@ -406,6 +406,86 @@ class TestInsightsServiceUsesRepositories:
         assert "analysis_repo" in params, "InsightsService must accept analysis_repo kwarg"
         assert "db" not in params, "InsightsService must not accept raw db/AsyncSession"
 
+    @pytest.mark.asyncio
+    async def test_exercise_insights_rep_count_zero_when_no_summary_json(self):
+        """When analysis has no summary_json or no rep_count key, append 0."""
+        a = MagicMock()
+        a.confidence_score = 0.8
+        a.summary_json = None  # no summary_json → branch line 64-65
+        a.quality_gate_result = None  # no quality gate result → branch line 70->69
+
+        from app.services.insights import InsightsService
+
+        repo = _make_insights_repo(analyses=[a], personal_best=0.8)
+        svc = InsightsService(analysis_repo=repo)
+        result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
+
+        assert result["rep_count_trend"] == [0]
+        assert result["most_common_warning"] is None
+
+    @pytest.mark.asyncio
+    async def test_exercise_insights_passed_check_does_not_add_warning(self):
+        """A check where passed=True does not contribute to warnings."""
+        analyses = [
+            _make_analysis(warnings=[_passed_check()]),  # passed=True → skipped
+        ]
+
+        from app.services.insights import InsightsService
+
+        svc = InsightsService(analysis_repo=_make_insights_repo(analyses=analyses, personal_best=0.8))
+        result = await svc.exercise_insights(_USER_ID, "squat", "high_bar")
+
+        assert result["most_common_warning"] is None
+
+    @pytest.mark.asyncio
+    async def test_global_insights_no_quality_gate_result_skipped(self):
+        """global_insights skips analyses with no quality_gate_result."""
+        a = MagicMock()
+        a.exercise_type = "squat"
+        a.quality_gate_result = None  # None → skipped in loop
+        a.summary_json = {"rep_count": 5}
+
+        from app.services.insights import InsightsService
+
+        repo = _make_insights_repo(completed_analyses=[a])
+        svc = InsightsService(analysis_repo=repo)
+        result = await svc.global_insights(_USER_ID)
+
+        assert result["most_common_warning"] is None
+
+    @pytest.mark.asyncio
+    async def test_global_insights_passed_check_not_added(self):
+        """In global_insights, passed checks are not counted as warnings."""
+        analyses = [
+            _make_analysis(
+                exercise_type="squat",
+                warnings=[_passed_check(), _failed_check("Bad framing")],
+            ),
+        ]
+
+        from app.services.insights import InsightsService
+
+        svc = InsightsService(analysis_repo=_make_insights_repo(completed_analyses=analyses))
+        result = await svc.global_insights(_USER_ID)
+
+        assert result["most_common_warning"] == "Bad framing"
+
+    @pytest.mark.asyncio
+    async def test_global_insights_rep_count_from_summary_json(self):
+        """global_insights uses rep_count from summary_json for variance calculation."""
+        analyses = [
+            _make_analysis(exercise_type="squat", rep_count=3, days_ago=1),
+            _make_analysis(exercise_type="squat", rep_count=7, days_ago=2),
+        ]
+
+        from app.services.insights import InsightsService
+
+        svc = InsightsService(analysis_repo=_make_insights_repo(completed_analyses=analyses))
+        result = await svc.global_insights(_USER_ID)
+
+        # squat has non-zero variance → should appear as highest_variance_exercise
+        assert result["highest_variance_exercise"] == "squat"
+
 
 # ---------------------------------------------------------------------------
 # Helpers

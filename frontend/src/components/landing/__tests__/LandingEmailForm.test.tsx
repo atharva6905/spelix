@@ -28,7 +28,7 @@ describe("LandingEmailForm", () => {
       status: "pending",
       created_at: "2026-04-15T00:00:00Z",
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<LandingEmailForm source="hero" />);
 
     await user.type(screen.getByLabelText(/email/i), "a@b.com");
@@ -49,7 +49,7 @@ describe("LandingEmailForm", () => {
     "409 duplicate shows message then auto-resets",
     async () => {
       vi.mocked(requestBetaAccess).mockRejectedValue({ status: 409 });
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       render(<LandingEmailForm source="final_cta" />);
 
       await user.type(screen.getByLabelText(/email/i), "dup@b.com");
@@ -76,7 +76,7 @@ describe("LandingEmailForm", () => {
     "generic error shows message then auto-resets",
     async () => {
       vi.mocked(requestBetaAccess).mockRejectedValue({ status: 500 });
-      const user = userEvent.setup();
+      const user = userEvent.setup({ delay: null });
       render(<LandingEmailForm source="hero" />);
 
       await user.type(screen.getByLabelText(/email/i), "a@b.com");

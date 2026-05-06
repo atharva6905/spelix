@@ -51,6 +51,19 @@ markers = [
     "slow: marks tests that run on real video fixtures (deselect with '-m not slow')",
 ]
 
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",

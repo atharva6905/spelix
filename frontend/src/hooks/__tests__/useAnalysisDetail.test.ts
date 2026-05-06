@@ -138,4 +138,40 @@ describe("useAnalysisDetail", () => {
 
     expect(mockGetAnalysisDetail).toHaveBeenCalledTimes(2);
   });
+
+  it("does not update state after unmount (cancellation)", async () => {
+    let resolveFn!: (val: AnalysisDetail) => void;
+    const pending = new Promise<AnalysisDetail>((res) => { resolveFn = res; });
+    mockGetAnalysisDetail.mockReturnValue(pending);
+
+    const { unmount, result } = renderHook(() => useAnalysisDetail("analysis-abc"));
+
+    // Unmount before fetch resolves
+    unmount();
+
+    // Resolve after unmount — should not throw or update state
+    resolveFn(MOCK_ANALYSIS);
+    await Promise.resolve();
+
+    // State should remain null (cancelled)
+    expect(result.current.analysis).toBeNull();
+  });
+
+  it("does not set error after unmount (cancellation on failure)", async () => {
+    let rejectFn!: (err: Error) => void;
+    const pending = new Promise<AnalysisDetail>((_res, rej) => { rejectFn = rej; });
+    mockGetAnalysisDetail.mockReturnValue(pending);
+
+    const { unmount, result } = renderHook(() => useAnalysisDetail("analysis-abc"));
+
+    // Unmount before fetch rejects
+    unmount();
+
+    // Reject after unmount — should not throw
+    rejectFn(new Error("Network error"));
+    await Promise.resolve();
+
+    // Error should remain null (cancelled)
+    expect(result.current.error).toBeNull();
+  });
 });

@@ -15,7 +15,7 @@ afterEach(() => {
 
 describe("EmailCaptureForm", () => {
   test("submit button is aria-disabled until consent is checked", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="hero" />);
 
     const btn = screen.getByRole("button", {
@@ -33,7 +33,7 @@ describe("EmailCaptureForm", () => {
   });
 
   test("invalid email is rejected client-side", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="hero" />);
     const emailInput = screen.getByLabelText(/email/i);
     await user.type(emailInput, "not-an-email");
@@ -51,7 +51,7 @@ describe("EmailCaptureForm", () => {
       status: "pending",
       created_at: "2026-04-15T00:00:00Z",
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="hero" />);
     await user.type(screen.getByLabelText(/email/i), "a@b.com");
     await user.click(screen.getByRole("checkbox"));
@@ -71,7 +71,7 @@ describe("EmailCaptureForm", () => {
         message: "This email is already in our private-beta queue.",
       },
     });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="hero" />);
     await user.type(screen.getByLabelText(/email/i), "dup@b.com");
     await user.click(screen.getByRole("checkbox"));
@@ -85,7 +85,7 @@ describe("EmailCaptureForm", () => {
 
   test("generic 500 shows fallback message", async () => {
     vi.mocked(requestBetaAccess).mockRejectedValue({ status: 500 });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="final_cta" buttonLabel="Join the private beta" />);
     await user.type(screen.getByLabelText(/email/i), "a@b.com");
     await user.click(screen.getByRole("checkbox"));

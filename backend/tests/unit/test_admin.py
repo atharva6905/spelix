@@ -692,3 +692,74 @@ class TestAdminServiceUsesRepositories:
         assert health["queue_depth"] == 3
         assert health["worker_heartbeat"] is True
         assert health["db_ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_get_health_redis_xlen_exception_swallowed(self):
+        """When redis.xlen() raises, the exception is silently caught and queue_depth stays 0."""
+        mock_redis = AsyncMock()
+        mock_redis.xlen = AsyncMock(side_effect=Exception("Redis connection lost"))
+        mock_redis.get = AsyncMock(return_value=None)
+
+        service = _make_admin_service(redis=mock_redis)
+        health = await service.get_health()
+
+        # Must not raise; queue_depth stays at default 0
+        assert health["queue_depth"] == 0
+
+    @pytest.mark.asyncio
+    async def test_get_health_redis_get_exception_swallowed(self):
+        """When redis.get() raises, the exception is silently caught and worker_heartbeat stays False."""
+        mock_redis = AsyncMock()
+        mock_redis.xlen = AsyncMock(return_value=2)
+        mock_redis.get = AsyncMock(side_effect=Exception("Redis timeout"))
+
+        service = _make_admin_service(redis=mock_redis)
+        health = await service.get_health()
+
+        # queue_depth was set before the exception; worker_heartbeat stays False
+        assert health["queue_depth"] == 2
+        assert health["worker_heartbeat"] is False
+
+    @pytest.mark.asyncio
+    async def test_list_flagged_analyses_calls_repo(self):
+        """list_flagged_analyses delegates to analysis_repo.list_flagged with correct args."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        flagged = _make_orm_analysis(flagged_for_review=True)
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.list_flagged = AsyncMock(return_value=[flagged])
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        results = await service.list_flagged_analyses(limit=25, offset=5)
+
+        mock_analysis_repo.list_flagged.assert_awaited_once_with(limit=25, offset=5)
+        assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_expert_queue_stats_returns_counts(self):
+        """get_expert_queue_stats aggregates count_flagged, count_annotated, count_golden."""
+        from app.repositories.analysis import AnalysisRepository
+        from app.repositories.user_profile import UserProfileRepository
+        from app.services.admin import AdminService
+
+        mock_analysis_repo = AsyncMock(spec=AnalysisRepository)
+        mock_analysis_repo.count_flagged = AsyncMock(return_value=10)
+        mock_analysis_repo.count_annotated = AsyncMock(return_value=4)
+        mock_analysis_repo.count_golden = AsyncMock(return_value=2)
+        mock_profile_repo = AsyncMock(spec=UserProfileRepository)
+
+        service = AdminService(
+            analysis_repo=mock_analysis_repo,
+            user_profile_repo=mock_profile_repo,
+        )
+        stats = await service.get_expert_queue_stats()
+
+        assert stats["total_flagged"] == 10
+        assert stats["total_annotated"] == 4
+        assert stats["golden_dataset_count"] == 2

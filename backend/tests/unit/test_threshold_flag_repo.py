@@ -103,3 +103,132 @@ async def test_update_status_sets_resolution_metadata(db_session: AsyncSession):
     assert updated.resolution_note == "Merged in PR #XXX."
     assert updated.resolved_by == admin_id
     assert updated.resolved_at is not None
+
+
+# ---------------------------------------------------------------------------
+# Mock-based unit tests for get_by_id, list_all, and update_status branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_returns_flag_mock():
+    """get_by_id delegates to scalar_one_or_none (mock-based, no real DB)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    flag_id = uuid4()
+    flag = MagicMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = flag
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.get_by_id(flag_id)
+
+    assert result is flag
+
+
+@pytest.mark.asyncio
+async def test_get_by_id_returns_none_mock():
+    """get_by_id returns None when flag not found."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = None
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.get_by_id(uuid4())
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_all_no_status_filter_mock():
+    """list_all without status filter returns all rows."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    row = MagicMock()
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = [row]
+    execute_result = MagicMock()
+    execute_result.scalars.return_value = scalars_result
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.list_all(status=None, limit=50, offset=0)
+
+    assert result == [row]
+
+
+@pytest.mark.asyncio
+async def test_list_all_with_status_filter_mock():
+    """list_all with status filter adds a WHERE clause."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    scalars_result = MagicMock()
+    scalars_result.all.return_value = []
+    execute_result = MagicMock()
+    execute_result.scalars.return_value = scalars_result
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.list_all(status="open", limit=10, offset=0)
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_update_status_flushes_when_row_found_mock():
+    """update_status calls flush when the row is found (the if-branch is covered)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    flag = MagicMock()
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = flag
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+    db.flush = AsyncMock()
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.update_status(
+        uuid4(),
+        status="resolved",
+        resolution_note="done",
+        resolved_by=uuid4(),
+    )
+
+    assert result is flag
+    db.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_status_returns_none_when_not_found_mock():
+    """update_status returns None without calling flush when row is not found."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = None
+
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+    db.flush = AsyncMock()
+
+    repo = ThresholdFlagRepository(db)
+    result = await repo.update_status(
+        uuid4(),
+        status="rejected",
+        resolution_note=None,
+        resolved_by=uuid4(),
+    )
+
+    assert result is None
+    db.flush.assert_not_awaited()

@@ -231,3 +231,67 @@ async def test_rerank_returns_sorted_indices() -> None:
     assert ranked == [(0, 0.95), (1, 0.7), (2, 0.4)], (
         f"Expected [(0, 0.95), (1, 0.7), (2, 0.4)], got {ranked}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — embed_batch raises ValueError when float_ is None (line 120)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_embed_batch_raises_when_float_vecs_none() -> None:
+    """When Cohere response returns None for float embeddings, ValueError is raised."""
+    from app.services.cohere_client import CohereEmbedClient, EmbedInputType
+
+    fake_embed_response = MagicMock()
+    fake_embed_response.embeddings.float_ = None  # simulate missing float vectors
+
+    mock_async_client = AsyncMock()
+    mock_async_client.embed = AsyncMock(return_value=fake_embed_response)
+
+    client = CohereEmbedClient.__new__(CohereEmbedClient)
+    client._client = mock_async_client
+
+    with pytest.raises(ValueError, match="None for float embeddings"):
+        await client.embed_batch(["test"], input_type=EmbedInputType.SEARCH_DOCUMENT)
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — get_cohere_client uses cache on second call (line 207)
+# ---------------------------------------------------------------------------
+
+
+def test_get_cohere_client_returns_cached_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Second call to get_cohere_client returns same instance without re-constructing."""
+    monkeypatch.setenv("COHERE_API_KEY", "test-key")
+
+    import app.services.cohere_client as cc_module
+
+    cc_module._cohere_client_cache = None  # reset cache
+
+    with patch("cohere.AsyncClientV2", return_value=MagicMock()):
+        from app.services.cohere_client import get_cohere_client
+
+        first = get_cohere_client()
+        second = get_cohere_client()
+
+    assert first is second  # same instance returned from cache
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — get_cohere_client raises RuntimeError when API key missing (line 211)
+# ---------------------------------------------------------------------------
+
+
+def test_get_cohere_client_raises_when_no_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """get_cohere_client raises RuntimeError when COHERE_API_KEY is not set."""
+    monkeypatch.delenv("COHERE_API_KEY", raising=False)
+
+    import app.services.cohere_client as cc_module
+
+    cc_module._cohere_client_cache = None  # reset cache
+
+    from app.services.cohere_client import get_cohere_client
+
+    with pytest.raises(RuntimeError, match="COHERE_API_KEY"):
+        get_cohere_client()

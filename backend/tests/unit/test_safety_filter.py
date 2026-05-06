@@ -191,3 +191,45 @@ def test_never_raises_on_malformed_input() -> None:
     # Shouldn't raise even with weird inputs
     result = SafetyFilter.apply(output)
     assert result.output is not None
+
+
+# ---------------------------------------------------------------------------
+# Branch coverage uplift — exception handler and remaining branches
+# ---------------------------------------------------------------------------
+
+
+def test_apply_exception_returns_input_unchanged() -> None:
+    """When _apply_impl raises, apply() swallows and returns original output."""
+    from unittest.mock import patch
+
+    from app.services.safety_filter import SafetyFilter
+
+    output = _make_coaching_output()
+    with patch.object(SafetyFilter, "_apply_impl", side_effect=RuntimeError("boom")):
+        result = SafetyFilter.apply(output)
+
+    assert result.output is output
+    assert result.phrases_replaced == 0
+    assert result.injected_disclaimer is False
+
+
+def test_replace_prohibited_phrase_in_recommended_cues() -> None:
+    """Prohibited phrases in recommended_cues are replaced and cues_changed triggers update."""
+    from app.services.safety_filter import SafetyFilter
+
+    output = _make_coaching_output(recommended_cues=["Focus on injury risk reduction here"])
+    result = SafetyFilter.apply(output)
+
+    assert "injury risk" not in result.output.recommended_cues[0]
+    assert result.phrases_replaced >= 1
+
+
+def test_replace_prohibited_phrase_in_safety_warnings() -> None:
+    """Prohibited phrases in safety_warnings are replaced."""
+    from app.services.safety_filter import SafetyFilter
+
+    output = _make_coaching_output(safety_warnings=["injury prevention protocol required"])
+    result = SafetyFilter.apply(output)
+
+    assert "injury prevention" not in result.output.safety_warnings[0].lower()
+    assert result.phrases_replaced >= 1
