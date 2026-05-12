@@ -1057,3 +1057,18 @@ Closed 20 audit findings across 4 PRs, then ran Phase 3 audit and fixed 2 HIGH f
 | D-AUDIT-M-07 | Pin system apt packages in Dockerfile | deferred | Requires per-mirror version resolution; infra sprint |
 | D-AUDIT-M-10 | Refactor files > 300 lines | deferred | Tech debt / refactoring scope — no feature context |
 | D-AUDIT-L-03 | Enable ufw on droplet | deferred | Pure server config, not code fix — do manually |
+
+---
+
+## Completed — Expert Onboarding Prep (2026-05-12, session 63)
+
+Three PRs preparing the expert portal for the first kinesiology reviewer. PR #135: nav link + unmeasurable dimension cleanup + structured annotation form. PR #136: "My Papers" tab replacing "Papers Pending" stub. PR #137: full paper ingestion pipeline (Docling PDF extraction → IngestionService → Qdrant).
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-EXPERT-12 | Expert Portal nav link in AppLayout (isExpert state for expert_reviewer + admin) | done | S | — | FR-EXPV-01 | `fc71a82` (PR #135) | `frontend/src/components/AppLayout.tsx` |
+| L2-EXPERT-13 | Remove unmeasurable dimension references from coaching prompts, Coach Brain vocab, distillation examples, scoring badge text, backend CLAUDE.md | done | M | — | — | `fc71a82` (PR #135) | `backend/app/services/coaching.py`, `backend/app/agents/tools.py`, `backend/app/distillation/extract.py`, `backend/app/cv/scoring.py`, `backend/CLAUDE.md` |
+| L2-EXPERT-14 | Replace JSON annotation textareas with exercise-specific checkboxes + structured citation rows | done | M | — | FR-EXPV-04 | `fc71a82` (PR #135) | `frontend/src/pages/ExpertAnalysisDetailPage.tsx`, `frontend/src/pages/__tests__/ExpertAnalysisDetailPageBranches.test.tsx` |
+| L2-EXPERT-15 | Repurpose "Papers Pending" → "My Papers" tab: GET /api/v1/expert/papers endpoint + PapersTable frontend component | done | M | — | FR-EXPV-02 | `9ac7147` (PR #136) | `backend/app/api/v1/expert.py`, `frontend/src/api/expert.ts`, `frontend/src/pages/ExpertPortalPage.tsx` |
+| L2-EXPERT-16 | Wire ingest_paper worker: Docling PDF extraction + IngestionService + chunk_count write-back. Triggered on paper approval. | done | L | L2-EXPERT-07 | FR-EXPV-02 | `05c37ee` (PR #137) | `backend/app/workers/paper_ingestion.py`, `backend/app/services/pdf_extraction.py`, `backend/app/services/paper_storage.py`, `backend/app/repositories/rag_document.py`, `backend/app/workers/streaq_worker.py` |
+| L2-EXPERT-17 | Gitignore cleanup: model binaries, e2e video fixtures, Playwright YML snapshots, superpowers plans, Word lock files | done | S | — | — | `9ac7147` (PR #136) | `.gitignore` |

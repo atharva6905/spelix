@@ -1199,3 +1199,22 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 **Decision.** All Coach Brain entry tombstones use the same pattern: `existing.status = 'deprecated'` + `existing.extra_metadata = {**existing.extra_metadata, 'rejected_reason': '<reason_string>'}`. Reasons are convention-driven free strings: `'source_consent_withdrawn'` (FR-BRAIN-16), `'contradicted_by_<candidate_uuid>'` (FR-BRAIN-17). Used in `backend/app/repositories/coach_brain.py:soft_delete_empty_unconfirmed` and `backend/app/distillation/store.py:store_entry`. No migration. No new column. SRS prose is the bug; the runtime invariant is canonical.
 
 **Consequences.** New tombstone reasons are 1-line additions to either function — no migration, no model change. Consumers querying for "rejected" entries must filter by `status='deprecated'` AND `extra_metadata->>'rejected_reason' = ?` — there is no clean SQL boolean column for this. Adding `'rejected'` to the CHECK or a `rejected_reason` column at any future point requires migrating both call sites and rewriting downstream queries. If a Phase 4 reporting need surfaces and the JSONB query becomes hot, **then** consider promoting `rejected_reason` to a real column behind a feature flag; until that need is concrete, the JSONB convention stays.
+
+## ADR-EXPERT-02: Docling for expert-uploaded PDF text extraction (Session 63)
+
+**Context.** Expert-uploaded papers are stored in Supabase Storage as raw PDFs. The `ingest_paper` worker (ADR-EXPERT-01) was a stub that downloaded 8 magic bytes and logged `docling_pending`. The existing `IngestionService` (P2-004) accepts raw text + optional sections dict — it handles chunking, Cohere embedding, and Qdrant upsert. The missing piece was PDF → text extraction.
+
+**Decision.** Use Docling (`docling>=2.0.0`) for PDF text extraction with section-aware parsing. `pdf_extraction.py` wraps `DocumentConverter` inside `asyncio.to_thread()` (CPU-bound). It returns `(full_text, sections_dict_or_None)` where sections are keyed by heading type (abstract, methods, results, discussion, conclusion). The worker calls this, then passes output to `IngestionService.ingest_document()`.
+
+**Key constraints:**
+- `IngestionService` has a hard guard: `review_status == "reviewed_approved"` required. Expert uploads arrive as `"pending"`. The worker returns `status="pending_review"` early.
+- Ingestion is triggered when an admin approves the paper via `PATCH /expert/papers/{id}/review` with `decision="reviewed_approved"` — this enqueues `ingest_paper`.
+- `WorkerContext` now wires `paper_storage` (PaperStorageService) and `db_session_maker` (async_session) in `lifespan()`, previously both `None`.
+- `chunk_count` is written back to `rag_documents` after ingestion via new `RagDocumentRepository.update_chunk_count()`.
+
+**Alternatives considered:**
+- **PyMuPDF (fitz)**: lighter, faster, but no section-aware parsing. Docling's section extraction maps directly to IngestionService's `sections` parameter for section-aware chunking.
+- **pymupdf4llm**: markdown output only, no structured section dict.
+- **Unstructured.io**: heavier dependency, cloud-hosted API tier, overkill for straightforward PDF parsing.
+
+**Consequences.** `docling` adds ~30 MB to the Docker image. The worker task timeout is 300s (may need increase for very large PDFs — monitor after first real uploads). Docling's `DocumentConverter` loads an ML model on first call (~2s cold start); subsequent calls reuse it within the worker process.
