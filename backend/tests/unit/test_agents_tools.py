@@ -209,8 +209,8 @@ async def test_retrieve_coach_brain_query_includes_seed_corpus_vocabulary() -> N
     """
     cases: list[tuple[str, set[str]]] = [
         # Tokens chosen from seed_coach_brain.py trigger_tags + content nouns.
-        ("bench", {"elbow", "scapular", "lat"}),
-        ("squat", {"depth", "knee", "lumbar"}),
+        ("bench", {"shoulder", "bar", "lockout"}),
+        ("squat", {"depth", "knee", "torso"}),
         ("deadlift", {"hinge", "lockout", "lat"}),
     ]
 
