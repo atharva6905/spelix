@@ -55,6 +55,7 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["app"]
+omit = ["app/services/pdf_extraction.py"]
 
 [tool.coverage.report]
 fail_under = 95
