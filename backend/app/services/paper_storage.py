@@ -45,6 +45,10 @@ class PaperStorageService:
         data: bytes = await bucket.download(storage_path)
         return data[:n]
 
+    async def download_bytes(self, storage_path: str) -> bytes:
+        bucket = self._client.storage.from_(self._bucket)
+        return await bucket.download(storage_path)
+
     async def delete_object(self, storage_path: str) -> None:
         bucket = self._client.storage.from_(self._bucket)
         await bucket.remove([storage_path])

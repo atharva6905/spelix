@@ -306,11 +306,11 @@ async def test_ingest_paper_fn_invokes_ingest() -> None:
 
     with patch(
         "app.workers.paper_ingestion.ingest_paper",
-        new=AsyncMock(return_value={"status": "docling_pending"}),
+        new=AsyncMock(return_value={"status": "ingested", "chunk_count": 5}),
     ) as mock_ingest:
         result = await ingest_paper.fn("paper-id-123", context)
         mock_ingest.assert_awaited_once()
-        assert result["status"] == "docling_pending"
+        assert result["status"] == "ingested"
 
 
 @pytest.mark.asyncio

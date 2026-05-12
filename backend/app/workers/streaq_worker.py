@@ -62,8 +62,8 @@ class WorkerContext:
 
     `redis` is the live async redis client created in `lifespan()` — task
     bodies read it via the adapter for mid-pipeline heartbeat writes.
-    `paper_storage` and `db_session_maker` stay None in this migration —
-    P2-005 will wire them when Docling ingestion lands.
+    `paper_storage` and `db_session_maker` are wired in `lifespan()` for
+    the worker process; None on the web process (enqueue-only).
     """
 
     redis: Any
@@ -79,6 +79,17 @@ async def _heartbeat_loop(redis: Any) -> None:
         except Exception:
             logger.warning("Failed to write worker heartbeat")
         await asyncio.sleep(_HEARTBEAT_INTERVAL)
+
+
+async def _build_supabase_client() -> Any | None:
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not supabase_key:
+        logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set — paper_storage inert")
+        return None
+    from supabase._async.client import acreate_client
+
+    return await acreate_client(supabase_url, supabase_key)
 
 
 @asynccontextmanager
@@ -99,12 +110,28 @@ async def lifespan() -> AsyncIterator[WorkerContext]:
     """
     redis_client = aioredis.from_url(_REDIS_URL, decode_responses=False)
     heartbeat: asyncio.Task | None = None
+
+    paper_storage = None
+    db_session_maker = None
     if not _IS_WEB_PROCESS:
         heartbeat = asyncio.create_task(_heartbeat_loop(redis_client))
         logger.info("streaq worker started — heartbeat loop active")
+
+        from app.db import async_session
+        from app.services.paper_storage import PaperStorageService
+
+        db_session_maker = async_session
+        supabase_client = await _build_supabase_client()
+        if supabase_client is not None:
+            paper_storage = PaperStorageService(client=supabase_client)
     else:
         logger.info("streaq worker context entered on web process — heartbeat suppressed")
-    ctx = WorkerContext(redis=redis_client)
+
+    ctx = WorkerContext(
+        redis=redis_client,
+        paper_storage=paper_storage,
+        db_session_maker=db_session_maker,
+    )
     try:
         yield ctx
     finally:

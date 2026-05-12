@@ -428,6 +428,12 @@ async def review_paper(
             status_code=404,
             detail={"error": {"code": "NOT_FOUND", "message": "Document not found.", "detail": None}},
         )
+
+    if body.decision == "reviewed_approved":
+        from app.workers.streaq_worker import ingest_paper
+
+        await ingest_paper.enqueue(str(doc_id))
+
     return RagDocumentReviewResponse.model_validate(doc, from_attributes=True)
 
 
