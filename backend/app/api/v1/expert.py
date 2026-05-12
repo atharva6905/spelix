@@ -512,3 +512,34 @@ async def list_my_threshold_flags(
 ) -> list[Any]:
     rows = await repo.list_by_reviewer(user["id"], limit=limit, offset=offset)
     return [ThresholdFlagResponse.model_validate(r, from_attributes=True) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# My Papers (expert-uploaded documents)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/papers")
+async def list_my_papers(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[Any]:
+    from sqlalchemy import select
+
+    from app.schemas.rag_document import RagDocumentResponse
+
+    stmt = (
+        select(RagDocument)
+        .where(
+            RagDocument.extra_metadata["uploaded_by"].as_string() == str(user["id"]),
+            RagDocument.review_status != "uploading",
+        )
+        .order_by(RagDocument.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    return [RagDocumentResponse.model_validate(r, from_attributes=True) for r in rows]

@@ -278,6 +278,18 @@ export async function reviewPaper(
 }
 
 // ---------------------------------------------------------------------------
+// My Papers (expert-uploaded documents)
+// ---------------------------------------------------------------------------
+
+export async function listExpertPapers(
+  limit = 20,
+  offset = 0,
+): Promise<RagDocumentResponse[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return expertFetch<RagDocumentResponse[]>(`/api/v1/expert/papers?${params}`);
+}
+
+// ---------------------------------------------------------------------------
 // Golden Dataset (FR-EXPV-07)
 // ---------------------------------------------------------------------------
 

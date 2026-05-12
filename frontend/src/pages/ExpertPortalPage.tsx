@@ -13,7 +13,9 @@ import { Link, Navigate } from "react-router";
 import { supabase } from "@/lib/supabase";
 import {
   getExpertQueue,
+  listExpertPapers,
   type ExpertQueueItem,
+  type RagDocumentResponse,
 } from "@/api/expert";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,7 @@ const TABS: Tab[] = [
   { label: "Flagged", queueType: "flagged" },
   { label: "Low Quality", queueType: "low_quality" },
   { label: "First Run", queueType: "first_run" },
-  { label: "Papers Pending", queueType: "papers_pending" },
+  { label: "My Papers", queueType: "papers_pending" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -197,6 +199,153 @@ function QueueTable({ items, loading, error, offset, onPrevious, onNext }: Queue
 }
 
 // ---------------------------------------------------------------------------
+// Status badge styles for papers
+// ---------------------------------------------------------------------------
+
+const REVIEW_STATUS_STYLES: Record<string, { label: string; className: string }> = {
+  pending: { label: "Pending", className: "bg-yellow-100 text-yellow-700" },
+  reviewed_approved: { label: "Approved", className: "bg-green-100 text-green-700" },
+  reviewed_rejected: { label: "Rejected", className: "bg-red-100 text-red-700" },
+  needs_revision: { label: "Needs Revision", className: "bg-orange-100 text-orange-700" },
+};
+
+const TIER_STYLES: Record<string, string> = {
+  L1: "bg-indigo-100 text-indigo-700",
+  L2: "bg-blue-100 text-blue-700",
+  L3: "bg-gray-100 text-gray-600",
+  L4: "bg-gray-100 text-gray-500",
+};
+
+// ---------------------------------------------------------------------------
+// Papers table component
+// ---------------------------------------------------------------------------
+
+interface PapersTableProps {
+  papers: RagDocumentResponse[];
+  loading: boolean;
+  error: string | null;
+  offset: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
+function PapersTable({ papers, loading, error, offset, onPrevious, onNext }: PapersTableProps) {
+  if (loading) {
+    return <p className="py-8 text-center text-sm text-gray-500">Loading papers...</p>;
+  }
+
+  if (error) {
+    return <p className="py-4 text-sm text-red-600">{error}</p>;
+  }
+
+  if (papers.length === 0) {
+    return (
+      <div className="py-8 text-center">
+        <p className="text-sm text-gray-500">
+          No papers uploaded yet.{" "}
+          <Link to="/expert/papers/upload" className="text-indigo-600 underline">
+            Upload your first paper
+          </Link>{" "}
+          to start building the knowledge base.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+              <th className="pb-3 pr-4">Title</th>
+              <th className="pb-3 pr-4">Authors</th>
+              <th className="pb-3 pr-4">Tags</th>
+              <th className="pb-3 pr-4">Tier</th>
+              <th className="pb-3 pr-4">Status</th>
+              <th className="pb-3 pr-4">Chunks</th>
+              <th className="pb-3">Uploaded</th>
+            </tr>
+          </thead>
+          <tbody>
+            {papers.map((paper) => {
+              const statusInfo = REVIEW_STATUS_STYLES[paper.review_status] ?? {
+                label: paper.review_status,
+                className: "bg-gray-100 text-gray-500",
+              };
+              const tierStyle = paper.quality_tier
+                ? (TIER_STYLES[paper.quality_tier] ?? "bg-gray-100 text-gray-500")
+                : null;
+
+              return (
+                <tr key={paper.id} className="border-b border-gray-100 last:border-0">
+                  <td className="max-w-[200px] truncate py-3 pr-4 font-medium text-gray-800">
+                    {paper.title}
+                  </td>
+                  <td className="max-w-[150px] truncate py-3 pr-4 text-gray-600">
+                    {paper.authors.length > 0 ? paper.authors.join(", ") : "—"}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <div className="flex flex-wrap gap-1">
+                      {paper.exercise_tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium capitalize text-indigo-600"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4">
+                    {tierStyle ? (
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${tierStyle}`}>
+                        {paper.quality_tier}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusInfo.className}`}>
+                      {statusInfo.label}
+                    </span>
+                  </td>
+                  <td className="py-3 pr-4 text-gray-700">{paper.chunk_count}</td>
+                  <td className="py-3 text-gray-700">{formatDate(paper.created_at)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onPrevious}
+          disabled={offset === 0}
+          className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-600 disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="text-xs text-gray-400">
+          Showing {offset + 1}–{offset + papers.length}
+        </span>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={papers.length < PAGE_SIZE}
+          className="rounded-md border border-gray-300 px-3 py-1 text-sm text-gray-600 disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -204,6 +353,7 @@ export default function ExpertPortalPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<QueueType>("flagged");
   const [items, setItems] = useState<ExpertQueueItem[]>([]);
+  const [papers, setPapers] = useState<RagDocumentResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
@@ -225,12 +375,16 @@ export default function ExpertPortalPage() {
   }, []);
 
   const fetchQueue = useCallback(async () => {
-    if (activeTab === "papers_pending") return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getExpertQueue(PAGE_SIZE, offset, activeTab);
-      setItems(data);
+      if (activeTab === "papers_pending") {
+        const data = await listExpertPapers(PAGE_SIZE, offset);
+        setPapers(data);
+      } else {
+        const data = await getExpertQueue(PAGE_SIZE, offset, activeTab);
+        setItems(data);
+      }
     } catch (err) {
       console.error("Failed to load expert queue", err);
       setError("Failed to load queue. Please try again.");
@@ -248,6 +402,7 @@ export default function ExpertPortalPage() {
     setActiveTab(tab);
     setOffset(0);
     setItems([]);
+    setPapers([]);
     setError(null);
   }
 
@@ -317,15 +472,14 @@ export default function ExpertPortalPage() {
         {/* Tab content */}
         <section className="rounded-lg bg-white p-6 shadow-sm">
           {activeTab === "papers_pending" ? (
-            <div className="py-8 text-center">
-              <p className="text-sm text-gray-500">
-                Paper review queue coming soon. Use the{" "}
-                <Link to="/expert/papers/upload" className="text-indigo-600 underline">
-                  Upload Paper
-                </Link>{" "}
-                page to submit research documents.
-              </p>
-            </div>
+            <PapersTable
+              papers={papers}
+              loading={loading}
+              error={error}
+              offset={offset}
+              onPrevious={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              onNext={() => setOffset(offset + PAGE_SIZE)}
+            />
           ) : (
             <QueueTable
               items={items}
