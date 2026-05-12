@@ -98,19 +98,28 @@ async def test_create_and_list_analyses():
 
     app.dependency_overrides[_get_service] = lambda: mock_service
 
+    mock_consent = MagicMock()
+    mock_consent.granted = True
+    mock_consent_repo = MagicMock()
+    mock_consent_repo.get_latest_by_type = AsyncMock(return_value=mock_consent)
+
     try:
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             # Create
-            resp = await client.post(
-                "/api/v1/analyses",
-                json={
-                    "exercise_type": "squat",
-                    "exercise_variant": "high_bar",
-                    "filename": "squat.mp4",
-                    "file_size_bytes": 5_000_000,
-                },
-            )
+            with patch(
+                "app.api.v1.analyses.ConsentRepository",
+                return_value=mock_consent_repo,
+            ):
+                resp = await client.post(
+                    "/api/v1/analyses",
+                    json={
+                        "exercise_type": "squat",
+                        "exercise_variant": "high_bar",
+                        "filename": "squat.mp4",
+                        "file_size_bytes": 5_000_000,
+                    },
+                )
             assert resp.status_code == 201, f"Create failed: {resp.text}"
             data = resp.json()
             assert data["status"] == "queued"
