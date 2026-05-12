@@ -87,7 +87,7 @@ async def _build_supabase_client() -> Any | None:
     if not supabase_url or not supabase_key:
         logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set — paper_storage inert")
         return None
-    from supabase._async.client import acreate_client
+    from supabase import acreate_client  # type: ignore[import]
 
     return await acreate_client(supabase_url, supabase_key)
 

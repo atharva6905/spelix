@@ -17,10 +17,11 @@ SECTION_HEADINGS = ("abstract", "introduction", "methods", "results", "discussio
 
 
 def _extract_sync(pdf_bytes: bytes) -> tuple[str, dict[str, str] | None]:
+    from docling.datamodel.base_models import DocumentStream
     from docling.document_converter import DocumentConverter
 
     converter = DocumentConverter()
-    source = io.BytesIO(pdf_bytes)
+    source = DocumentStream(name="paper.pdf", stream=io.BytesIO(pdf_bytes))
     result = converter.convert(source)
 
     doc: Any = result.document

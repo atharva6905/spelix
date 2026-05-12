@@ -63,6 +63,9 @@ async def ingest_paper(ctx: dict[str, Any], paper_id: str) -> dict[str, Any]:
 
     cohere_client = get_cohere_client()
     qdrant_client = await get_qdrant_client()
+    if qdrant_client is None:
+        logger.error("paper.ingest.qdrant_unavailable", extra={"paper_id": paper_id})
+        return {"paper_id": paper_id, "status": "qdrant_unavailable"}
     svc = IngestionService(cohere_client=cohere_client, qdrant_client=qdrant_client)
 
     result = await svc.ingest_document(
