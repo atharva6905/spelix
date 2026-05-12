@@ -93,6 +93,17 @@ class RagDocumentRepository:
         await self._db.refresh(doc)
         return doc
 
+    async def update_chunk_count(
+        self, doc_id: uuid.UUID, *, chunk_count: int
+    ) -> None:
+        result = await self._db.execute(
+            select(RagDocument).where(RagDocument.id == doc_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is not None:
+            doc.chunk_count = chunk_count
+            await self._db.flush()
+
     async def create(self, doc: RagDocument) -> RagDocument:
         self._db.add(doc)
         await self._db.flush()

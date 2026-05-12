@@ -646,11 +646,13 @@ def test_annotation_create_uses_movement_advice_field():
 
 
 class TestExpertPaperReview:
+    @patch("app.workers.streaq_worker.ingest_paper")
     @patch("app.api.v1.expert.RagDocumentRepository")
-    def test_approve_paper(self, MockRepo, expert_client):
+    def test_approve_paper(self, MockRepo, mock_ingest_task, expert_client):
         doc = _make_rag_document(review_status="reviewed_approved", reviewer_id=TEST_EXPERT_ID, reviewed_at=NOW)
         instance = MockRepo.return_value
         instance.update_review_status = AsyncMock(return_value=doc)
+        mock_ingest_task.enqueue = AsyncMock()
 
         resp = expert_client.patch(
             f"/api/v1/expert/papers/{TEST_DOC_ID}/review",
@@ -658,6 +660,7 @@ class TestExpertPaperReview:
         )
         assert resp.status_code == 200
         assert resp.json()["review_status"] == "reviewed_approved"
+        mock_ingest_task.enqueue.assert_awaited_once_with(str(TEST_DOC_ID))
 
     @patch("app.api.v1.expert.RagDocumentRepository")
     def test_reject_paper(self, MockRepo, expert_client):

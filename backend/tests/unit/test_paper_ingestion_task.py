@@ -1,14 +1,14 @@
-"""Tests for the ingest_paper ARQ task stub (ADR-EXPERT-01, FR-EXPV-02).
+"""Tests for the ingest_paper worker task (real pipeline).
 
-Stub scope: confirms the task downloads head bytes via the injected
-PaperStorageService and emits the docling_pending log. Full Docling
-parsing arrives with P2-005.
+Covers: not_found, pending_review guard, extraction_failed,
+happy path (mocked Docling + IngestionService), and worker registration.
 """
 
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -16,177 +16,132 @@ import pytest
 from app.workers.paper_ingestion import ingest_paper
 
 
-@pytest.mark.asyncio
-async def test_ingest_paper_downloads_and_logs_pending(caplog):
-    paper_id = str(uuid4())
-    storage = AsyncMock()
-    storage.download_head_bytes = AsyncMock(return_value=b"%PDF-1.4")
-
-    ctx: dict = {
-        "paper_storage": storage,
-        "storage_path_override": f"papers/{paper_id}/test.pdf",
-    }
-
-    with caplog.at_level(logging.INFO):
-        result = await ingest_paper(ctx, paper_id)
-
-    assert result == {"paper_id": paper_id, "status": "docling_pending"}
-    storage.download_head_bytes.assert_awaited_once_with(
-        f"papers/{paper_id}/test.pdf", n=8
+def _make_doc(
+    paper_id=None,
+    review_status="reviewed_approved",
+    storage_path=None,
+    title="Test Paper",
+    authors=None,
+    year=2024,
+    doi="10.1234/test",
+    quality_tier="L2_rct",
+):
+    pid = paper_id or str(uuid4())
+    return SimpleNamespace(
+        id=pid,
+        title=title,
+        authors=authors or ["Smith J"],
+        year=year,
+        doi=doi,
+        quality_tier=quality_tier,
+        review_status=review_status,
+        storage_path=storage_path or f"papers/{pid}/doc.pdf",
+        chunk_count=0,
     )
-    assert any("docling_pending" in rec.message for rec in caplog.records)
 
 
 @pytest.mark.asyncio
-async def test_ingest_paper_not_found_when_row_missing(caplog):
-    """If the DB lookup returns None and no override is set, return status=not_found."""
+async def test_ingest_paper_not_found(caplog):
     paper_id = str(uuid4())
-    # No storage_path_override, no db_session_maker — forces the None path.
     ctx: dict = {"paper_storage": AsyncMock()}
 
     with caplog.at_level(logging.WARNING):
         result = await ingest_paper(ctx, paper_id)
 
     assert result == {"paper_id": paper_id, "status": "not_found"}
-    assert any("not_found" in rec.message for rec in caplog.records)
-
-
-def test_ingest_paper_registered_in_streaq_worker():
-    """Confirm the task is in the streaq worker's dispatch registry.
-
-    Presence in worker.registry is the property the old WorkerSettings.functions
-    check was really about — it means the worker process can actually invoke this
-    task, not just that the wrapper object exists.
-    """
-    from app.workers.streaq_worker import ingest_paper, worker
-
-    assert "ingest_paper" in worker.registry
-    assert worker.registry["ingest_paper"] is ingest_paper
 
 
 @pytest.mark.asyncio
-async def test_ingest_paper_uses_db_session_maker_to_lookup_storage_path():
-    """When db_session_maker is set (no override), the task looks up storage_path via DB."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from uuid import uuid4
-
+async def test_ingest_paper_pending_review(caplog):
     paper_id = str(uuid4())
-    mock_doc = MagicMock()
-    mock_doc.storage_path = f"papers/{paper_id}/doc.pdf"
+    doc = _make_doc(paper_id=paper_id, review_status="pending")
 
-    mock_repo = AsyncMock()
-    mock_repo.get_by_id = AsyncMock(return_value=mock_doc)
+    ctx: dict = {"paper_storage": AsyncMock(), "doc_override": doc}
 
-    mock_session = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_session_factory = MagicMock(return_value=mock_session)
+    with caplog.at_level(logging.INFO):
+        result = await ingest_paper(ctx, paper_id)
 
-    mock_storage = AsyncMock()
-    mock_storage.download_head_bytes = AsyncMock(return_value=b"%PDF")
-
-    ctx = {
-        "paper_storage": mock_storage,
-        "db_session_maker": mock_session_factory,
-    }
-
-    with patch("app.repositories.rag_document.RagDocumentRepository", return_value=mock_repo):
-        with patch(
-            "app.workers.paper_ingestion._lookup_storage_path",
-            AsyncMock(return_value=f"papers/{paper_id}/doc.pdf"),
-        ):
-            result = await ingest_paper(ctx, paper_id)
-
-    assert result["status"] == "docling_pending"
+    assert result == {"paper_id": paper_id, "status": "pending_review"}
 
 
 @pytest.mark.asyncio
-async def test_ingest_paper_returns_not_found_when_db_returns_none():
-    """When _lookup_storage_path returns None (doc doesn't exist), returns not_found."""
-    from unittest.mock import AsyncMock, patch
-    from uuid import uuid4
-
+async def test_ingest_paper_extraction_failed():
     paper_id = str(uuid4())
+    doc = _make_doc(paper_id=paper_id)
 
-    ctx = {
-        "paper_storage": AsyncMock(),
-    }
+    storage = AsyncMock()
+    storage.download_bytes = AsyncMock(return_value=b"%PDF-1.4 fake")
+
+    ctx: dict = {"paper_storage": storage, "doc_override": doc}
 
     with patch(
-        "app.workers.paper_ingestion._lookup_storage_path",
-        AsyncMock(return_value=None),
+        "app.services.pdf_extraction.extract_text_from_pdf",
+        AsyncMock(return_value=("", None)),
     ):
         result = await ingest_paper(ctx, paper_id)
 
-    assert result["status"] == "not_found"
+    assert result == {"paper_id": paper_id, "status": "extraction_failed"}
 
 
 @pytest.mark.asyncio
-async def test_lookup_storage_path_via_db_session_maker():
-    """_lookup_storage_path uses db_session_maker when no override is set."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from uuid import uuid4
+async def test_ingest_paper_happy_path():
+    paper_id = str(uuid4())
+    doc = _make_doc(paper_id=paper_id)
 
-    from app.workers.paper_ingestion import _lookup_storage_path
+    storage = AsyncMock()
+    storage.download_bytes = AsyncMock(return_value=b"%PDF-1.4 content")
 
-    paper_id = uuid4()
-    mock_doc = MagicMock()
-    mock_doc.storage_path = f"papers/{paper_id}/doc.pdf"
+    mock_ingestion_result = SimpleNamespace(
+        paper_id=paper_id, chunk_count=7, point_ids=["a", "b"]
+    )
+    mock_svc = AsyncMock()
+    mock_svc.ingest_document = AsyncMock(return_value=mock_ingestion_result)
 
     mock_repo = AsyncMock()
-    mock_repo.get_by_id = AsyncMock(return_value=mock_doc)
+    mock_repo.update_chunk_count = AsyncMock()
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=False)
+    mock_session.commit = AsyncMock()
     mock_session_factory = MagicMock(return_value=mock_session)
 
-    ctx = {"db_session_maker": mock_session_factory}
+    ctx: dict = {
+        "paper_storage": storage,
+        "doc_override": doc,
+        "db_session_maker": mock_session_factory,
+    }
 
-    # RagDocumentRepository is imported inline inside _lookup_storage_path,
-    # so patch at the source module that provides it.
-    with patch(
-        "app.repositories.rag_document.RagDocumentRepository",
-        new=MagicMock(return_value=mock_repo),
+    with (
+        patch(
+            "app.services.pdf_extraction.extract_text_from_pdf",
+            AsyncMock(return_value=("Full paper text here.", {"abstract": "Summary."})),
+        ),
+        patch("app.services.cohere_client.get_cohere_client", return_value=MagicMock()),
+        patch(
+            "app.services.qdrant.get_qdrant_client",
+            AsyncMock(return_value=MagicMock()),
+        ),
+        patch(
+            "app.services.ingestion.IngestionService",
+            return_value=mock_svc,
+        ),
+        patch(
+            "app.repositories.rag_document.RagDocumentRepository",
+            return_value=mock_repo,
+        ),
     ):
-        result = await _lookup_storage_path(ctx, paper_id)
+        result = await ingest_paper(ctx, paper_id)
 
-    assert result == f"papers/{paper_id}/doc.pdf"
+    assert result["status"] == "ingested"
+    assert result["chunk_count"] == 7
+    storage.download_bytes.assert_awaited_once_with(doc.storage_path)
+    mock_svc.ingest_document.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_lookup_storage_path_returns_none_when_doc_not_in_db():
-    """_lookup_storage_path returns None when repo.get_by_id returns None."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from uuid import uuid4
+def test_ingest_paper_registered_in_streaq_worker():
+    from app.workers.streaq_worker import ingest_paper as task_fn
+    from app.workers.streaq_worker import worker
 
-    from app.workers.paper_ingestion import _lookup_storage_path
-
-    paper_id = uuid4()
-    mock_repo = AsyncMock()
-    mock_repo.get_by_id = AsyncMock(return_value=None)
-
-    mock_session = AsyncMock()
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
-    mock_session_factory = MagicMock(return_value=mock_session)
-
-    ctx = {"db_session_maker": mock_session_factory}
-
-    # Use builtins import patching for the deferred import
-    import builtins
-
-    real_import = builtins.__import__
-
-    def _mock_import(name, *args, **kwargs):
-        mod = real_import(name, *args, **kwargs)
-        if name == "app.repositories.rag_document":
-            mock_module = MagicMock()
-            mock_module.RagDocumentRepository = lambda db: mock_repo
-            return mock_module
-        return mod
-
-    with patch("builtins.__import__", side_effect=_mock_import):
-        result = await _lookup_storage_path(ctx, paper_id)
-
-    assert result is None
+    assert "ingest_paper" in worker.registry
+    assert worker.registry["ingest_paper"] is task_fn
