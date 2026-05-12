@@ -98,9 +98,6 @@ async def test_stuck_queued_analysis_is_auto_failed() -> None:
     assert count == 1
     mock_session.commit.assert_awaited()
 
-    # Verify the UPDATE was issued with the correct values
-    update_call_args = mock_session.execute.call_args_list[1]
-    # The statement passed to execute is the update() statement — check it was called
     assert mock_session.execute.await_count >= 2  # SELECT + at least one UPDATE
 
 
@@ -233,7 +230,6 @@ async def test_db_error_on_first_continues_to_second() -> None:
     select_result.scalars.return_value.all.return_value = [analysis_a, analysis_b]
 
     # First UPDATE raises, second UPDATE succeeds
-    update_error = MagicMock(side_effect=RuntimeError("DB write failed"))
     update_ok = MagicMock()
 
     mock_session.execute = AsyncMock(
