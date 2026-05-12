@@ -228,22 +228,28 @@ class TestRateLimitBoundary:
             limiter.reset()
             return TestClient(app)
 
-        # User A exhausts their limit
-        client_a = _make_client_for_user(user_a_id)
-        for i in range(10):
-            resp = client_a.post("/api/v1/analyses", json=_VALID_BODY)
-            assert resp.status_code == status.HTTP_201_CREATED
-        resp_a = client_a.post("/api/v1/analyses", json=_VALID_BODY)
-        assert resp_a.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+        mock_consent = MagicMock()
+        mock_consent.granted = True
+        mock_consent_repo = MagicMock()
+        mock_consent_repo.get_latest_by_type = AsyncMock(return_value=mock_consent)
 
-        # User B gets a fresh counter — first request must succeed
-        # NOTE: Because slowapi uses in-process memory storage and the key
-        # includes the user identifier, a different user_id produces a
-        # different bucket. We verify by resetting to a fresh store for user B.
-        client_b = _make_client_for_user(user_b_id)
-        resp_b = client_b.post("/api/v1/analyses", json=_VALID_BODY)
-        assert resp_b.status_code == status.HTTP_201_CREATED, (
-            "User B should not be affected by User A's rate limit exhaustion"
-        )
+        with patch(
+            "app.api.v1.analyses.ConsentRepository",
+            return_value=mock_consent_repo,
+        ):
+            # User A exhausts their limit
+            client_a = _make_client_for_user(user_a_id)
+            for i in range(10):
+                resp = client_a.post("/api/v1/analyses", json=_VALID_BODY)
+                assert resp.status_code == status.HTTP_201_CREATED
+            resp_a = client_a.post("/api/v1/analyses", json=_VALID_BODY)
+            assert resp_a.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+            # User B gets a fresh counter — first request must succeed
+            client_b = _make_client_for_user(user_b_id)
+            resp_b = client_b.post("/api/v1/analyses", json=_VALID_BODY)
+            assert resp_b.status_code == status.HTTP_201_CREATED, (
+                "User B should not be affected by User A's rate limit exhaustion"
+            )
 
         app.dependency_overrides.clear()
