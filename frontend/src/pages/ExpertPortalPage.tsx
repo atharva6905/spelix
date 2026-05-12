@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import {
   getExpertQueue,
   listExpertPapers,
+  reviewPaper,
   type ExpertQueueItem,
   type RagDocumentResponse,
 } from "@/api/expert";
@@ -227,9 +228,11 @@ interface PapersTableProps {
   offset: number;
   onPrevious: () => void;
   onNext: () => void;
+  onApprove: (paperId: string) => void;
+  approving: string | null;
 }
 
-function PapersTable({ papers, loading, error, offset, onPrevious, onNext }: PapersTableProps) {
+function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving }: PapersTableProps) {
   if (loading) {
     return <p className="py-8 text-center text-sm text-gray-500">Loading papers...</p>;
   }
@@ -264,7 +267,8 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext }: Pap
               <th className="pb-3 pr-4">Tier</th>
               <th className="pb-3 pr-4">Status</th>
               <th className="pb-3 pr-4">Chunks</th>
-              <th className="pb-3">Uploaded</th>
+              <th className="pb-3 pr-4">Uploaded</th>
+              <th className="pb-3">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -312,7 +316,21 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext }: Pap
                     </span>
                   </td>
                   <td className="py-3 pr-4 text-gray-700">{paper.chunk_count}</td>
-                  <td className="py-3 text-gray-700">{formatDate(paper.created_at)}</td>
+                  <td className="py-3 pr-4 text-gray-700">{formatDate(paper.created_at)}</td>
+                  <td className="py-3">
+                    {paper.review_status === "pending" ? (
+                      <button
+                        type="button"
+                        onClick={() => onApprove(paper.id)}
+                        disabled={approving === paper.id}
+                        className="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
+                      >
+                        {approving === paper.id ? "Approving..." : "Approve & Ingest"}
+                      </button>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -357,6 +375,7 @@ export default function ExpertPortalPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  const [approving, setApproving] = useState<string | null>(null);
 
   // Role check — FR-EXPV-01
   useEffect(() => {
@@ -396,6 +415,21 @@ export default function ExpertPortalPage() {
   useEffect(() => {
     fetchQueue();
   }, [fetchQueue]);
+
+  async function handleApprovePaper(paperId: string) {
+    setApproving(paperId);
+    try {
+      await reviewPaper(paperId, { decision: "reviewed_approved" });
+      setPapers((prev) =>
+        prev.map((p) => (p.id === paperId ? { ...p, review_status: "reviewed_approved" } : p))
+      );
+    } catch (err) {
+      console.error("Failed to approve paper", err);
+      setError("Failed to approve paper. Please try again.");
+    } finally {
+      setApproving(null);
+    }
+  }
 
   // Reset offset when switching tabs
   function handleTabChange(tab: QueueType) {
@@ -479,6 +513,8 @@ export default function ExpertPortalPage() {
               offset={offset}
               onPrevious={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               onNext={() => setOffset(offset + PAGE_SIZE)}
+              onApprove={handleApprovePaper}
+              approving={approving}
             />
           ) : (
             <QueueTable
