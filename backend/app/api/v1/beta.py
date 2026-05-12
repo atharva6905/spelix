@@ -9,6 +9,7 @@ Provenance: landing-page-plan §7. No SRS FR — growth/ops surface.
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -25,8 +26,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["beta"])
 
 
+class BetaRequestCountResponse(BaseModel):
+    count: int
+
+
 def _get_service(db: AsyncSession = Depends(get_db)) -> BetaRequestService:
     return BetaRequestService(repo=BetaRequestRepository(db))
+
+
+@router.get(
+    "/count",
+    response_model=BetaRequestCountResponse,
+    summary="Get total beta waitlist count (public)",
+)
+async def get_beta_count(
+    db: AsyncSession = Depends(get_db),
+) -> BetaRequestCountResponse:
+    repo = BetaRequestRepository(db)
+    count = await repo.count_all()
+    return BetaRequestCountResponse(count=count)
 
 
 @router.post(

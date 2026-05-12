@@ -112,3 +112,36 @@ async def test_invalid_source_returns_422() -> None:
             "email": "a@b.com", "source": "facebook_ad", "consented_to_beta_terms": True,
         })
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_count_returns_200_with_count() -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.db import get_db
+
+    service = AsyncMock()
+    app = _make_app(service)
+
+    mock_repo = AsyncMock()
+    mock_repo.count_all.return_value = 42
+
+    mock_db = MagicMock()
+
+    async def _override_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = _override_db
+
+    with patch(
+        "app.api.v1.beta.BetaRequestRepository", return_value=mock_repo
+    ):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/v1/beta/count")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["count"] == 42
+    mock_repo.count_all.assert_awaited_once()
