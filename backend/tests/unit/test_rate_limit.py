@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import status
@@ -72,8 +72,19 @@ def client():
 
     from app.rate_limit import limiter
 
+    mock_consent = MagicMock()
+    mock_consent.granted = True
+    mock_consent_repo = MagicMock()
+    mock_consent_repo.get_latest_by_type = AsyncMock(return_value=mock_consent)
+
     # Swap to in-memory storage AFTER app startup to avoid Redis dependency
-    with TestClient(app) as c:
+    with (
+        TestClient(app) as c,
+        patch(
+            "app.api.v1.analyses.ConsentRepository",
+            return_value=mock_consent_repo,
+        ),
+    ):
         mem = MemoryStorage()
         limiter._storage = mem
         limiter._limiter.storage = mem
