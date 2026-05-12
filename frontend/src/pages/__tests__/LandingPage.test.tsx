@@ -12,6 +12,7 @@ vi.mock("@/lib/supabase", () => ({
 
 vi.mock("@/api/beta", () => ({
   requestBetaAccess: vi.fn(),
+  getBetaCount: vi.fn().mockResolvedValue({ count: 203 }),
 }));
 
 vi.mock("@/lib/posthog", () => ({ capture: vi.fn() }));
