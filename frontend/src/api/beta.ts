@@ -19,6 +19,12 @@ export interface BetaRequestResponse {
   created_at: string;
 }
 
+export async function getBetaCount(): Promise<{ count: number }> {
+  const resp = await fetch(`${API_BASE}/api/v1/beta/count`);
+  if (!resp.ok) throw new Error("Failed to fetch beta count");
+  return resp.json() as Promise<{ count: number }>;
+}
+
 export async function requestBetaAccess(
   input: BetaRequestInput,
 ): Promise<BetaRequestResponse> {
