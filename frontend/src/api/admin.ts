@@ -363,3 +363,51 @@ export async function getCoachBrainCandidateSimilar(
     `/api/v1/admin/coach-brain/candidates/${id}/similar?limit=${limit}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Beta Request Approval (admin ops)
+// ---------------------------------------------------------------------------
+
+export interface AdminBetaRequest {
+  id: string;
+  email: string;
+  source: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  approved_at: string | null;
+  approved_by: string | null;
+  invite_sent_at: string | null;
+}
+
+export interface AdminBetaRequestStats {
+  pending: number;
+  approved: number;
+  rejected: number;
+  total: number;
+}
+
+export async function listBetaRequests(
+  limit = 50,
+  offset = 0,
+  status?: string,
+): Promise<AdminBetaRequest[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (status) params.set("status", status);
+  return adminFetch<AdminBetaRequest[]>(`/api/v1/admin/beta-requests?${params}`);
+}
+
+export async function getBetaRequestStats(): Promise<AdminBetaRequestStats> {
+  return adminFetch<AdminBetaRequestStats>("/api/v1/admin/beta-requests/stats");
+}
+
+export async function approveBetaRequest(id: string): Promise<AdminBetaRequest> {
+  return adminFetch<AdminBetaRequest>(`/api/v1/admin/beta-requests/${id}/approve`, {
+    method: "POST",
+  });
+}
+
+export async function rejectBetaRequest(id: string): Promise<AdminBetaRequest> {
+  return adminFetch<AdminBetaRequest>(`/api/v1/admin/beta-requests/${id}/reject`, {
+    method: "POST",
+  });
+}

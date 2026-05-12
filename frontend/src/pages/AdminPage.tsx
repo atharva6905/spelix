@@ -30,6 +30,10 @@ import {
   listCoachBrainEntries,
   updateCoachBrainEntry,
   deleteCoachBrainEntry,
+  listBetaRequests,
+  getBetaRequestStats,
+  approveBetaRequest,
+  rejectBetaRequest,
   type AdminUser,
   type AdminAnalysis,
   type AdminHealth,
@@ -37,6 +41,8 @@ import {
   type AdminExpertQueueItem,
   type AdminExpertQueueStats,
   type CoachBrainEntry,
+  type AdminBetaRequest,
+  type AdminBetaRequestStats,
 } from "@/api/admin";
 
 // Valid status values per SRS Section 5.2a (7 total — quality_gate_passed is NOT valid)
@@ -984,6 +990,192 @@ function CoachBrainPanel() {
 }
 
 // ---------------------------------------------------------------------------
+// Beta Requests Panel (admin ops)
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE_BETA = 50;
+
+function BetaRequestsPanel() {
+  const [requests, setRequests] = useState<AdminBetaRequest[]>([]);
+  const [stats, setStats] = useState<AdminBetaRequestStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [offset, setOffset] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [data, s] = await Promise.all([
+        listBetaRequests(PAGE_SIZE_BETA, offset, statusFilter || undefined),
+        getBetaRequestStats(),
+      ]);
+      setRequests(data);
+      setStats(s);
+    } catch {
+      setError("Failed to load beta requests");
+    } finally {
+      setLoading(false);
+    }
+  }, [offset, statusFilter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleApprove = async (id: string) => {
+    try {
+      await approveBetaRequest(id);
+      load();
+    } catch {
+      setError("Failed to approve request");
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    try {
+      await rejectBetaRequest(id);
+      load();
+    } catch {
+      setError("Failed to reject request");
+    }
+  };
+
+  const statusBadge = (s: string) => {
+    const colors: Record<string, string> = {
+      pending: "bg-yellow-100 text-yellow-800",
+      approved: "bg-green-100 text-green-800",
+      rejected: "bg-red-100 text-red-800",
+    };
+    return (
+      <span
+        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${colors[s] ?? "bg-gray-100 text-gray-800"}`}
+      >
+        {s}
+      </span>
+    );
+  };
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow" aria-labelledby="beta-requests-heading">
+      <h2 id="beta-requests-heading" className="mb-4 text-lg font-semibold text-gray-900">
+        Beta Requests
+      </h2>
+
+      {stats && (
+        <div className="mb-4 flex gap-6 text-sm">
+          <span>
+            Pending: <strong>{stats.pending}</strong>
+          </span>
+          <span>
+            Approved: <strong>{stats.approved}</strong>
+          </span>
+          <span>
+            Rejected: <strong>{stats.rejected}</strong>
+          </span>
+          <span>
+            Total: <strong>{stats.total}</strong>
+          </span>
+        </div>
+      )}
+
+      <div className="mb-4">
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setOffset(0);
+          }}
+          className="rounded border px-2 py-1 text-sm"
+          aria-label="Filter beta requests by status"
+        >
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading...</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500">
+                <th className="px-3 py-2">Email</th>
+                <th className="px-3 py-2">Source</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Submitted</th>
+                <th className="px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((r) => (
+                <tr key={r.id} className="border-b hover:bg-gray-50">
+                  <td className="px-3 py-2">{r.email}</td>
+                  <td className="px-3 py-2">{r.source}</td>
+                  <td className="px-3 py-2">{statusBadge(r.status)}</td>
+                  <td className="px-3 py-2">{formatDate(r.created_at)}</td>
+                  <td className="px-3 py-2">
+                    {r.status === "pending" && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleApprove(r.id)}
+                          className="text-xs text-green-600 hover:underline"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleReject(r.id)}
+                          className="text-xs text-red-600 hover:underline"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {requests.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-4 text-center text-gray-400">
+                    No beta requests found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="mt-3 flex justify-between">
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE_BETA))}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <button
+          type="button"
+          disabled={requests.length < PAGE_SIZE_BETA}
+          onClick={() => setOffset(offset + PAGE_SIZE_BETA)}
+          className="rounded bg-gray-100 px-3 py-1 text-sm disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Page
 // ---------------------------------------------------------------------------
 
@@ -1040,6 +1232,7 @@ export default function AdminPage() {
           <RagCorpusPanel />
           <ExpertQueuePanel />
           <CoachBrainPanel />
+          <BetaRequestsPanel />
         </div>
       </div>
     </div>

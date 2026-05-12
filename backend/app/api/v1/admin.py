@@ -783,3 +783,92 @@ async def resolve_threshold_flag(
             detail={"error": {"code": "NOT_FOUND", "message": "Threshold flag not found.", "detail": None}},
         )
     return ThresholdFlagResponse.model_validate(updated, from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Beta Request Approval (admin ops — no SRS FR-ID)
+# ---------------------------------------------------------------------------
+
+
+class AdminBetaRequestResponse(BaseModel):
+    id: UUID
+    email: str
+    source: str
+    status: str
+    created_at: datetime
+    approved_at: datetime | None
+    approved_by: UUID | None
+    invite_sent_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class AdminBetaRequestStats(BaseModel):
+    pending: int
+    approved: int
+    rejected: int
+    total: int
+
+
+async def _get_beta_repo(
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    from app.repositories.beta_request import BetaRequestRepository
+
+    return BetaRequestRepository(db)
+
+
+@router.get("/beta-requests", response_model=list[AdminBetaRequestResponse])
+async def list_beta_requests(
+    status_filter: str | None = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(get_admin_user),
+    repo: Any = Depends(_get_beta_repo),
+) -> list[Any]:
+    rows = await repo.list_all(status_filter=status_filter, limit=limit, offset=offset)
+    return [AdminBetaRequestResponse.model_validate(r, from_attributes=True) for r in rows]
+
+
+@router.get("/beta-requests/stats", response_model=AdminBetaRequestStats)
+async def get_beta_request_stats(
+    user: CurrentUser = Depends(get_admin_user),
+    repo: Any = Depends(_get_beta_repo),
+) -> dict[str, int]:
+    return await repo.get_stats()
+
+
+@router.post(
+    "/beta-requests/{request_id}/approve",
+    response_model=AdminBetaRequestResponse,
+)
+async def approve_beta_request(
+    request_id: UUID,
+    user: CurrentUser = Depends(get_admin_user),
+    repo: Any = Depends(_get_beta_repo),
+) -> Any:
+    row = await repo.approve(request_id=request_id, approved_by=user["id"])
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Beta request not found.", "detail": None}},
+        )
+    return AdminBetaRequestResponse.model_validate(row, from_attributes=True)
+
+
+@router.post(
+    "/beta-requests/{request_id}/reject",
+    response_model=AdminBetaRequestResponse,
+)
+async def reject_beta_request(
+    request_id: UUID,
+    user: CurrentUser = Depends(get_admin_user),
+    repo: Any = Depends(_get_beta_repo),
+) -> Any:
+    row = await repo.reject(request_id=request_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "NOT_FOUND", "message": "Beta request not found.", "detail": None}},
+        )
+    return AdminBetaRequestResponse.model_validate(row, from_attributes=True)
