@@ -26,6 +26,12 @@ class BetaRequestRepository:
         await self.db.refresh(row)
         return row
 
+    async def count_all(self) -> int:
+        from sqlalchemy import func, select
+
+        result = await self.db.execute(select(func.count(BetaRequest.id)))
+        return result.scalar_one()
+
     async def list_all(
         self,
         *,
