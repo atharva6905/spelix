@@ -287,3 +287,13 @@ async def cleanup_orphan_papers_cron(
     from app.workers.cleanup_orphan_papers import cleanup_orphan_papers as _cleanup
 
     return await _cleanup(_adapt_ctx(context))
+
+
+@worker.cron("30 3 * * *")  # 03:30 UTC — between artifact (03:00) and orphan-papers (04:00)
+async def cleanup_stuck_analyses_cron(
+    context: WorkerContext = WorkerDepends(),
+) -> int:
+    """Nightly auto-fail of analyses stuck in non-terminal states."""
+    from app.workers.cleanup_stuck_analyses import cleanup_stuck_analyses as _cleanup
+
+    return await _cleanup(_adapt_ctx(context))

@@ -1,8 +1,22 @@
+import { useEffect, useState } from "react";
+import { getBetaCount } from "@/api/beta";
 import { HERO } from "@/constants/landing";
 import LandingHeroBackground from "./LandingHeroBackground";
 import LandingEmailForm from "./LandingEmailForm";
 
 export default function LandingHero() {
+  const [countText, setCountText] = useState<string>(HERO.countText);
+
+  useEffect(() => {
+    getBetaCount()
+      .then(({ count }) => {
+        setCountText(`${count} people on the waitlist`);
+      })
+      .catch(() => {
+        // silently fall back to the hardcoded default
+      });
+  }, []);
+
   return (
     <header
       data-section="hero"
@@ -46,7 +60,7 @@ export default function LandingHero() {
             <span className="mr-1.5 text-[13px] text-brand-primary opacity-55">
               {HERO.countPrefix}
             </span>
-            {HERO.countText}
+            {countText}
           </p>
         </div>
       </div>
