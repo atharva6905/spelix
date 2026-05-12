@@ -265,7 +265,7 @@ class SafetyScore:
                         message=(
                             f"Shoulder angle at bottom {shoulder_angle:.0f}° exceeds "
                             f"recommended maximum ({max_shoulder:.0f}°). "
-                            "Reduce flare to protect shoulder health."
+                            "Consider reducing shoulder opening angle for better stability."
                         ),
                     )
                 )
@@ -420,6 +420,9 @@ class TechniqueScore:
                     )
                 )
 
+        # NOTE: elbow_flare_deg is not currently produced by metric_extraction.py
+        # (requires frontal-plane camera). Branch retained for MC/DC test coverage
+        # and future multi-camera support. See cv-dimension-audit-2026-05-11.md.
         elbow_flare = metrics.get("elbow_flare_deg")
         if elbow_flare is not None:
             caution = cfg.get("bench", "elbow_flare_caution_deg")
@@ -524,8 +527,8 @@ class PathBalanceScore:
                     issue_key="lateral_deviation_high",
                     severity="Medium",
                     message=(
-                        f"Bar lateral deviation {lateral_dev:.2f} (normalised) is elevated. "
-                        "Keep the bar moving in a straight vertical path."
+                        f"Bar forward/backward deviation {lateral_dev:.2f} (normalised) is elevated. "
+                        "Keep the bar over midfoot throughout the lift."
                     ),
                 )
             )

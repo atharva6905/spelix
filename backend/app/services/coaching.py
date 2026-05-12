@@ -87,7 +87,7 @@ def _build_system_prompt() -> str:
         "the coach can use with the lifter.\n"
         "  - When a Retrieved Evidence section is provided below, you MUST embed inline "
         "citation markers directly in your prose using [N] notation "
-        "(e.g., \"Knee valgus collapse [1] is linked to reduced hip abductor strength [2]\"). "
+        "(e.g., \"Excessive forward lean during the squat descent [1] correlates with limited ankle dorsiflexion [2]\"). "
         "Use the same [N] index as the numbered item in the Retrieved Evidence section. "
         "Markers must appear inline inside the `summary`, `strengths`, `correction_plan`, "
         "and `issues[].description` fields wherever a claim is evidence-backed. "

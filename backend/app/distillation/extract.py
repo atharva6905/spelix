@@ -47,7 +47,7 @@ def _build_extraction_prompt(coaching_output: CoachingOutput, exercise_type: str
         "forward_lean).",
         "- When the insight describes a root-cause chain — a primary weakness that "
         "mechanically drives a downstream error — tag entry_type=\"compensation\". "
-        "Example: weak hip abductors driving knee valgus. Do NOT tag compensation "
+        "Example: limited ankle dorsiflexion driving excessive forward lean. Do NOT tag compensation "
         "for simple technique errors that have no root-cause explanation in the text.",
         "- If there is nothing worth distilling, return an empty list.",
         "",

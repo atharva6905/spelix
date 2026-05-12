@@ -613,20 +613,20 @@ describe("ExpertAnalysisDetailPage — branch coverage", () => {
       expect(screen.getByRole("button", { name: /submit annotation/i })).toBeInTheDocument(),
     );
 
-    const checkbox = screen.getByRole("checkbox");
+    const checkbox = screen.getByRole("checkbox", { name: /golden dataset/i });
     expect(checkbox).not.toBeChecked();
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();
   });
 
-  // AnnotationForm: parseJsonField — valid JSON
-  it("accepts valid JSON in issues_identified field", async () => {
+  // AnnotationForm: exercise-specific issue checkboxes
+  it("checks an exercise issue and submits structured payload", async () => {
     mocks.submitAnnotation.mockResolvedValue({
       id: "ann-json",
       coaching_quality_score: null,
       movement_advice_accurate: null,
       engagement_advice_accurate: null,
-      issues_identified: { knee_cave: true },
+      issues_identified: { insufficient_depth: { severity: "Medium" } },
       suggested_corrections: null,
       cited_sources: [],
       is_golden_label: false,
@@ -638,17 +638,27 @@ describe("ExpertAnalysisDetailPage — branch coverage", () => {
       expect(screen.getByRole("button", { name: /submit annotation/i })).toBeInTheDocument(),
     );
 
-    const issuesField = screen.getByLabelText(/Issues Identified/i);
-    fireEvent.change(issuesField, { target: { value: '{"knee_cave": true}' } });
+    const depthCheckbox = screen.getByRole("checkbox", { name: /Insufficient depth/i });
+    fireEvent.click(depthCheckbox);
+    expect(depthCheckbox).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: /submit annotation/i }));
     await waitFor(() =>
       expect(screen.getByText(/Annotation submitted successfully/i)).toBeInTheDocument(),
     );
+
+    expect(mocks.submitAnnotation).toHaveBeenCalledWith(
+      ANALYSIS_ID,
+      expect.objectContaining({
+        issues_identified: expect.objectContaining({
+          insufficient_depth: { severity: "Medium" },
+        }),
+      }),
+    );
   });
 
-  // AnnotationForm: cited_sources as JSON array
-  it("accepts JSON array in cited_sources field", async () => {
+  // AnnotationForm: structured cited sources
+  it("adds a source row, fills title, and submits structured payload", async () => {
     mocks.submitAnnotation.mockResolvedValue({
       id: "ann-cited",
       coaching_quality_score: null,
@@ -656,7 +666,7 @@ describe("ExpertAnalysisDetailPage — branch coverage", () => {
       engagement_advice_accurate: null,
       issues_identified: {},
       suggested_corrections: null,
-      cited_sources: [{ title: "Test" }],
+      cited_sources: [{ title: "Test Study", authors: [], year: null, doi: null }],
       is_golden_label: false,
       created_at: "2026-04-23T10:00:00Z",
     });
@@ -666,12 +676,23 @@ describe("ExpertAnalysisDetailPage — branch coverage", () => {
       expect(screen.getByRole("button", { name: /submit annotation/i })).toBeInTheDocument(),
     );
 
-    const citedField = screen.getByLabelText(/Cited Sources/i);
-    fireEvent.change(citedField, { target: { value: '[{"title": "Test"}]' } });
+    fireEvent.click(screen.getByText(/\+ Add Source/i));
+
+    const titleInput = screen.getByRole("textbox", { name: /source title/i });
+    fireEvent.change(titleInput, { target: { value: "Test Study" } });
 
     fireEvent.click(screen.getByRole("button", { name: /submit annotation/i }));
     await waitFor(() =>
       expect(screen.getByText(/Annotation submitted successfully/i)).toBeInTheDocument(),
+    );
+
+    expect(mocks.submitAnnotation).toHaveBeenCalledWith(
+      ANALYSIS_ID,
+      expect.objectContaining({
+        cited_sources: expect.arrayContaining([
+          expect.objectContaining({ title: "Test Study" }),
+        ]),
+      }),
     );
   });
 });

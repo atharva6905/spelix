@@ -89,6 +89,28 @@ const EXERCISE_VARIANT_LABELS: Record<string, string> = {
   romanian: "Romanian",
 };
 
+const EXERCISE_ISSUES: Record<string, Array<{ key: string; label: string }>> = {
+  squat: [
+    { key: "insufficient_depth", label: "Insufficient depth" },
+    { key: "excessive_forward_lean", label: "Excessive forward lean" },
+    { key: "knee_tracking", label: "Knee tracking issues at depth" },
+    { key: "incomplete_lockout", label: "Incomplete lockout" },
+    { key: "inconsistent_tempo", label: "Inconsistent rep tempo" },
+  ],
+  bench: [
+    { key: "shoulder_angle_high", label: "Excessive shoulder angle at bottom" },
+    { key: "incomplete_lockout", label: "Incomplete lockout" },
+    { key: "inconsistent_tempo", label: "Inconsistent rep tempo" },
+    { key: "bar_path_deviation", label: "Bar path deviation" },
+  ],
+  deadlift: [
+    { key: "excessive_torso_lean", label: "Excessive torso lean at start" },
+    { key: "incomplete_lockout", label: "Incomplete hip extension at lockout" },
+    { key: "inconsistent_tempo", label: "Inconsistent rep tempo" },
+    { key: "bar_path_deviation", label: "Bar path deviation" },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Score card
 // ---------------------------------------------------------------------------
@@ -333,30 +355,52 @@ function PreviousAnnotations({ annotations }: PreviousAnnotationsProps) {
 // ---------------------------------------------------------------------------
 
 type RadioValue = "yes" | "no" | "na";
+type Severity = "High" | "Medium" | "Low";
+
+interface IssueEntry {
+  checked: boolean;
+  severity: Severity;
+  notes: string;
+}
+
+interface SourceEntry {
+  id: string;
+  title: string;
+  authors: string;
+  year: string;
+  doi: string;
+}
 
 interface AnnotationFormState {
   coaching_quality_score: string;
   movement_advice_accurate: RadioValue | "";
   engagement_advice_accurate: RadioValue | "";
-  issues_identified: string;
+  issues: Record<string, IssueEntry>;
+  ai_missed_issue: string;
+  ai_false_positive: string;
   suggested_corrections: string;
-  cited_sources: string;
+  sources: SourceEntry[];
   is_golden_label: boolean;
 }
 
 interface AnnotationFormProps {
   analysisId: string;
+  exerciseType: string;
   onSuccess: (ann: AnnotationResponse) => void;
 }
 
-function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
+let sourceIdCounter = 0;
+
+function AnnotationForm({ analysisId, exerciseType, onSuccess }: AnnotationFormProps) {
   const [form, setForm] = useState<AnnotationFormState>({
     coaching_quality_score: "",
     movement_advice_accurate: "",
     engagement_advice_accurate: "",
-    issues_identified: "",
+    issues: {},
+    ai_missed_issue: "",
+    ai_false_positive: "",
     suggested_corrections: "",
-    cited_sources: "",
+    sources: [],
     is_golden_label: false,
   });
   const [submitting, setSubmitting] = useState(false);
@@ -369,13 +413,38 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
     return null;
   }
 
-  function parseJsonField(val: string): Record<string, unknown> | Record<string, unknown>[] {
-    if (!val.trim()) return {};
-    try {
-      return JSON.parse(val);
-    } catch {
-      return {};
-    }
+  function updateIssue(key: string, patch: Partial<IssueEntry>) {
+    setForm((f) => ({
+      ...f,
+      issues: {
+        ...f.issues,
+        [key]: {
+          checked: f.issues[key]?.checked ?? false,
+          severity: f.issues[key]?.severity ?? "Medium",
+          notes: f.issues[key]?.notes ?? "",
+          ...patch,
+        },
+      },
+    }));
+  }
+
+  function addSource() {
+    sourceIdCounter += 1;
+    setForm((f) => ({
+      ...f,
+      sources: [...f.sources, { id: `src-${sourceIdCounter}`, title: "", authors: "", year: "", doi: "" }],
+    }));
+  }
+
+  function removeSource(id: string) {
+    setForm((f) => ({ ...f, sources: f.sources.filter((s) => s.id !== id) }));
+  }
+
+  function updateSource(id: string, patch: Partial<Omit<SourceEntry, "id">>) {
+    setForm((f) => ({
+      ...f,
+      sources: f.sources.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    }));
   }
 
   async function handleSubmit() {
@@ -390,15 +459,34 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
       return;
     }
 
+    const issuesPayload: Record<string, unknown> = {};
+    for (const { key } of EXERCISE_ISSUES[exerciseType] ?? []) {
+      const entry = form.issues[key];
+      if (entry?.checked) {
+        issuesPayload[key] = { severity: entry.severity, notes: entry.notes || undefined };
+      }
+    }
+    if (form.ai_missed_issue.trim())
+      issuesPayload.ai_missed_issue = { text: form.ai_missed_issue.trim() };
+    if (form.ai_false_positive.trim())
+      issuesPayload.ai_false_positive = { text: form.ai_false_positive.trim() };
+
+    const citedPayload = form.sources
+      .filter((s) => s.title.trim())
+      .map((s) => ({
+        title: s.title.trim(),
+        authors: s.authors.split(",").map((a) => a.trim()).filter(Boolean),
+        year: parseInt(s.year, 10) || null,
+        doi: s.doi.trim() || null,
+      }));
+
     const payload: AnnotationCreate = {
       coaching_quality_score: qualityNum,
       movement_advice_accurate: radioToBool(form.movement_advice_accurate),
       engagement_advice_accurate: radioToBool(form.engagement_advice_accurate),
-      issues_identified: parseJsonField(form.issues_identified) as Record<string, unknown>,
+      issues_identified: issuesPayload,
       suggested_corrections: form.suggested_corrections.trim() || null,
-      cited_sources: Array.isArray(parseJsonField(form.cited_sources))
-        ? (parseJsonField(form.cited_sources) as Record<string, unknown>[])
-        : [],
+      cited_sources: citedPayload,
       is_golden_label: form.is_golden_label,
     };
 
@@ -422,6 +510,8 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
       </div>
     );
   }
+
+  const exerciseIssues = EXERCISE_ISSUES[exerciseType] ?? [];
 
   return (
     <div className="space-y-5">
@@ -491,20 +581,80 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
         </div>
       </fieldset>
 
-      {/* Issues identified */}
-      <div>
-        <label htmlFor="issues_identified" className="mb-1 block text-sm font-medium text-gray-700">
-          Issues Identified (JSON)
-        </label>
-        <textarea
-          id="issues_identified"
-          rows={3}
-          value={form.issues_identified}
-          onChange={(e) => setForm((f) => ({ ...f, issues_identified: e.target.value }))}
-          placeholder={'{"missed_depth": true, "forward_lean": "excessive"}'}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-        />
-      </div>
+      {/* Issues identified — exercise-specific checkboxes */}
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium text-gray-700">Issues Identified</legend>
+        <div className="space-y-2">
+          {exerciseIssues.map(({ key, label }) => {
+            const entry = form.issues[key];
+            const checked = entry?.checked ?? false;
+            return (
+              <div key={key} className="rounded-md border border-gray-200 p-3">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => updateIssue(key, { checked: e.target.checked })}
+                    className="rounded text-indigo-600"
+                  />
+                  {label}
+                </label>
+                {checked && (
+                  <div className="mt-2 flex flex-wrap items-center gap-3 pl-6">
+                    <select
+                      aria-label={`${label} severity`}
+                      value={entry?.severity ?? "Medium"}
+                      onChange={(e) => updateIssue(key, { severity: e.target.value as Severity })}
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                    >
+                      <option value="High">High</option>
+                      <option value="Medium">Medium</option>
+                      <option value="Low">Low</option>
+                    </select>
+                    <input
+                      type="text"
+                      aria-label={`${label} notes`}
+                      placeholder="Notes (optional)"
+                      value={entry?.notes ?? ""}
+                      onChange={(e) => updateIssue(key, { notes: e.target.value })}
+                      className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 space-y-2">
+          <div>
+            <label htmlFor="ai_missed_issue" className="mb-1 block text-xs font-medium text-gray-600">
+              AI missed an issue
+            </label>
+            <input
+              id="ai_missed_issue"
+              type="text"
+              value={form.ai_missed_issue}
+              onChange={(e) => setForm((f) => ({ ...f, ai_missed_issue: e.target.value }))}
+              placeholder="Describe any issue the AI failed to identify..."
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label htmlFor="ai_false_positive" className="mb-1 block text-xs font-medium text-gray-600">
+              AI identified a non-issue
+            </label>
+            <input
+              id="ai_false_positive"
+              type="text"
+              value={form.ai_false_positive}
+              onChange={(e) => setForm((f) => ({ ...f, ai_false_positive: e.target.value }))}
+              placeholder="Describe any false positive from the AI..."
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+            />
+          </div>
+        </div>
+      </fieldset>
 
       {/* Suggested corrections */}
       <div>
@@ -521,20 +671,66 @@ function AnnotationForm({ analysisId, onSuccess }: AnnotationFormProps) {
         />
       </div>
 
-      {/* Cited sources */}
-      <div>
-        <label htmlFor="cited_sources" className="mb-1 block text-sm font-medium text-gray-700">
-          Cited Sources (JSON array)
-        </label>
-        <textarea
-          id="cited_sources"
-          rows={3}
-          value={form.cited_sources}
-          onChange={(e) => setForm((f) => ({ ...f, cited_sources: e.target.value }))}
-          placeholder={'[{"title": "...", "authors": ["..."], "year": 2023, "doi": "..."}]'}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-        />
-      </div>
+      {/* Cited sources — structured rows */}
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium text-gray-700">Cited Sources</legend>
+        <div className="space-y-3">
+          {form.sources.map((src) => (
+            <div key={src.id} className="rounded-md border border-gray-200 p-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <input
+                  type="text"
+                  aria-label="Source title"
+                  placeholder="Title"
+                  value={src.title}
+                  onChange={(e) => updateSource(src.id, { title: e.target.value })}
+                  className="col-span-2 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  aria-label="Source authors"
+                  placeholder="Authors (comma-separated)"
+                  value={src.authors}
+                  onChange={(e) => updateSource(src.id, { authors: e.target.value })}
+                  className="col-span-2 rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  aria-label="Source year"
+                  placeholder="Year"
+                  value={src.year}
+                  onChange={(e) => updateSource(src.id, { year: e.target.value })}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                />
+                <input
+                  type="text"
+                  aria-label="Source DOI"
+                  placeholder="DOI (optional)"
+                  value={src.doi}
+                  onChange={(e) => updateSource(src.id, { doi: e.target.value })}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-indigo-400 focus:outline-none"
+                />
+                <div className="col-span-2 flex justify-end sm:col-span-2">
+                  <button
+                    type="button"
+                    onClick={() => removeSource(src.id)}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={addSource}
+          className="mt-2 text-sm font-medium text-indigo-600 hover:text-indigo-800"
+        >
+          + Add Source
+        </button>
+      </fieldset>
 
       {/* Golden label — FR-EXPV-07 */}
       <div>
@@ -792,7 +988,7 @@ export default function ExpertAnalysisDetailPage() {
           <h2 className="mb-4 text-lg font-semibold text-gray-900">
             Submit Annotation
           </h2>
-          <AnnotationForm analysisId={analysis.id} onSuccess={handleAnnotationSuccess} />
+          <AnnotationForm analysisId={analysis.id} exerciseType={analysis.exercise_type} onSuccess={handleAnnotationSuccess} />
         </section>
       </div>
     </div>
