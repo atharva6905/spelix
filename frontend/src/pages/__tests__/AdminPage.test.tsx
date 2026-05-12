@@ -14,6 +14,23 @@ vi.mock("@/api/admin", () => ({
   disableAdminUser: vi.fn(),
   listAdminAnalyses: vi.fn(),
   getAdminHealth: vi.fn(),
+  listBetaRequests: vi.fn(),
+  getBetaRequestStats: vi.fn(),
+  approveBetaRequest: vi.fn(),
+  rejectBetaRequest: vi.fn(),
+  listRagDocuments: vi.fn(),
+  deleteRagDocument: vi.fn(),
+  reEmbedRagDocument: vi.fn(),
+  listExpertQueue: vi.fn(),
+  getExpertQueueStats: vi.fn(),
+  listCoachBrainEntries: vi.fn(),
+  updateCoachBrainEntry: vi.fn(),
+  deleteCoachBrainEntry: vi.fn(),
+  listCoachBrainCandidates: vi.fn(),
+  getCoachBrainCandidateStats: vi.fn(),
+  approveCoachBrainCandidate: vi.fn(),
+  rejectCoachBrainCandidate: vi.fn(),
+  getCoachBrainCandidateSimilar: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -30,6 +47,12 @@ import {
   disableAdminUser,
   listAdminAnalyses,
   getAdminHealth,
+  listBetaRequests,
+  getBetaRequestStats,
+  listRagDocuments,
+  listExpertQueue,
+  getExpertQueueStats,
+  listCoachBrainEntries,
 } from "@/api/admin";
 import { supabase } from "@/lib/supabase";
 
@@ -136,6 +159,13 @@ function setupAdminMocks() {
   vi.mocked(disableAdminUser).mockResolvedValue({
     message: "User aaaaaaaa-0000-0000-0000-000000000001 disable is a Phase 1 feature (Supabase Admin API).",
   });
+  // New panels added to AdminPage
+  vi.mocked(listBetaRequests).mockResolvedValue([]);
+  vi.mocked(getBetaRequestStats).mockResolvedValue({ pending: 0, approved: 0, rejected: 0, total: 0 });
+  vi.mocked(listRagDocuments).mockResolvedValue([]);
+  vi.mocked(listExpertQueue).mockResolvedValue([]);
+  vi.mocked(getExpertQueueStats).mockResolvedValue({ total_flagged: 0, total_annotated: 0, golden_dataset_count: 0 });
+  vi.mocked(listCoachBrainEntries).mockResolvedValue([]);
 }
 
 // ---------------------------------------------------------------------------
