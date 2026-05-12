@@ -1218,3 +1218,23 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 - **Unstructured.io**: heavier dependency, cloud-hosted API tier, overkill for straightforward PDF parsing.
 
 **Consequences.** `docling` adds ~30 MB to the Docker image. The worker task timeout is 300s (may need increase for very large PDFs — monitor after first real uploads). Docling's `DocumentConverter` loads an ML model on first call (~2s cold start); subsequent calls reuse it within the worker process.
+
+## ADR-CONSENT-GATE-01: Mandatory consent gate before upload (Session 64)
+
+**Context.** Prod audit found only 3 of 38 users who submitted analyses had consent records. The consent page existed at `/consent` with 3 tiers (analytics, health_data_processing, coach_brain_contribution), but nothing forced users through it before uploading. This was a GDPR compliance gap — health data was being processed without explicit consent.
+
+**Decision.** Dual-layer mandatory consent gate for `health_data_processing` (Tier 2):
+
+1. **Frontend gate**: `RequireConsent` component wraps `/upload`, `/analysis/:id`, and `/results/:id` routes. Calls `getConsents()` on mount, checks for `health_data_processing` with `granted=true`. If absent, redirects to `/consent?redirect=<current-path>`. After granting, `ConsentPage.handleGrant` reads the `?redirect` param and navigates back. Conservative default: API errors deny access.
+
+2. **Backend gate**: `create_analysis` endpoint checks `ConsentRepository.get_latest_by_type(user_id, "health_data_processing")` and returns HTTP 403 `CONSENT_REQUIRED` if absent or `granted=False`. Defense-in-depth — the frontend gate catches this first, the backend prevents API-only bypasses.
+
+**Consequences.** Every existing test that hits `POST /analyses` needs `ConsentRepository` patched (affected: `test_analysis_api.py`, `test_rate_limit.py`, `test_full_flow.py`). The `RequireConsent` component makes one `GET /api/v1/consent` call per mount — acceptable at pre-beta scale. A React context for consent state would reduce API calls but is over-engineering at <50 users.
+
+## ADR-BETA-OPS-01: Orphaned analysis cleanup cron (Session 64)
+
+**Context.** 13 analyses on prod were stuck in non-terminal states (`queued`, `quality_gate_pending`, `processing`) since April 11 — oldest 31 days old. Users who submitted these saw a perpetually loading status page. All three transitions to `failed` are valid per the status.py transition table. There was no mechanism to auto-detect and resolve stuck analyses.
+
+**Decision.** Add `cleanup_stuck_analyses` nightly cron at 03:30 UTC (between artifact cleanup at 03:00 and orphan-papers cleanup at 04:00). Queries analyses where `status IN ('queued', 'quality_gate_pending', 'processing') AND updated_at < NOW() - 2 hours`. Per-row UPDATE to `status='failed'` with descriptive `error_message`. Per-row commit with try/except — one DB failure doesn't block the rest.
+
+**Consequences.** 2-hour window matches the worst-case pipeline duration (long clip + CoVe retries). Legitimately long analyses won't be touched because `updated_at` advances through status transitions. The cron catches both current orphans and any future ones from worker crashes, deploys, or OOM kills.

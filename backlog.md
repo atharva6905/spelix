@@ -1001,7 +1001,7 @@ Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2
 | L2-LANDING-V2-01 | Section 5 "Four Dimensions" — 2×2 card grid (Movement Quality / Technique / Path & Balance / Control) with §6.5 verbatim copy | S | — | landing-page-plan §5 | pending |
 | L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) with §6.6 verbatim copy | S | — | landing-page-plan §5 | pending |
 | L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing-page-plan §16.4 | pending |
-| L2-LANDING-V2-04 | Admin beta-request approval UI + transactional-email invite flow — `/admin` card listing pending requests with approve/reject; single-use invite token → `/signup?invite=TOKEN` | M | L2-LANDING-02 | ADR-050 | pending |
+| L2-LANDING-V2-04 | Admin beta-request approval UI — BetaRequestsPanel in AdminPage with table, status filter, approve/reject buttons, pagination, stats bar. Transactional-email invite flow deferred. | M | L2-LANDING-02 | ADR-050 | done — `e8e82a5` (PR #142, session 64) |
 | L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | pending |
 
 
@@ -1073,3 +1073,15 @@ Three PRs preparing the expert portal for the first kinesiology reviewer. PR #13
 | L2-EXPERT-16 | Wire ingest_paper worker: Docling PDF extraction + IngestionService + chunk_count write-back. Triggered on paper approval. | done | L | L2-EXPERT-07 | FR-EXPV-02 | `05c37ee` (PR #137) | `backend/app/workers/paper_ingestion.py`, `backend/app/services/pdf_extraction.py`, `backend/app/services/paper_storage.py`, `backend/app/repositories/rag_document.py`, `backend/app/workers/streaq_worker.py` |
 | L2-EXPERT-17 | Gitignore cleanup: model binaries, e2e video fixtures, Playwright YML snapshots, superpowers plans, Word lock files | done | S | — | — | `9ac7147` (PR #136) | `.gitignore` |
 | L2-EXPERT-18 | Add "Approve & Ingest" self-approval button to My Papers tab for pending papers | done | S | L2-EXPERT-15, L2-EXPERT-16 | FR-EXPV-02 | `e0a6182` (PR #138) | `frontend/src/pages/ExpertPortalPage.tsx` |
+
+## Completed — Pre-Beta Fixes (2026-05-12, session 64)
+
+Prod audit found 4 issues blocking private beta invites. All 4 fixed via independent PRs (#139–#142), merged, deployed, E2E verified.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-BETA-01 | Add nightly cron to auto-fail analyses stuck in non-terminal states >2h | done | S | — | — | `8c3ccd8` (PR #139) | `backend/app/workers/cleanup_stuck_analyses.py`, `backend/app/workers/streaq_worker.py`, `backend/tests/unit/test_cleanup_stuck_analyses.py` |
+| L2-BETA-02 | Replace hardcoded waitlist count with live GET /api/v1/beta/count endpoint | done | S | — | — | `a35937b` (PR #140) | `backend/app/api/v1/beta.py`, `backend/app/repositories/beta_request.py`, `frontend/src/api/beta.ts`, `frontend/src/components/landing/LandingHero.tsx` |
+| L2-BETA-03 | Add mandatory consent gate — RequireConsent redirect + backend 403 defense-in-depth | done | M | — | NFR-PRIV-01 | `698e447` (PR #141) | `frontend/src/components/RequireConsent.tsx`, `frontend/src/routes.tsx`, `frontend/src/pages/ConsentPage.tsx`, `backend/app/api/v1/analyses.py`, `backend/tests/unit/test_analysis_api.py` |
+| L2-BETA-04 | Add admin BetaRequestsPanel — list/approve/reject beta requests from /admin | done | M | — | — | `e8e82a5` (PR #142) | `backend/app/api/v1/admin.py`, `backend/app/repositories/beta_request.py`, `frontend/src/api/admin.ts`, `frontend/src/pages/AdminPage.tsx`, `backend/tests/unit/test_admin_beta_api.py` |
+| L2-BETA-05 | Omit pdf_extraction.py from coverage (IO-heavy, integration-tested) | done | S | — | — | `e8e82a5` (PR #142) | `backend/pyproject.toml` |
