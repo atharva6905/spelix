@@ -11,11 +11,13 @@ const NAV_ITEMS = [
 export default function AppLayout() {
   const location = useLocation();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isExpert, setIsExpert] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const role = data.session?.user?.app_metadata?.role;
       setIsAdmin(role === "admin");
+      setIsExpert(role === "expert_reviewer" || role === "admin");
     });
   }, []);
 
@@ -46,6 +48,18 @@ export default function AppLayout() {
                 {item.label}
               </Link>
             ))}
+            {isExpert && (
+              <Link
+                to="/expert"
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  location.pathname.startsWith("/expert")
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                }`}
+              >
+                Expert Portal
+              </Link>
+            )}
             {isAdmin && (
               <Link
                 to="/admin"

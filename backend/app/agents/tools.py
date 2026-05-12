@@ -45,12 +45,12 @@ _HYBRID_FLOOR_THRESHOLD: float = 0.65
 # content; bench seeds use "bench press", "elbows", "scapula" instead.
 _COACH_BRAIN_QUERY_VOCAB: dict[str, str] = {
     "bench": (
-        "elbow flare scapular retraction lat engagement bar path "
-        "tempo eccentric control lockout"
+        "shoulder angle bar touch bar path tempo eccentric control "
+        "lockout wrist position"
     ),
     "squat": (
-        "depth knee valgus lumbar flexion ankle mobility torso lean "
-        "lockout glute"
+        "depth angle knee angle ankle mobility torso lean "
+        "lockout glute hip angle"
     ),
     "deadlift": (
         "hip hinge lumbar lockout glute extension lat engagement "
