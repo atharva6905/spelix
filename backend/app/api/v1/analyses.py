@@ -27,6 +27,7 @@ from app.api.deps import CurrentUser, get_current_user
 from app.db import get_db
 from app.rate_limit import limiter
 from app.repositories.analysis import AnalysisRepository
+from app.repositories.consent import ConsentRepository
 from app.schemas.analysis import (
     AnalysisCreate,
     AnalysisCreateResponse,
@@ -195,6 +196,22 @@ async def create_analysis(
     """
     quota = await _quota_service.check(db)
     _raise_if_storage_full(quota.status, quota.message)
+
+    consent_repo = ConsentRepository(db)
+    consent_record = await consent_repo.get_latest_by_type(
+        user["id"], "health_data_processing"
+    )
+    if consent_record is None or not consent_record.granted:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "CONSENT_REQUIRED",
+                    "message": "Health data processing consent is required before submitting an analysis.",
+                    "detail": None,
+                }
+            },
+        )
 
     result = await service.create_analysis(
         user_id=user["id"],
