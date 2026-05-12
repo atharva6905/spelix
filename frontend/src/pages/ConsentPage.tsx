@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { useConsent } from "@/hooks/useConsent";
 import type { ConsentType, ConsentStatusItem } from "@/api/consent";
 
@@ -205,9 +206,17 @@ function ConsentTierCard({
 
 export default function ConsentPage() {
   const { consents, isLoading, error, grant, withdraw } = useConsent();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   async function handleGrant(type: ConsentType) {
     await grant(type, CONSENT_VERSION);
+    if (type === "health_data_processing") {
+      const redirect = searchParams.get("redirect");
+      if (redirect) {
+        navigate(redirect);
+      }
+    }
   }
 
   if (isLoading) {

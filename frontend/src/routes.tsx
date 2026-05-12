@@ -1,5 +1,6 @@
 import { createBrowserRouter } from "react-router";
 import RequireAuth from "@/components/RequireAuth";
+import RequireConsent from "@/components/RequireConsent";
 import AppLayout from "@/components/AppLayout";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AdminCoachBrainCandidatesPage from "@/pages/AdminCoachBrainCandidatesPage";
@@ -48,12 +49,33 @@ const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { path: "/upload", element: <UploadPage /> },
+      {
+        path: "/upload",
+        element: (
+          <RequireConsent>
+            <UploadPage />
+          </RequireConsent>
+        ),
+      },
       { path: "/history", element: <HistoryPage /> },
       { path: "/profile", element: <ProfilePage /> },
       { path: "/consent", element: <ConsentPage /> },
-      { path: "/analysis/:id", element: <AnalysisStatusPage /> },
-      { path: "/results/:id", element: <ResultsPage /> },
+      {
+        path: "/analysis/:id",
+        element: (
+          <RequireConsent>
+            <AnalysisStatusPage />
+          </RequireConsent>
+        ),
+      },
+      {
+        path: "/results/:id",
+        element: (
+          <RequireConsent>
+            <ResultsPage />
+          </RequireConsent>
+        ),
+      },
       { path: "/admin", element: <AdminPage /> },
       {
         path: "/admin/coach-brain/candidates",

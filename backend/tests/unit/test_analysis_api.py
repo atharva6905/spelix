@@ -14,7 +14,7 @@ Requirements: FR-UPLD-07, FR-UPLD-16, FR-UPLD-17
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -92,6 +92,35 @@ def _build_app(mock_service=None) -> FastAPI:
 def app_client():
     """Return a TestClient with auth dependency overridden (no service mock)."""
     return TestClient(_build_app(), raise_server_exceptions=False)
+
+
+# ---------------------------------------------------------------------------
+# Consent gate default: patch ConsentRepository to grant consent everywhere
+# except in TestConsentGate which supplies its own per-test patch.
+# ---------------------------------------------------------------------------
+
+
+def _make_granted_consent_repo():
+    """Return a mock ConsentRepository whose get_latest_by_type grants consent."""
+    repo = MagicMock()
+    granted_record = MagicMock()
+    granted_record.granted = True
+    repo.get_latest_by_type = AsyncMock(return_value=granted_record)
+    return repo
+
+
+@pytest.fixture(autouse=True)
+def _patch_consent_granted(request):
+    """Auto-patch ConsentRepository to grant consent for all tests except
+    TestConsentGate, which manages its own per-test patches."""
+    if request.node.cls is not None and request.node.cls.__name__ == "TestConsentGate":
+        yield
+        return
+    with patch(
+        "app.api.v1.analyses.ConsentRepository",
+        return_value=_make_granted_consent_repo(),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +553,6 @@ class TestGetAnalysisDetail:
 
     def test_get_detail_artifact_paths_are_signed_https_urls(self):
         """GET /analyses/{id} returns https:// signed URLs for artifact paths (FR-RESL-02, FR-RESL-05, FR-XPRT-02)."""
-        from unittest.mock import patch
 
         analysis = self._make_detail_analysis()
         analysis_id = analysis.id
@@ -562,7 +590,6 @@ class TestGetAnalysisDetail:
 
     def test_get_detail_null_artifact_paths_remain_null(self):
         """GET /analyses/{id} returns null for artifact paths that are not yet set."""
-        from unittest.mock import patch
 
         analysis = self._make_detail_analysis()
         analysis.annotated_video_path = None
@@ -750,3 +777,120 @@ class TestGetAnalysisStatus:
 
         assert resp.status_code == 200
         assert resp.json()["detection_result"] is None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/analyses — consent gate (NFR-PRIV-01)
+# ---------------------------------------------------------------------------
+
+
+class TestConsentGate:
+    """Defense-in-depth: create_analysis must block when health_data_processing
+    consent has not been granted."""
+
+    def _make_consent_record(self, granted: bool):
+        record = MagicMock()
+        record.granted = granted
+        return record
+
+    def test_no_consent_record_returns_403(self):
+        """No consent row at all → 403 CONSENT_REQUIRED."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        mock_service = _AsyncMock()
+        create_result = _CreateResult(
+            _make_mock_analysis(),
+            "https://example.com/upload",
+            __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        )
+        mock_service.create_analysis.return_value = create_result
+
+        async def _mock_get_latest(user_id, consent_type):
+            return None  # no record exists
+
+        with patch(
+            "app.api.v1.analyses.ConsentRepository"
+        ) as MockRepo:
+            instance = MockRepo.return_value
+            instance.get_latest_by_type = _mock_get_latest
+
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/analyses",
+                json={
+                    "exercise_type": "squat",
+                    "exercise_variant": "high_bar",
+                    "filename": "squat.mp4",
+                    "file_size_bytes": 5_000_000,
+                },
+            )
+
+        assert resp.status_code == 403
+        body = resp.json()
+        assert body["detail"]["error"]["code"] == "CONSENT_REQUIRED"
+
+    def test_consent_withdrawn_returns_403(self):
+        """Consent record with granted=False → 403 CONSENT_REQUIRED."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        mock_service = _AsyncMock()
+
+        async def _mock_get_latest(user_id, consent_type):
+            return self._make_consent_record(granted=False)
+
+        with patch(
+            "app.api.v1.analyses.ConsentRepository"
+        ) as MockRepo:
+            instance = MockRepo.return_value
+            instance.get_latest_by_type = _mock_get_latest
+
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/analyses",
+                json={
+                    "exercise_type": "squat",
+                    "exercise_variant": "high_bar",
+                    "filename": "squat.mp4",
+                    "file_size_bytes": 5_000_000,
+                },
+            )
+
+        assert resp.status_code == 403
+        body = resp.json()
+        assert body["detail"]["error"]["code"] == "CONSENT_REQUIRED"
+
+    def test_consent_granted_proceeds_normally(self):
+        """Consent record with granted=True → normal flow (not 403)."""
+        from unittest.mock import AsyncMock as _AsyncMock
+        import datetime
+
+        mock_service = _AsyncMock()
+        analysis = _make_mock_analysis()
+        create_result = _CreateResult(
+            analysis,
+            "https://example.com/upload",
+            datetime.datetime.now(datetime.timezone.utc),
+        )
+        mock_service.create_analysis.return_value = create_result
+
+        async def _mock_get_latest(user_id, consent_type):
+            return self._make_consent_record(granted=True)
+
+        with patch(
+            "app.api.v1.analyses.ConsentRepository"
+        ) as MockRepo:
+            instance = MockRepo.return_value
+            instance.get_latest_by_type = _mock_get_latest
+
+            client = TestClient(_build_app(mock_service), raise_server_exceptions=False)
+            resp = client.post(
+                "/api/v1/analyses",
+                json={
+                    "exercise_type": "squat",
+                    "exercise_variant": "high_bar",
+                    "filename": "squat.mp4",
+                    "file_size_bytes": 5_000_000,
+                },
+            )
+
+        assert resp.status_code == 201
