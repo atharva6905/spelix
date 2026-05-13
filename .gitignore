@@ -4,6 +4,14 @@
 .claire/
 .playwright-mcp/
 
+# Graphify knowledge graph — commit graph.json + report, exclude ephemeral files
+graphify-out/manifest.json
+graphify-out/cost.json
+graphify-out/cache/
+graphify-out/wiki/
+graphify-out/.graphify_*.json
+.graphify_python
+
 # Node / Frontend
 node_modules/
 dist/
