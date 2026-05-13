@@ -549,7 +549,7 @@ function buildSection2() {
 // ─────────────────────────────────────────────
 function buildSection3() {
   const colRows = [
-    ["Analysis ID", "Truncated identifier shown in grey monospace. Click to copy the full ID."],
+    ["Analysis ID", "Truncated identifier shown in grey monospace."],
     ["Exercise", "The exercise type: Squat, Bench Press, or Deadlift."],
     ["Variant", "The specific variant (e.g. High Bar, Conventional)."],
     ["Confidence", "Colour-coded badge: High (green), Moderate (blue), Low (yellow), Very Low (red)."],
@@ -607,7 +607,7 @@ function buildSection4() {
     ["9.0 – 10.0", "Elite", "Green"],
     ["7.5 – 8.9", "Advanced", "Green"],
     ["5.0 – 7.4", "Intermediate", "Amber"],
-    ["3.0 – 4.9", "Needs Work", "Amber"],
+    ["3.0 – 4.9", "Needs Work", "Red"],
     ["0.0 – 2.9", "Needs Attention", "Red"],
   ];
   const annotationRef = REF.annotation_fields;
@@ -834,7 +834,7 @@ function buildSection6() {
     ["Authors", "Comma-separated list of author surnames and initials."],
     ["Year", "Four-digit publication year."],
     ["DOI", "Digital Object Identifier without the https://doi.org/ prefix."],
-    ["Exercise Tags", "Checkboxes: Squat, Bench Press, Deadlift, General Strength. Select all that apply."],
+    ["Exercise Tags", "Checkboxes: Squat, Bench Press, Deadlift. Select all that apply."],
     ["Quality Tier", "Select from the four tiers (see table below)."],
     ["Study Design", "Select from the six designs (see table below)."],
     ["PDF File", "Required. Max 50 MB. Must be a text-extractable PDF (not a scanned image)."],
@@ -861,7 +861,7 @@ function buildSection6() {
     ["Status", "Current ingestion status"],
     ["Chunks", "Number of text chunks in the knowledge base (0 until approved)"],
     ["Uploaded", "Upload date (UTC)"],
-    ["Action", "Approve & Ingest or Delete button"],
+    ["Action", "Approve & Ingest button (visible only for pending papers)"],
   ];
   const statusRows = [
     ["Pending", "Yellow", "Awaiting your approval. Chunks = 0."],
@@ -1034,7 +1034,7 @@ function buildSection9() {
     ["9.0 – 10.0", "Elite", "Green card"],
     ["7.5 – 8.9", "Advanced", "Green card"],
     ["5.0 – 7.4", "Intermediate", "Amber card"],
-    ["3.0 – 4.9", "Needs Work", "Amber card"],
+    ["3.0 – 4.9", "Needs Work", "Red card"],
     ["0.0 – 2.9", "Needs Attention", "Red card"],
   ];
   const measRows = [
@@ -1042,10 +1042,10 @@ function buildSection9() {
     ["Knee angle at depth", "YES", "Tracked by BlazePose landmark pairs."],
     ["Bar path deviation", "YES", "Derived from wrist landmark trajectory."],
     ["Rep tempo", "YES", "Measured from landmark velocity over time."],
-    ["Grip width", "NO", "Not reliably measurable from a single camera angle."],
-    ["Bar weight / load", "NO", "No weight sensor; cannot be inferred from video."],
-    ["Foot placement angle", "PARTIAL", "Visible only if camera angle is favourable."],
-    ["Bracing / intra-abdominal pressure", "NO", "Not visible; internal pressure cannot be measured."],
+    ["Grip width", "NO", "Not measurable from a side-view camera."],
+    ["Stance width", "NO", "Not measurable from a side-view camera."],
+    ["Knee valgus / varus", "NO", "Requires a frontal-view camera. If the AI mentions knee valgus, flag it as a false positive."],
+    ["Scapular retraction", "NO", "Not visible from a side-view camera."],
   ];
 
   return [
@@ -1147,7 +1147,7 @@ function buildSection11() {
     ),
 
     h2("How Annotations Feed Coach Brain"),
-    bullet("When you approve an analysis (score ≥7.0 and no unresolved flags), it becomes a candidate for distillation.", cbRef),
+    bullet("When you submit an annotation, the analysis becomes a candidate for distillation if its automated eval scores meet the internal quality threshold.", cbRef),
     bullet("When you correct an issue, the correction is used to refine the coaching patterns the AI applies to similar lifts.", cbRef),
     bullet("When you mark an analysis as a golden entry, it enters the evaluation benchmark that is used to measure AI quality over time.", cbRef),
     bullet("Distillation candidates are reviewed by an administrator before being committed to the Coach Brain.", cbRef),
@@ -1190,9 +1190,9 @@ function buildSection12() {
     spacer(100),
     h2("Consent Withdrawal"),
     p(
-      "If a user withdraws their consent, their data is deleted within 72 hours and their analyses " +
-        "are removed from the review queue. You may notice analyses disappearing from the queue — " +
-        "this is expected behaviour.",
+      "If a user withdraws their consent, a background process removes their data from the Coach Brain " +
+        "and their analyses may be removed from the review queue. You may notice analyses disappearing " +
+        "from the queue — this is expected behaviour.",
       { spacing: { before: 60, after: 80 } }
     ),
 
@@ -1294,7 +1294,7 @@ function buildAppendixA() {
     ["Hip angle at depth", "≤90°", "Hip must reach parallel (thigh parallel to floor) or below."],
     ["Hip/knee at standing lockout", "≥160°", "Full extension at the top of each rep."],
     ["Torso forward lean", ">45° from vertical", "Triggers excessive forward lean flag."],
-    ["Knee cave at depth", "<70° knee-to-hip lateral angle", "Triggers knee tracking flag."],
+    ["Knee angle at depth", "<70°", "Deep squat indicator."],
     ["Hip + knee at lockout", "≥165° combined", "Incomplete lockout flag threshold."],
   ];
   const benchRows = [
