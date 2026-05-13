@@ -40,6 +40,7 @@ export interface ExpertAnalysisDetail {
   flagged_for_review: boolean;
   is_golden_dataset: boolean;
   created_at: string;
+  annotated_video_url: string | null;
 }
 
 export interface AnnotationCreate {

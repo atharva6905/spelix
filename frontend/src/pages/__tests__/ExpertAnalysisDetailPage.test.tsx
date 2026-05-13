@@ -134,6 +134,7 @@ describe("ExpertAnalysisDetailPage", () => {
       flagged_for_review: false,
       is_golden_dataset: false,
       created_at: "2026-04-20T10:00:00Z",
+      annotated_video_url: null,
     });
 
     vi.mocked(getAnnotations).mockResolvedValue([]);

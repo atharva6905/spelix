@@ -163,6 +163,21 @@ async def get_expert_analysis_detail(
             status_code=404,
             detail={"error": {"code": "NOT_FOUND", "message": "Analysis not found.", "detail": None}},
         )
+
+    if detail.annotated_video_url:
+        try:
+            from app.services.storage import StorageService
+
+            storage = StorageService()
+            signed = await storage.create_signed_read_url(
+                detail.annotated_video_url, expires_in=3600
+            )
+            detail = detail.model_copy(update={"annotated_video_url": signed})
+        except Exception:
+            logger.warning(
+                "Failed to sign video URL for expert analysis %s", analysis_id
+            )
+
     return detail
 
 
