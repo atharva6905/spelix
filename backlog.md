@@ -31,6 +31,14 @@ The 2026-04-27 spelix-auditor sweep against the 8 Phase 3 Must FRs returned 0 CR
 
 **Related:** ADR-BRAIN-10 in `decisions.md`. Plans: `docs/superpowers/plans/2026-04-27-fr-brain-17-tombstone-contradicted.md`, `docs/superpowers/plans/2026-04-27-fr-admn-12-confirmation-count-on-card.md`, `docs/superpowers/plans/2026-04-27-pr-c-h03-mediums-bundle.md`.
 
+## Completed — Expert Portal UX improvements (session 67–68)
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-EXPERT-19 | **Add annotated video to expert analysis detail page** — added `annotated_video_url` to `ExpertAnalysisDetail` schema + service, signed URL in endpoint via `StorageService`, `<video>` player in `ExpertAnalysisDetailPage.tsx`. Expert can now verify AI coaching against skeleton overlay. | done | M | — | FR-EXPV-03 | `225c0d1` | `backend/app/schemas/expert_review.py`, `backend/app/services/expert.py`, `backend/app/api/v1/expert.py`, `frontend/src/api/expert.ts`, `frontend/src/pages/ExpertAnalysisDetailPage.tsx` |
+| L2-EXPERT-20 | **Render eval scores as structured UI** — replaced `JSON.stringify` dump with `EvalScoresCard` component showing faithfulness percentage (green/red badge), CoVe verified status, unsupported claims list. Non-technical expert can now interpret eval quality. | done | M | — | FR-EXPV-03 | `225c0d1` | `frontend/src/pages/ExpertAnalysisDetailPage.tsx` |
+| L2-EXPERT-21 | **Update Expert Reviewer Guide doc v2.1** — fixed "other reviewers" → single-reviewer language, documented annotated video + structured eval scores, updated FAQ, kept `generate_expert_guide.cjs` for future updates. | done | S | L2-EXPERT-19, L2-EXPERT-20 | — | `225c0d1` | `Spelix_Expert_Reviewer_Guide.docx`, `generate_expert_guide.cjs` |
+
 ## Open — Post-Phase-3-gate cleanup (parked from session 62)
 
 | ID | Title | Status | Size | Deps | SRS IDs | Notes |
@@ -1002,7 +1010,7 @@ Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2
 | L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) with §6.6 verbatim copy | S | — | landing-page-plan §5 | pending |
 | L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing-page-plan §16.4 | pending |
 | L2-LANDING-V2-04 | Admin beta-request approval UI — BetaRequestsPanel in AdminPage with table, status filter, approve/reject buttons, pagination, stats bar. Transactional-email invite flow deferred. | M | L2-LANDING-02 | ADR-050 | done — `e8e82a5` (PR #142, session 64) |
-| L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | pending |
+| L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | done — `9b78e39` (PR #143, session 65) |
 
 
 ## Completed — Pre-Beta Audit Full Closeout (2026-04-20/21, session 58)
