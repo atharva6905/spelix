@@ -579,7 +579,7 @@ function buildSection3() {
     spacer(120),
     h2("Priority Order"),
     p("Work through the tabs in this order:", { spacing: { before: 60, after: 60 } }),
-    numbered("Flagged — highest priority. A user or the system has raised a concern.", prRef),
+    numbered("Flagged — highest priority. The system or an administrator has flagged a concern.", prRef),
     numbered("Low Quality — the CV pipeline had low confidence in its pose data.", prRef),
     numbered("First Run — the analysis has never had a human review.", prRef),
 
@@ -587,8 +587,8 @@ function buildSection3() {
     h2("Auto-Failed Analyses"),
     p(
       "A nightly cleanup job runs at 03:30 UTC and automatically marks any analysis that has been " +
-        "stuck in a non-terminal state for more than 2 hours as failed. These entries appear with an " +
-        '"Auto-failed:" prefix in the Analysis ID column. They produce no coaching output. ' +
+        "stuck in a non-terminal state for more than 2 hours as failed. When you open the detail page, " +
+        "you will see an error message starting with \"Auto-failed:\". These analyses produce no coaching output. " +
         "Skip them unless they are also flagged.",
       { spacing: { before: 60, after: 100 } }
     ),
@@ -601,11 +601,11 @@ function buildSection3() {
 // ─────────────────────────────────────────────
 function buildSection4() {
   const scoreRows = [
-    ["Overall", "Weighted average of the four dimension scores."],
-    ["Movement Quality", "Biomechanical safety indicators detectable by camera angle."],
-    ["Technique", "Execution quality relative to the target variant."],
-    ["Path & Balance", "Bar path linearity and centre-of-mass stability."],
-    ["Control", "Tempo, deceleration, and rep consistency."],
+    ["Overall", "Weighted composite of the four dimensions below (see Section 9 for weights and detail)."],
+    ["Movement Quality", "Excessive torso lean, acute knee angles, shoulder/elbow range violations. Score < 3.0 triggers a red alert."],
+    ["Technique", "Squat depth vs parallel, hip hinge depth, elbow angle range, rep-to-rep depth consistency."],
+    ["Path & Balance", "Bar path consistency across reps and front-to-back deviation from midfoot. Defaults to 5.0 if bar path data unavailable."],
+    ["Control", "Descent tempo (penalises drops < 1.0–1.5 s) and lockout completeness (hip+knee or elbow ≥ 165°)."],
   ];
   const scoreDescRows = [
     ["9.0 – 10.0", "Elite", "Green"],
@@ -983,7 +983,7 @@ function buildSection6() {
   ];
   const dashCols = [
     ["Title", "Paper title (truncated if long)"],
-    ["Authors", "First author et al."],
+    ["Authors", "Comma-separated author list (may be truncated for long lists)."],
     ["Tags", "Exercise tag chips"],
     ["Tier", "Quality tier badge"],
     ["Status", "Current ingestion status"],
@@ -993,9 +993,9 @@ function buildSection6() {
   ];
   const statusRows = [
     ["Pending", "Yellow", "Awaiting your approval. Chunks = 0."],
-    ["Approved", "Green", "Ingestion complete. Chunks > 0."],
+    ["Approved", "Green", "Approved and queued for ingestion. Chunks update once processing completes (1–2 min)."],
     ["Rejected", "Red", "Rejected by an administrator."],
-    ["Needs Revision", "Orange", "Metadata is incomplete or the PDF could not be parsed."],
+    ["Needs Revision", "Orange", "An administrator has requested changes before the paper can be approved."],
   ];
   const stepRef = REF.paper_steps;
   const whatRef = REF.paper_what;
@@ -1013,7 +1013,7 @@ function buildSection6() {
     numbered("Click Upload Paper in the Expert Portal header.", stepRef),
     numbered("Fill in the metadata form (see fields table below). Title and PDF File are required.", stepRef),
     numbered("Select your PDF file (max 50 MB).", stepRef),
-    numbered("Click the Upload Paper button. A progress bar shows three phases: uploading, extracting, indexing.", stepRef),
+    numbered("Click the Upload Paper button. The button label changes through three stages: \"Requesting upload URL...\" → \"Uploading...\" (with a progress bar and percentage) → \"Finalizing...\". Wait for it to complete.", stepRef),
     numbered("A green success banner confirms the upload.", stepRef),
     numbered("The My Papers tab now shows the paper with status Pending.", stepRef),
     numbered("Click Approve & Ingest to start ingestion.", stepRef),
@@ -1152,11 +1152,11 @@ function buildSection8() {
 // ─────────────────────────────────────────────
 function buildSection9() {
   const dimRows = [
-    ["Movement Quality", "Camera-detectable biomechanical safety indicators (e.g. depth, spinal neutrality, knee tracking)."],
-    ["Technique", "Adherence to correct execution for the target exercise variant."],
-    ["Path & Balance", "Bar path linearity and lifter centre-of-mass stability across the rep."],
-    ["Control", "Rep tempo, deceleration quality, and consistency across multiple reps."],
-    ["Overall", "Weighted combination of the four dimensions above."],
+    ["Movement Quality (40%)", "Penalises threshold violations that indicate potentially harmful mechanics: excessive torso lean (squat/deadlift), acute knee angle at depth (squat), excessive shoulder opening (bench), elbow/shoulder range violations (bench). Capped at 5.0 when confidence is Very Low. Score < 3.0 triggers a red alert banner."],
+    ["Technique (30%)", "Evaluates execution against the target variant: squat depth relative to parallel, hip hinge depth (deadlift), elbow angle range at bottom (bench), plus rep-to-rep depth consistency across all exercises (std dev > 10° triggers a penalty)."],
+    ["Path & Balance (20%)", "Bar path consistency (how repeatable the bar trajectory is across reps) and anterior-posterior deviation (how far the bar drifts from the midfoot line). Returns a default 5.0 when bar path data is unavailable."],
+    ["Control (10%)", "Eccentric (descent) tempo — penalises drops faster than 1.0 s or 1.5 s — plus lockout completeness at the top of each rep (hip+knee ≥ 165° for squat/deadlift, elbow ≥ 165° for bench)."],
+    ["Overall", "Weighted composite of the four dimensions above. Weights shown in parentheses."],
   ];
   const descRows = [
     ["9.0 – 10.0", "Elite", "Green card"],
@@ -1274,11 +1274,11 @@ function buildSection11() {
       { spacing: { before: 80, after: 100 } }
     ),
 
-    h2("How Annotations Feed Coach Brain"),
-    bullet("When you submit an annotation, the analysis becomes a candidate for distillation if its automated eval scores meet the internal quality threshold.", cbRef),
-    bullet("When you correct an issue, the correction is used to refine the coaching patterns the AI applies to similar lifts.", cbRef),
-    bullet("When you mark an analysis as a golden entry, it enters the evaluation benchmark that is used to measure AI quality over time.", cbRef),
-    bullet("Distillation candidates are reviewed by an administrator before being committed to the Coach Brain.", cbRef),
+    h2("How Your Work Feeds Coach Brain"),
+    p("Two processes feed Coach Brain — one automated, one driven by your annotations:", { spacing: { before: 60, after: 60 } }),
+    bullet("An automated pipeline extracts candidate coaching insights from every completed analysis that passes a quality threshold. These candidates are reviewed by an administrator before entering Coach Brain.", cbRef),
+    bullet("Your annotations inform which candidates are approved or rejected. When you flag issues or correct coaching, the administrator uses your feedback to decide what enters the knowledge base.", cbRef),
+    bullet("When you mark an analysis as a golden entry, it enters a benchmark dataset used to measure AI quality over time.", cbRef),
 
     spacer(120),
     p(
