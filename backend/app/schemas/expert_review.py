@@ -90,6 +90,7 @@ class ExpertAnalysisDetail(BaseModel):
     flagged_for_review: bool
     is_golden_dataset: bool
     created_at: datetime
+    annotated_video_url: str | None = None
 
 
 class AdminExpertQueueItem(BaseModel):

@@ -140,6 +140,76 @@ function ScoreCard({ label, score }: ScoreCardProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Eval scores card (structured replacement for raw JSON)
+// ---------------------------------------------------------------------------
+
+function EvalScoresCard({ scores }: { scores: Record<string, unknown> }) {
+  const faithfulness =
+    typeof scores.faithfulness === "number" ? scores.faithfulness : null;
+  const passed = scores.faithfulness_passed === true;
+  const coveVerified = scores.cove_verified === true;
+  const coveIterations =
+    typeof scores.cove_iterations === "number" ? scores.cove_iterations : null;
+  const unsupported = Array.isArray(scores.unsupported_claims)
+    ? (scores.unsupported_claims as string[])
+    : [];
+
+  return (
+    <div className="mt-4 space-y-3">
+      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+        Eval Scores
+      </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {faithfulness !== null && (
+          <div
+            className={`rounded-md border p-3 ${passed ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"}`}
+          >
+            <p className="text-xs text-gray-500">Faithfulness</p>
+            <p
+              className={`text-lg font-semibold ${passed ? "text-green-700" : "text-red-700"}`}
+            >
+              {Math.round(faithfulness * 100)}%
+            </p>
+            <span
+              className={`text-xs ${passed ? "text-green-600" : "text-red-600"}`}
+            >
+              {passed ? "Passed" : "Below threshold"}
+            </span>
+          </div>
+        )}
+        <div
+          className={`rounded-md border p-3 ${coveVerified ? "border-green-200 bg-green-50" : "border-yellow-200 bg-yellow-50"}`}
+        >
+          <p className="text-xs text-gray-500">Fact-Check (CoVe)</p>
+          <p
+            className={`text-lg font-semibold ${coveVerified ? "text-green-700" : "text-yellow-700"}`}
+          >
+            {coveVerified ? "Verified" : "Not verified"}
+          </p>
+          {coveIterations !== null && (
+            <span className="text-xs text-gray-500">
+              {coveIterations} iteration{coveIterations !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      </div>
+      {unsupported.length > 0 && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3">
+          <p className="mb-1 text-xs font-medium text-red-700">
+            Unsupported Claims
+          </p>
+          <ul className="list-inside list-disc space-y-1 text-sm text-red-600">
+            {unsupported.map((claim, i) => (
+              <li key={i}>{claim}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Coaching output renderer
 // ---------------------------------------------------------------------------
 
@@ -949,16 +1019,27 @@ export default function ExpertAnalysisDetailPage() {
             </div>
           )}
 
-          {/* Eval scores — shown to expert reviewers only */}
-          {analysis.eval_scores && (
+          {/* Annotated video — skeleton overlay with angle labels */}
+          {analysis.annotated_video_url && (
             <div className="mt-4">
               <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">
-                Eval Scores
+                Annotated Video
               </p>
-              <pre className="overflow-x-auto rounded-md bg-gray-50 p-3 text-xs text-gray-600">
-                {JSON.stringify(analysis.eval_scores, null, 2)}
-              </pre>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video
+                controls
+                className="w-full rounded-md"
+                src={analysis.annotated_video_url}
+                data-testid="expert-annotated-video"
+              >
+                Your browser does not support the video element.
+              </video>
             </div>
+          )}
+
+          {/* Eval scores — structured cards for expert reviewers */}
+          {analysis.eval_scores && (
+            <EvalScoresCard scores={analysis.eval_scores} />
           )}
         </section>
 

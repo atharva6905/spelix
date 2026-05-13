@@ -116,6 +116,7 @@ class ExpertService:
             flagged_for_review=analysis.flagged_for_review,
             is_golden_dataset=analysis.is_golden_dataset,
             created_at=analysis.created_at,
+            annotated_video_url=getattr(analysis, "annotated_video_path", None),
         )
 
     async def submit_annotation(

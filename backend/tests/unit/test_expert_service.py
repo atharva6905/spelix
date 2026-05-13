@@ -55,6 +55,7 @@ def _make_mock_analysis(**overrides):
     a.coaching_result = None
     a.retrieval_context = None
     a.eval_scores = None
+    a.annotated_video_path = None
     for k, v in overrides.items():
         setattr(a, k, v)
     return a
