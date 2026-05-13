@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Build output
+dist/
+frontend/dist/
+*.egg-info/
+
+# Generated / large
+graphify-out/manifest.json
+graphify-out/cost.json
+.playwright-mcp/
+e2e/screenshots/
+e2e/fixtures/
+
+# Config noise
+.git/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+
+# Docs we don't need graphed
+landing-page/
+docs/audit/

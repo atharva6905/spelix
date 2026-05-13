@@ -289,3 +289,13 @@ last_session: [today's date]
 **Run `/backlog`** when: a task is completed (mark `done` + add squash-merge SHA); a new task is discovered mid-session; a task's scope changes (split/merge/blocked/deferred); a batch of work finishes (add `## Completed —` header); a new phase begins (seed from SRS Must filter).
 
 **File ownership**: `decisions.md` is **append-only across phases** — old ADRs are NEVER edited; if a decision is reversed, write a new ADR that supersedes the old one by ID. `backlog.md` rows ARE edited in place (status, commits, scope). Both files commit alongside normal code changes — atomic with the PR that introduces the decision/closes the task, never as a follow-up cleanup PR.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- ALWAYS read graphify-out/GRAPH_REPORT.md before reading any source files, running grep/glob searches, or answering codebase questions. The graph is your primary map of the codebase.
+- IF graphify-out/wiki/index.md EXISTS, navigate it instead of reading raw files
+- For cross-module "how does X relate to Y" questions, prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"` over grep — these traverse the graph's EXTRACTED + INFERRED edges instead of scanning files
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
