@@ -259,6 +259,8 @@ const REF = {
   coach_brain_bullets: nextRef(),
   privacy_bullets: nextRef(),
   faq_bullets: nextRef(),
+  walkthrough_steps: nextRef(),
+  walkthrough_bullets: nextRef(),
 };
 
 function makeNumberingConfig() {
@@ -314,6 +316,8 @@ function makeNumberingConfig() {
       bulletLevel(REF.coach_brain_bullets),
       bulletLevel(REF.privacy_bullets),
       numberLevel(REF.faq_bullets),
+      numberLevel(REF.walkthrough_steps),
+      bulletLevel(REF.walkthrough_bullets),
     ],
   };
 }
@@ -723,7 +727,131 @@ function buildSection4() {
       spacing: { before: 40, after: 80 },
     }),
 
-    h2("4.3  Previous Annotations"),
+    // ── 4.3 Common AI Failure Patterns ──
+    h2("4.3  Common AI Failure Patterns"),
+    p(
+      "The AI coaching is generally accurate, but it has known blind spots. " +
+        "Watch for these specific patterns when reviewing:",
+      { spacing: { before: 60, after: 60 } }
+    ),
+
+    threeColTable(
+      [
+        [
+          "Knee valgus hallucination",
+          "The AI claims knee valgus (inward collapse), knee varus, elbow flare, grip width, or stance width. None of these are measurable from the side-view camera.",
+          "Flag as false positive using \"AI identified a non-issue\". This is the most common AI error.",
+        ],
+        [
+          "Generic coaching cues",
+          "Vague advice like \"maintain good form\" or \"keep your core tight\" without specifying which rep, which joint, or what to change.",
+          "Lower the Coaching Quality Score. Note in Suggested Corrections that cues should reference specific reps and joints.",
+        ],
+        [
+          "Missing inline citation markers",
+          "Citations listed at the bottom but no [1], [2] markers in the coaching text. Markers must appear inline where claims are made.",
+          "Flag as a quality issue. Citations without inline markers don't help the user trace claims to evidence.",
+        ],
+        [
+          "Unsupported claims (red faithfulness)",
+          "Faithfulness eval score is red (below 80%). Some coaching claims are not backed by cited papers. Coaching is NOT suppressed — user sees it as-is.",
+          "Check each coaching claim against the cited papers. Flag specific unsupported claims using issue checkboxes and free-text fields.",
+        ],
+        [
+          "Severity misordering",
+          "A Medium or Low severity issue appears before a High severity issue. High-severity issues should be listed first.",
+          "Note in Suggested Corrections that issues should be reordered by severity.",
+        ],
+        [
+          "Prohibited language",
+          "Terms like \"injury risk\", \"injury prevention\", \"diagnose\", \"treatment\", or \"clinical\" in the coaching text.",
+          "Flag using \"AI identified a non-issue\" and note the prohibited term. See Section 8.",
+        ],
+        [
+          "Overclaiming depth issues",
+          "AI flags depth as insufficient when score cards show depth angle at or below 90° (parallel).",
+          "Cross-reference depth angle in rep metrics against the coaching claim. If numbers contradict, flag it.",
+        ],
+      ],
+      [2200, 3800, 3360],
+      ["Pattern", "What To Look For", "What To Do"]
+    ),
+
+    new Paragraph({ children: [new PageBreak()] }),
+
+    // ── 4.4 What Good vs Bad Coaching Looks Like ──
+    h2("4.4  What Good vs Bad Coaching Looks Like"),
+    p(
+      "Use these examples to calibrate your quality judgments. A Coaching Quality Score of 8+ " +
+        "should match the \"good\" column; a score below 5 should match the \"bad\" column.",
+      { spacing: { before: 60, after: 60 } }
+    ),
+
+    threeColTable(
+      [
+        [
+          "Specificity",
+          "\"On rep 3, your hip angle reached 95°. Drive your hips back further to break 90°.\"",
+          "\"Try to go deeper on your squats.\"",
+        ],
+        [
+          "Citation use",
+          "\"Maintaining torso angle below 45° reduces lumbar shear force [1]. Your torso reached 52° on rep 2.\"",
+          "\"Your form could be better.\" (No citations, no rep reference.)",
+        ],
+        [
+          "Safety warnings",
+          "\"Movement Quality alert: Torso lean exceeded 50° on reps 2 and 4. Consider reducing load.\"",
+          "\"You might get injured if you keep lifting like this.\" (Prohibited language.)",
+        ],
+        [
+          "Cues",
+          "\"Cue: spread the floor apart with your feet during descent. This engages hip external rotators.\"",
+          "\"Keep your knees out.\" (Too vague, no mechanism.)",
+        ],
+        [
+          "Issue severity",
+          "High: \"Excessive forward lean (52° on rep 2) [2].\" Medium: \"Tempo inconsistency — rep 4 was 0.8s vs 1.2s avg.\"",
+          "All issues marked Medium. No rep numbers or measurements.",
+        ],
+      ],
+      [1400, 4200, 3760],
+      ["Aspect", "Good Coaching (score 8+)", "Bad Coaching (score < 5)"]
+    ),
+
+    // ── 4.5 Annotation Walkthrough ──
+    h2("4.5  Annotation Walkthrough — Worked Example"),
+    p(
+      "Here is a step-by-step walkthrough of how to review a squat analysis. Use this as a " +
+        "mental model for your first few reviews.",
+      { spacing: { before: 60, after: 60 } }
+    ),
+
+    p("Scenario: A high-bar squat analysis with 5 reps, Moderate confidence, Movement Quality score of 5.8.", {
+      bold: true,
+      spacing: { before: 40, after: 40 },
+    }),
+
+    numbered("Open the analysis detail page. Note the confidence badge is blue (Moderate) — scores are generally reliable but double-check any borderline claims.", REF.walkthrough_steps),
+    numbered("Check the 5 score cards. Movement Quality is 5.8 (Intermediate, amber). Technique is 7.2, Path & Balance is 8.1, Control is 6.0.", REF.walkthrough_steps),
+    numbered("Watch the annotated video. Look for excessive torso lean (Movement Quality) and inconsistent reps (Control). Note what you observe.", REF.walkthrough_steps),
+    numbered("Read the coaching output. The AI says: \"Depth was adequate on all reps, with hip angles ranging from 82° to 88°.\" Cross-check against the rep metrics.", REF.walkthrough_steps),
+    numbered("The AI also says: \"Knee valgus was observed on rep 3.\" Knee valgus cannot be measured from side view. This is a false positive.", REF.walkthrough_steps),
+    numbered("Check citations. Hover [1] and [2] markers — are the cited papers relevant? Do markers appear inline, or only at the bottom?", REF.walkthrough_steps),
+    numbered("Check eval scores. Faithfulness 91% (green). CoVe Verified. No unsupported claims. Good sign.", REF.walkthrough_steps),
+    numbered("Fill in the annotation form:", REF.walkthrough_steps),
+    bullet("Coaching Quality Score: 6.5 (decent overall, but the valgus false positive brings it down)", REF.walkthrough_bullets),
+    bullet("Movement Quality Advice Accurate: Yes (torso lean observation matches the video)", REF.walkthrough_bullets),
+    bullet("Engagement Advice Accurate: Yes (cues are specific and actionable)", REF.walkthrough_bullets),
+    bullet("Issue: check \"Knee tracking issues at depth\", set severity Medium, note: \"AI claimed knee valgus from side view — not measurable. False positive.\"", REF.walkthrough_bullets),
+    bullet("AI identified a non-issue: \"Knee valgus on rep 3 — not visible from sagittal camera angle.\"", REF.walkthrough_bullets),
+    bullet("Do NOT mark as golden — the false positive disqualifies it.", REF.walkthrough_bullets),
+    numbered("Click Submit. Green banner confirms success.", REF.walkthrough_steps),
+
+    new Paragraph({ children: [new PageBreak()] }),
+
+    // ── 4.6 Previous Annotations (renumbered from 4.3) ──
+    h2("4.6  Previous Annotations"),
     p(
       "If you have previously submitted an annotation for this analysis, it appears in a " +
         "'Previous Annotations' section above your form. Each past annotation shows the quality " +
@@ -731,7 +859,7 @@ function buildSection4() {
       { spacing: { before: 60, after: 80 } }
     ),
 
-    h2("4.4  Your Annotation Form"),
+    h2("4.7  Your Annotation Form"),
     p("Complete all relevant fields and click Submit.", { spacing: { before: 60, after: 80 } }),
 
     numbered("Coaching Quality Score — Enter a value from 1.0 to 10.0 in increments of 0.1. This is your overall judgment of the coaching output quality.", annotationRef),
