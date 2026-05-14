@@ -1,37 +1,41 @@
 # Backend — CLAUDE.md
 
-Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, streaq + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint, Anthropic SDK, OpenAI SDK, instructor, Pydantic v2.
+Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, streaq + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint, Anthropic SDK, OpenAI SDK, instructor, Pydantic v2, LangGraph, LangSmith.
 
-**Current phase: Phase 1 COMPLETE → Phase 2 PLANNING.** Phase 1 added: 5-tier confidence, 4-dimension scoring, SSE coaching, GPT-4o keyframe analysis, exercise auto-detection, Phase 1 PDF, per-rep metrics (FR-REPM-07/08/09/12), detection_result JSONB column (migration 003).
+**Current phase: Phase 3 COMPLETE — private beta live.** Phase 3 shipped: LangGraph agent (deterministic + adaptive modes), distillation pipeline, CoVe verification, Coach Brain candidate lifecycle, expert portal with PDF upload + annotated video, landing page, beta flow, streaq migration. All on prod since 2026-05-03.
 
-Test counts as of Phase 1 gate: **895 passing, 2 skipped, 0 failures, 91% coverage.** Current alembic head: `003_add_detection_result`.
+Test counts: **~2225 passing.** Current alembic head: `0906139da711` (23 migration files).
 
-**Backend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. Any backend change that touches the analysis pipeline, coaching, upload endpoint, auth, or a schema migration is a meaningful checkpoint that requires: (1) a feature branch, (2) a PR with green CI, (3) `gh pr merge --squash --delete-branch`, (4) Playwright MCP E2E verification against spelix.app after the deploy settles. Unit tests green is not enough — prod has a different Supabase project and different env vars, and production-only bugs (PgBouncer asyncpg, JWT issuer, CORS) have burned us before.
+**Backend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. Any backend change that touches the analysis pipeline, coaching, upload endpoint, auth, or a schema migration is a meaningful checkpoint that requires: (1) a feature branch, (2) a PR with green CI, (3) merge via `mcp__github__merge_pull_request` (merge method: `merge`, NEVER squash), (4) Playwright MCP E2E verification against spelix.app after the deploy settles. Unit tests green is not enough — prod has a different Supabase project and different env vars, and production-only bugs (PgBouncer asyncpg, JWT issuer, CORS) have burned us before.
 
 ## Directory Layout
 
 ```
 backend/
   app/
-    api/v1/           # FastAPI routers (one file per resource)
-    services/         # Business logic — no DB calls
-    repositories/     # DB access — all queries live here
-    cv/               # MediaPipe pipeline, quality gates, scoring, detection
-    workers/          # streaq job functions
-    models/           # SQLAlchemy models
-    schemas/          # Pydantic v2 schemas
+    api/v1/           # FastAPI routers (analyses, profiles, admin, coaching_sse, insights, chat, consent, expert, exports, beta, account)
+    agents/           # Phase 3 LangGraph agent (graph.py, nodes.py, state.py, tools.py, tracing.py)
+    distillation/     # Phase 3 distillation pipeline (graph.py, extract, validate, lifecycle, cove_brain, format, store)
+    services/         # Business logic — no DB calls (~40 service files)
+    repositories/     # DB access — all queries live here (~13 repository files)
+    cv/               # MediaPipe pipeline, quality gates, scoring, detection, signal processing, video probe
+    workers/          # streaq job functions (analysis, cleanup, consent_cascade, distillation, paper_ingestion, keepalive)
+    models/           # SQLAlchemy models (~14 model files)
+    schemas/          # Pydantic v2 schemas (~14 schema files)
+    utils/            # Utilities (pdf_upload)
     config.py         # ThresholdConfig loader
   tests/
     unit/             # Pure-function tests + mocked API tests
     integration/      # Real Postgres, real Redis
     e2e/              # Full flow via httpx AsyncClient
+    mcdc/             # MC/DC traceability tests
     fixtures/         # Synthetic video files (~10s, 720p)
-  alembic/versions/   # Migration files
+  alembic/versions/   # 23 migration files (001 through 0906139da711)
 ```
 
 ## API Layer
 
-Route prefix: `/api/v1/`. One router file per resource in `app/api/v1/`: `analyses.py`, `profiles.py`, `admin.py`, `coaching_sse.py`, `insights.py`.
+Route prefix: `/api/v1/`. One router file per resource in `app/api/v1/`: `analyses.py`, `profiles.py`, `admin.py`, `coaching_sse.py`, `insights.py`, `chat.py`, `consent.py`, `expert.py`, `exports.py`, `beta.py`, `account.py`.
 
 Auth: FastAPI dependency `get_current_user` validates Supabase JWT via `SUPABASE_JWT_SECRET`; inject into all protected routes. JWT issuer validation added in B-075.
 
@@ -65,17 +69,25 @@ Status transitions: use the `transition(current, target)` guard function in `app
 
 ## Database
 
-8 tables: `users` (Supabase-managed), `user_profiles`, `analyses`, `rep_metrics`, `coaching_results`, `expert_annotations`, `rag_documents`, `admin_events`.
+14 models: `user_profiles`, `analyses` (Analysis), `rep_metrics` (RepMetric), `coaching_results` (CoachingResult), `rag_documents` (RagDocument), `analysis_expert_reviews` (AnalysisExpertReview), `coach_brain_entries` (CoachBrainEntry), `coach_brain_candidates` (CoachBrainCandidate), `consent_records` (ConsentRecord), `chat_messages` (ChatMessage), `beta_requests` (BetaRequest), `threshold_flags` (ThresholdFlag). `users` is Supabase-managed (auth schema).
 
 ### Migration history
 - **001** — `analyses`, `user_profiles`, `rep_metrics`, `coaching_results` (core tables)
 - **002** — RLS policies on all user-owned tables
 - **003** — `detection_result` JSONB column on `analyses` (FR-XDET-07)
-- **004** — `rag_documents` + `expert_annotations` + `coach_brain_entries` + `consent_records` (Phase 2 RAG + Brain foundation)
+- **004** — `rag_documents` + `expert_annotations` + `coach_brain_entries` + `consent_records` (Phase 2 RAG + Brain)
 - **005** — `chat_messages` table (Phase 2 follow-up chat)
-- **006** — Promoted `rag_documents` metadata columns + `analysis_expert_reviews` table (Phase 2 Admin + Expert Portal, ADR-040)
-
-Current alembic head: `006_admin_expert_reviews`. `admin_events` deferred further.
+- **006** — Promoted `rag_documents` metadata columns + `analysis_expert_reviews` table
+- **007** — Enable Realtime on analyses
+- **008** — `beta_requests` table
+- **009** — Papers bucket RLS
+- **010** — `timing_json` column on analyses
+- **011** — `coach_brain_candidates` table (Phase 3 distillation)
+- **012** — `compensation` entry type on coach_brain
+- **013** — Rename injury→accurate advice column
+- **015–022** — RLS admin tables, `requires_technical_review`, missing indexes, `threshold_flags`, various index additions
+- **0906139da711** (head) — `eval_scores_json` on coaching_results
+- Plus RLS refinement migrations (1862247fad86, f2c0572a0bde)
 
 ### Schema rules
 - Required indexes in migration 001: `(user_id, created_at DESC)` on `analyses`; `(analysis_id)` on `rep_metrics` and `coaching_results`.
@@ -407,6 +419,27 @@ to `coach_brain_candidates`: strips withdrawing-user analysis IDs from
   stalling the graph — do NOT remove the safety net. The
   `test_lifecycle_decision_never_calls_legacy_search` regression test
   guards against accidental re-introduction of the `.search` call.
+
+## Droplet Debugging (SSH)
+
+**When any droplet debugging is needed: SSH in directly. Never ask the user to run commands on the droplet — do it yourself.**
+
+Start every debugging session with `ssh spelix-droplet "docker ps -a"` to confirm connectivity and container state before running anything else. If SSH fails, report the error and stop.
+
+**SSH alias**: `spelix-droplet` (configured in `~/.ssh/config` with `IdentityFile ~/.ssh/claude_spelix`).
+
+**Common debugging commands**:
+```bash
+ssh spelix-droplet "docker ps -a"                           # Container status
+ssh spelix-droplet "docker logs spelix-backend --tail 100 -f"  # Backend logs
+ssh spelix-droplet "docker logs spelix-worker --tail 100 -f"   # Worker logs
+ssh spelix-droplet "docker logs spelix-caddy --tail 50"        # Caddy logs
+ssh spelix-droplet "docker exec spelix-redis redis-cli XLEN 'streaq:spelix:queues:'"  # Queue depth (streaq uses streams, not lists)
+ssh spelix-droplet "docker restart spelix-backend"             # Restart container
+ssh spelix-droplet "docker exec spelix-backend <cmd>"          # One-off command
+```
+
+**Key management**: Private key `~/.ssh/claude_spelix` on local machine. Public key in `~deploy/.ssh/authorized_keys` on droplet.
 
 ## Backend Gotchas
 

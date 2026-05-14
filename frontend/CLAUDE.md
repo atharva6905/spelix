@@ -2,11 +2,11 @@
 
 React 19, Vite 8, TypeScript strict mode, Tailwind CSS 4, shadcn/ui, Recharts, React Router v6. Package manager: npm. Node 22 LTS.
 
-**Current phase: Phase 1 COMPLETE → Phase 2 PLANNING.** Phase 1 added: FormScoreCards on ResultsPage (4 dimension scores + Overall + Movement Quality < 3.0 alert), extended CoachingOutput rendering (safety_warnings, recommended_cues, citations), detection_result display on AnalysisStatusPage, Phase 1 fields on `AnalysisDetail` + `CoachingOutput` TypeScript types.
+**Current phase: Phase 3 COMPLETE — private beta live.** All phases shipped: Phase 1 (scores, SSE coaching, detection display), Phase 2 (citations, consent flow, chat, expert portal, admin panels), Phase 3 (LangGraph agent reasoning sidebar, landing page, beta flow, threshold flagging, coach brain candidates admin). Auto-deploys to spelix.app via Vercel on merge to main.
 
-Test counts as of Phase 1 gate: **177 passing, 0 failures.**
+Test counts: **746 passing, 0 failures** (75 test files).
 
-**Frontend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. The frontend auto-deploys to spelix.app on merge to main. Any change that touches `ResultsPage`, `UploadPage`, `AnalysisStatusPage`, `useAnalysisStatus`, `useAnalysisDetail`, the coaching renderer, or `api/analyses.ts` is a meaningful checkpoint requiring: (1) feature branch, (2) PR with green CI, (3) `gh pr merge --squash --delete-branch`, (4) Playwright MCP E2E verification against spelix.app. Vitest green is not enough — the component might mount fine with mocked hooks but crash against real backend response shapes (a Phase 1 lesson: MagicMock + Pydantic schema drift caused 500s that unit tests never caught).
+**Frontend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. Any change that touches core pages, hooks, or `api/` files is a meaningful checkpoint requiring: (1) feature branch, (2) PR with green CI, (3) merge via `mcp__github__merge_pull_request` (merge method: `merge`, NEVER squash), (4) Playwright MCP E2E verification against spelix.app. Vitest green is not enough — the component might mount fine with mocked hooks but crash against real backend response shapes.
 
 ## Stack Details
 
@@ -27,9 +27,14 @@ frontend/
     api/             # Centralized API calls (one file per resource)
       analyses.ts    # CreateAnalysis, status poll, detail, list, DetectionResult type
       profiles.ts
+      admin.ts       # Admin endpoints
+      beta.ts        # Beta request/waitlist
+      consent.ts     # GDPR consent
+      expert.ts      # Expert portal API
+      insights.ts    # Per-exercise + global insights
       config.ts      # API_BASE constant
       types.ts       # Auto-generated from backend OpenAPI
-    components/      # Shared UI components
+    components/      # Shared UI components (~60+ files incl. tests)
     pages/           # Route page components
       UploadPage.tsx
       AnalysisStatusPage.tsx
@@ -37,9 +42,21 @@ frontend/
       HistoryPage.tsx
       ProfilePage.tsx
       AdminPage.tsx
+      AdminCoachBrainCandidatesPage.tsx
+      ConsentPage.tsx
+      LandingPage.tsx
+      LoginPage.tsx
+      SignupPage.tsx
+      BetaTermsPage.tsx
+      ExpertPortalPage.tsx
+      ExpertAnalysisDetailPage.tsx
+      ExpertPaperUploadPage.tsx
+      ExpertThresholdsPage.tsx
     hooks/           # Custom hooks
       useAnalysisStatus.ts   # Realtime + polling fallback
       useAnalysisDetail.ts
+      useChat.ts             # Follow-up chat
+      useConsent.ts          # Consent state
     lib/
       supabase.ts    # @supabase/supabase-js client
       confidence.ts  # Confidence category helpers
@@ -54,14 +71,23 @@ Absolute imports only: `@/components/`, `@/pages/`, `@/hooks/`, `@/api/`, `@/lib
 
 All routes in `src/routes.tsx`. React Router v6.
 
-- `UploadPage` — exercise type + variant dropdowns + file input, TUS upload to Supabase Storage. Upload button `aria-disabled=true` until both exercise type AND variant selected (FR-XDET-09).
-- `AnalysisStatusPage` — real-time status via Supabase Realtime + polling fallback. Displays detected exercise card (Phase 1, FR-XDET-07). Quality-gate rejection shows specific corrective guidance.
-- `ResultsPage` — full analysis results: summary card, FormScoreCards (Phase 1), annotated video, coaching output (with Phase 1 safety_warnings/recommended_cues/citations), rep metrics table, angle plot, downloads.
-- `HistoryPage` — reverse-chronological list with status badges, exercise/variant, confidence label, date. Per-exercise insights (FR-HIST-02) + global insights (FR-HIST-03).
-- `ProfilePage` — user body stats edit form (height, weight, age, experience, arm_span_cm, femur_length_cm for FR-PROF-06).
-- `AdminPage` — Phase 0 Tier 1 + Tier 2 admin features (FR-ADMN-01 through FR-ADMN-05).
+- `LandingPage` — public marketing page with hero, process, science, differentiators, email capture, beta CTA.
+- `LoginPage` / `SignupPage` — Supabase auth forms.
+- `BetaTermsPage` — beta terms & GDPR disclosures (public).
+- `ConsentPage` — 3-tier GDPR consent flow (Phase 2, FR-CONS-01/02/03).
+- `UploadPage` — exercise type + variant dropdowns + file input, TUS upload to Supabase Storage. Wrapped in `RequireConsent`.
+- `AnalysisStatusPage` — real-time status via Supabase Realtime + polling fallback. Displays detected exercise card.
+- `ResultsPage` — full analysis results: summary card, FormScoreCards, annotated video, coaching output (with citations, safety_warnings, recommended_cues), agent reasoning sidebar (Phase 3), chat panel (Phase 2), rep metrics, angle plot, downloads.
+- `HistoryPage` — reverse-chronological list with status badges, exercise/variant, confidence label, date. Per-exercise + global insights.
+- `ProfilePage` — user body stats edit form.
+- `AdminPage` — admin features (FR-ADMN-01 through FR-ADMN-05), corpus management, expert queue.
+- `AdminCoachBrainCandidatesPage` — review queue for distillation candidates (Phase 3).
+- `ExpertPortalPage` — expert reviewer queue listing.
+- `ExpertAnalysisDetailPage` — expert annotation form with structured scores, annotated video, PDF upload.
+- `ExpertPaperUploadPage` — expert paper/document ingestion.
+- `ExpertThresholdsPage` — threshold flag management for experts.
 
-**Protected routes**: wrap with `RequireAuth` component that checks Supabase session. Public routes: `/`, `/login`, `/signup`.
+**Protected routes**: wrap with `RequireAuth` component that checks Supabase session. Upload further wrapped with `RequireConsent`. Public routes: `/`, `/login`, `/signup`, `/beta-terms`.
 
 ## Key Components
 
@@ -104,6 +130,24 @@ Overall rating card + 4 dimension cards (Movement Quality, Technique, Path & Bal
 Color classes by score: `score >= 7.5` → green; `score >= 5.0` → amber; `score < 5.0` → red.
 
 Movement Quality < 3.0 shows a red `movement-quality-alert` banner at the top of the card section (FR-RESL-01).
+
+### ChatPanel (Phase 2, `components/ChatPanel.tsx`)
+Follow-up chat interface for coaching clarification questions. Uses `useChat` hook. Renders citation tooltips inline.
+
+### CitationTooltip (Phase 2, `components/CitationTooltip.tsx`)
+Hover/click tooltip showing source title, authors, year, DOI for cited coaching claims.
+
+### AgentReasoningSidebar (Phase 3, `components/AgentReasoningSidebar.tsx`)
+Collapsible sidebar showing the Phase 3 agent's node-by-node trace — which tools ran, durations, eval scores, CoVe iterations. Only renders when `agent_trace_json` is present on coaching results.
+
+### ThresholdFlagModal (Phase 3, `components/ThresholdFlagModal.tsx`)
+Modal for users/experts to flag threshold values as potentially incorrect, feeding into the expert review queue.
+
+### Landing page components (`components/Landing*.tsx`)
+Hero, HowItWorks, Science, Differentiators, EmailCapture, Privacy, Footer, Process, Report, Problem sections. Each is a standalone section component composed in `LandingPage.tsx`.
+
+### RequireConsent (`components/RequireConsent.tsx`)
+Route guard that redirects to `/consent` if the user hasn't completed the 3-tier GDPR consent flow.
 
 ## Supabase Integration
 
@@ -184,7 +228,7 @@ export interface AnalysisStatusResponse {
 
 ## Testing
 
-Vitest + React Testing Library. **Coverage target: 90% minimum**. Current: 177 tests passing.
+Vitest + React Testing Library. **Coverage target: 90% minimum**. Current: **746 tests passing** (75 test files).
 
 ### Run commands
 ```bash

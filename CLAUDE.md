@@ -2,7 +2,7 @@
 
 Science-based barbell form coaching platform. Users upload squat/bench/deadlift videos → CV pipeline extracts pose + reps + metrics → AI generates structured coaching feedback. Private web app at spelix.app.
 
-**Current phase: L2 sprint — 19-day hard gate to 2026-05-03** (Phase 3 + landing V1 + expert portal PDF upload + ARQ→streaq migration all live on prod). Phase 0 complete (93 items, B-001–B-093). Phase 1 complete (44 items, B-094–B-137). Phase 2 complete (44 items, P2-001–P2-044, 33 Must requirements). Phase 2 delivered: RAG (Qdrant dual-collection, Cohere embed-v4 + Rerank 4.0), Docling ingestion, hybrid retrieval (dense+BM25+RRF), citation-grounded coaching, CoVe verification, follow-up chat, Coach Brain foundation (24 seed entries, contextual embedding, cold-start fallback, dual-collection orchestrator), GDPR consent (3-tier UI + withdrawal cascade), DPIA, per-analysis eval scores (RAGAS/HHEM), Langfuse tracing, expert reviewer portal metadata-only (7 FR-EXPV), admin panels (corpus/brain/expert queue). **Phase 3 (LangGraph agent) PULLED FORWARD — ships in this 19-day sprint per STRATEGY.md v3 (2026-04-14), not deferred.** SRS v2.1 (north star — set in stone).
+**Current phase: Post-L2 sprint — private beta live.** Phase 0 complete (93 items). Phase 1 complete (44 items). Phase 2 complete (44 items). Phase 3 complete (LangGraph agent, distillation pipeline, landing page, expert portal, beta flow, streaq migration — all on prod since 2026-05-03). L2 sprint hard gate met. Now in beta ops: real users, expert reviews, Coach Brain growing. Next: internship applications (mid-May 2026), Phase 4 eval infrastructure when needed. SRS v2.1 (north star — set in stone).
 
 Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`. **Strategy & priorities: `STRATEGY.md`** — L2 beta launch plan, internship timeline, time budgets, stop-loss triggers. Read before suggesting new features or scope changes.
 
@@ -10,10 +10,10 @@ Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at mi
 
 ## Stack
 
-- **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, ARQ + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint. See `backend/CLAUDE.md`.
+- **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 + Alembic, streaq + Redis, MediaPipe BlazePose Heavy, OpenCV headless, WeasyPrint, LangGraph. See `backend/CLAUDE.md`.
 - **Database**: Supabase Postgres (public schema only; auth schema is Supabase-managed)
 - **Storage/Auth/Realtime**: Supabase (Storage for artifacts, Auth for JWT, Realtime for status push)
-- **AI (Phase 1)**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching with prompt caching; OpenAI GPT-4o (`gpt-4o`) for keyframe analysis + exercise auto-detect fallback
+- **AI**: Claude Sonnet 4.6 (`claude-sonnet-4-6`) for coaching with prompt caching; OpenAI GPT-4o (`gpt-4o`) for keyframe analysis + exercise auto-detect fallback; LangGraph for Phase 3 agent orchestration; LangSmith for tracing
 - **Frontend**: React 19, Vite 8, TypeScript strict, Tailwind CSS 4, shadcn/ui, Recharts. See `frontend/CLAUDE.md`.
 - **Infra**: DigitalOcean 4GB droplet behind Caddy, Vercel for frontend, Qdrant Cloud (Phase 2+)
 
@@ -83,15 +83,17 @@ Named specialist agents carry permanent domain knowledge. Main agent auto-delega
 - `spelix-security-reviewer` — pre-merge auth/RLS/language checks
 - `spelix-migration` — Alembic migrations and schema changes
 
-**Active agents (Phase 1+, still needed for Phase 2):**
+**Active agents (Phase 1+):**
 - `spelix-cv-engineer` — all tasks in `backend/app/cv/`
 - `spelix-coaching-engineer` — coaching service, SSE, LLM prompt work
 
-**Active agents (Phase 2):**
+**Active agents (Phase 2+):**
 - `spelix-rag-engineer` — Qdrant, Cohere embed/rerank, hybrid retrieval, ingestion
 - `spelix-corpus-curator` — research document ingestion, metadata, citation provenance
 
-**Activate Day 10 of L2 sprint (2026-04-23):** `spelix-langgraph-engineer` — Phase 3 agent core, distillation StateGraph, CoVe verification, Coach Brain review queue, reasoning sidebar
+**Active agents (Phase 3+):**
+- `spelix-langgraph-engineer` — Phase 3 agent core, distillation StateGraph, CoVe verification, Coach Brain review queue, reasoning sidebar
+
 **Activate at Phase 4:** `spelix-eval-engineer`
 
 ### Delegation Rules
@@ -164,7 +166,7 @@ Scopes: `api`, `cv`, `auth`, `models`, `worker`, `frontend`, `admin`, `config`, 
 
 ## Checkpoint Workflow (branch + PR + merge — NEVER direct push to main)
 
-`main` auto-deploys to spelix.app. A broken push breaks production. For every meaningful checkpoint, work on a branch, open a PR, let CI run, then merge via `gh pr merge --squash --delete-branch`. The main agent merges its own PR once CI is green.
+`main` auto-deploys to spelix.app. A broken push breaks production. For every meaningful checkpoint, work on a branch, open a PR, let CI run, then merge via `mcp__github__merge_pull_request` (merge method: `merge`). The main agent merges its own PR once CI is green.
 
 **Meaningful checkpoints** (PR required): phase batch completion, FR-ID implementations with user-facing changes, schema migrations, bug fixes touching auth/coaching/upload/pipeline, dependency upgrades, infra changes, CI fixes.
 
@@ -193,65 +195,15 @@ After merging to `main`, **"Deploy to Production" runs automatically as a CI ste
 
 ## E2E Verification via Playwright MCP
 
-After deployment completes (CI "Deploy to Production" step green), verify the live flow end-to-end with the Playwright MCP browser tools BEFORE moving on. "Unit tests pass" ≠ "works in production" — prod has different env vars, different Supabase project, different everything.
+After "Deploy to Production" CI step is green, verify the live flow with Playwright MCP BEFORE moving on. Verify on prod after any PR touching upload/pipeline/results/coaching/PDF/auth, API shapes, Phase MUST requirements, or production bugs. Skip for docs-only, CI-only, or prompt-only changes.
 
-**Verify on prod after merging any PR that**: touches upload/pipeline/results/coaching/PDF/auth flows, changes API response shapes, adds or modifies a Phase MUST requirement, or fixes a production bug. Also periodically at phase gates.
+**Procedure**: wait for deploy → `browser_navigate` → `https://spelix.app` → `browser_snapshot` → walk affected flow → check `browser_console_messages` (level=error) + `browser_network_requests` (4xx/5xx). If broken: write to `.claude/handoff.md` and STOP. If green: record in handoff.
 
-**Skip verification for**: docs-only changes, CI fixes that don't change runtime behavior, agent prompt edits, commits not touching `backend/app/`, `frontend/src/`, or migrations.
-
-**Procedure**:
-1. Wait for "Deploy to Production" CI step to complete (check via GitHub MCP)
-2. `mcp__playwright__browser_navigate` → `https://spelix.app`
-3. `mcp__playwright__browser_snapshot` to capture accessibility tree
-4. Walk the affected flow: click/fill/type/wait through login → upload → status → results → download
-5. At the end: `browser_console_messages` (level=error) + `browser_network_requests` (filter for 4xx/5xx)
-6. **If broken**: write findings to `.claude/handoff.md` under a new "E2E Findings" section and STOP — do not continue until fixed
-7. **If green**: record verification as a bullet in the handoff and move on
-
-Authenticated flows use persistent cookies from the browse daemon. Never verify on localhost when prod is the question.
-
-**Test artifacts live in `e2e/`** — `e2e/fixtures/` holds video inputs (e.g. `squat-high-bar.mp4`) attached via `browser_file_upload` with an absolute path; `e2e/screenshots/` holds PNG captures from runs. The noisy auto-generated `.playwright-mcp/` folder (accessibility snapshots, console logs, network dumps) is gitignored — reference those files from handoff notes only. See `e2e/README.md`.
+Test artifacts: `e2e/fixtures/` (video inputs), `e2e/screenshots/` (captures). `.playwright-mcp/` is gitignored.
 
 ## Droplet Debugging (SSH)
- 
-**When any droplet debugging is needed: SSH in directly. Never ask the user to run commands on the droplet — do it yourself.**
- 
-Start every debugging session with `ssh spelix-droplet "docker ps -a"` to confirm connectivity and container state before running anything else. If SSH fails, report the error and stop — do not ask the user to run it instead.
- 
-Claude Code connects directly to the droplet via SSH using a dedicated key. No DO MCP — not configured, not needed.
- 
-**SSH alias**: `spelix-droplet` (configured in `~/.ssh/config` with `IdentityFile ~/.ssh/claude_spelix`).
- 
-**Verify access**:
-```bash
-ssh spelix-droplet "echo ok && whoami"
-```
- 
-**Common debugging commands**:
-```bash
-# Container status
-ssh spelix-droplet "docker ps -a"
- 
-# Live backend logs (last 100 lines + follow)
-ssh spelix-droplet "docker logs spelix-backend --tail 100 -f"
- 
-# Worker logs
-ssh spelix-droplet "docker logs spelix-worker --tail 100 -f"
- 
-# Caddy access/error logs
-ssh spelix-droplet "docker logs spelix-caddy --tail 50"
- 
-# ARQ queue depth
-ssh spelix-droplet "docker exec spelix-redis redis-cli llen arq:queue"
- 
-# Restart a container
-ssh spelix-droplet "docker restart spelix-backend"
- 
-# Run a one-off command inside the backend container
-ssh spelix-droplet "docker exec spelix-backend <cmd>"
-```
- 
-**Key management**: The private key is `~/.ssh/claude_spelix` on the local machine. The public key is in `~deploy/.ssh/authorized_keys` on the droplet. 
+
+SSH in directly — never ask the user. See `backend/CLAUDE.md` "Droplet Debugging" for full command reference. SSH alias: `spelix-droplet`. Start with `ssh spelix-droplet "docker ps -a"`.
 
 ## Compaction Survival
 
@@ -261,7 +213,7 @@ Use the Explore built-in subagent for file discovery — its reads stay out of m
 When asked to summarize for compaction: preserve current phase, last 5 modified files, failing tests, current task.
 After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirements before resuming. Run `/status` to confirm environment state.
 
-**Phase completion criterion**: All MUST requirements for the phase implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10 (895 backend tests, 177 frontend, 91% coverage, migration 003 applied).
+**Phase completion criterion**: All MUST requirements for the phase implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10. Phase 2 passed 2026-04-14. Phase 3 + L2 sprint passed 2026-05-03. Current: **2225 backend tests, 746 frontend tests, 23 migrations applied** (head: `0906139da711`).
 
 At the end of any session that didn't complete all planned batches, write a handoff note to `.claude/handoff.md` containing: (1) completed tasks with commit SHAs, (2) remaining tasks with backlog IDs, (3) current test count and any failures, (4) any blockers discovered.
 
