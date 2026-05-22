@@ -147,9 +147,9 @@ UI labels (FR-CVPL-25): ≥0.80 High (green); 0.65–0.79 Moderate (yellow); 0.5
 ## Form Scoring (Phase 1)
 
 4-dimension Composite via `ScoreComponent` Protocol in `app/cv/scoring.py` (ADR-016):
-- **SafetyScore** (FR-SCOR-01) — user-facing label "Movement Quality Score". Torso lean (squat/DL), knee angle at depth (squat), elbow angle range (bench), shoulder angle range (bench). Score < 3.0 triggers mandatory top-of-page warning.
-- **TechniqueScore** (FR-SCOR-02) — depth angle, torso lean, hip/knee angles, shoulder angle at bottom.
-- **PathBalanceScore** (FR-SCOR-03) — bar path anterior-posterior deviation, path consistency. Nuckols bar-over-midfoot anchor.
+- **SafetyScore** (FR-SCOR-01) — user-facing label "Movement Quality Score". Sagittal-observable inputs: torso lean (squat/DL), knee angle at depth (squat), elbow angle range (bench), shoulder angle range (bench), ankle dorsiflexion + heel rise (squat, planned via sagittal heel-y baseline). Score < 3.0 triggers mandatory top-of-page warning. Knee valgus, true wrist-over-elbow frontal alignment, and true scapular retraction require a frontal-plane camera and are deferred (ADR-AUDIT-2026-05-22).
+- **TechniqueScore** (FR-SCOR-02) — sagittal-observable inputs: depth angle, torso lean, hip/knee angles, shoulder angle at bottom, elbow angle at bottom (bench). Elbow flare, grip width, stance width require a frontal-plane camera and are deferred (ADR-AUDIT-2026-05-22).
+- **PathBalanceScore** (FR-SCOR-03) — bar path anterior-posterior (A-P) deviation (`ap_deviation_px`), path consistency, bar path classification (bench). Nuckols bar-over-midfoot anchor. Lateral weight shift requires a frontal-plane camera and is deferred (ADR-AUDIT-2026-05-22).
 - **ControlScore** (FR-SCOR-04) — eccentric duration, lockout quality, phase of max deviation, rep-to-rep std dev. Sheiko consistency-under-load anchor.
 
 **OverallFormScore** (FR-SCOR-05) = weighted composite. Default weights: Movement Quality 40%, Technique 30%, Path & Balance 20%, Control 10%. Admin-configurable via ThresholdConfig without code changes.
