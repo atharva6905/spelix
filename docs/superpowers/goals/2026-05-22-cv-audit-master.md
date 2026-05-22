@@ -52,8 +52,8 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 |---|---------|--------|-------------------|------------|----|
 | 1 | Part 1 cleanup | complete | 0 | c47740e | #147 |
 | 2 | Lifter-side detection + refactor | complete | 0 | af1548b | #150 |
-| 3 | Infrastructure scaffold | active | 0 | — | — |
-| 4 | Trivial metrics (auto-flow scoring) | pending | 0 | — | — |
+| 3 | Infrastructure scaffold | complete | 0 | fc5e6ca | #153 |
+| 4 | Trivial metrics (auto-flow scoring) | active | 0 | — | — |
 | 5 | Standard single-frame landmark math | pending | 0 | — | — |
 | 6 | Bar-coordinate math | pending | 0 | — | — |
 | 7 | Complex multi-frame analysis | pending | 0 | — | — |
@@ -186,10 +186,10 @@ On STOP: write detailed handoff and auto-launch narrow remediation /goal per Rem
 
 ## Session 3 — Infrastructure scaffold
 
-**Status:** pending
+**Status:** complete (merged 2026-05-22; merge SHA `fc5e6ca`; PR #153)
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-3
-- Plan (skeleton — expand before launch): `docs/superpowers/plans/2026-05-22-session-3-infrastructure-scaffold.md`
+- Plan (expanded TDD, merged via PR #152): `docs/superpowers/plans/2026-05-22-session-3-infrastructure-scaffold.md`
 **Backlog IDs:** `L2-SAGITTAL-INFRA-01` through `-04`
 
 **Launch command (copy verbatim into `/goal`):**
@@ -230,18 +230,20 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 **Completion checklist:**
 
-- [ ] `backend/app/cv/sagittal_metrics_registry.py` with 16 entries
-- [ ] `GET /api/v1/expert/sagittal-metrics-registry` endpoint
-- [ ] Alembic migration extending `threshold_flags.section` CHECK
-- [ ] `<UnvalidatedMetricsPanel />` rendered in expert analysis detail page
-- [ ] `ThresholdFlagModal` extended for `section='unvalidated_metrics'`
-- [ ] Backend + frontend tests green
-- [ ] PR-level CI green via `gh pr checks <PR>`; PR merged via `merge_method=merge`; post-merge Deploy to Production green via `gh run watch <main-run-id>`
-- [ ] E2E: expert sees 16 "Not yet computed" rows
-- [ ] ADR-SAGITTAL-METRICS-REGISTRY in `decisions.md`
-- [ ] `backend/CLAUDE.md` registry pattern section
-- [ ] `spelix-security-reviewer` PASS
-- [ ] Master manifest updated; Session 4 active
+- [x] `backend/app/cv/sagittal_metrics_registry.py` with 16 entries (commit `3204436`)
+- [x] `GET /api/v1/expert/sagittal-metrics-registry` endpoint (commit `b4dfedf`)
+- [x] Alembic migration `7c4af3e51f08` adds `threshold_flags.section` CHECK enumerating 5 allowed values (commit `060bdb9`)
+- [x] `<UnvalidatedMetricsPanel />` rendered in expert analysis detail page (commit `b62b059`)
+- [x] `ThresholdFlagModal` accepts `section='unvalidated_metrics'` (commit `b62b059` + addendum test)
+- [x] Backend tests green (2096 passed); frontend tests green (755 passed, +9 over Session-2 baseline)
+- [x] PR-level CI green via `gh pr checks 153` (Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel — all pass on commit `863b152`)
+- [x] PR #153 merged via `mcp__github__merge_pull_request` with `merge_method=merge`; merge SHA `fc5e6ca`
+- [ ] Post-merge Deploy to Production green via `gh run watch 26312764595` (in progress at handoff write — confirm conclusion=`success` before launching Session 4)
+- [ ] E2E: expert sees applicable "Not yet computed" rows on prod (post-deploy)
+- [x] ADR-SAGITTAL-METRICS-REGISTRY in `decisions.md` (commit `024d8b0`)
+- [x] `backend/CLAUDE.md` registry pattern section appended (commit `024d8b0`)
+- [x] `spelix-security-reviewer` PASS — no CRITICAL, no HIGH, no findings
+- [x] Master manifest updated; Session 4 active
 
 ---
 
