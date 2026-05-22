@@ -23,7 +23,12 @@ import { supabase } from "@/lib/supabase";
 
 type Tab = "thresholds" | "my_flags";
 
-const SECTION_LABELS: Record<ThresholdRow["section"], string> = {
+// ExpertThresholdsPage only renders the four config-backed sections. The
+// "unvalidated_metrics" section (Session 3, ADR-SAGITTAL-METRICS-REGISTRY)
+// has no rows in /thresholds and is intentionally excluded here.
+type ConfigBackedSection = "squat" | "bench" | "deadlift" | "control";
+
+const SECTION_LABELS: Record<ConfigBackedSection, string> = {
   squat: "Squat",
   bench: "Bench",
   deadlift: "Deadlift",
@@ -98,7 +103,7 @@ export default function ExpertThresholdsPage() {
 
   const sections = useMemo(() => {
     if (!listing) return [];
-    return (Object.keys(SECTION_LABELS) as ThresholdRow["section"][]).map(
+    return (Object.keys(SECTION_LABELS) as ConfigBackedSection[]).map(
       (section) => ({
         section,
         label: SECTION_LABELS[section],

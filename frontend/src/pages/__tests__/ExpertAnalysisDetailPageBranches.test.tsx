@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => ({
   getExpertAnalysis: vi.fn(),
   submitAnnotation: vi.fn(),
   getAnnotations: vi.fn(),
+  // Session 3 (L2-SAGITTAL-INFRA-04): UnvalidatedMetricsPanel is mounted on
+  // the page and fetches the sagittal registry on render. Returns an empty
+  // entries list here so the panel renders with no rows -- existing branch-
+  // coverage tests don't care about its contents.
+  getSagittalMetricsRegistry: vi.fn().mockResolvedValue({ entries: [] }),
+  createThresholdFlag: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -34,6 +40,8 @@ vi.mock("@/api/expert", () => ({
   getExpertAnalysis: mocks.getExpertAnalysis,
   submitAnnotation: mocks.submitAnnotation,
   getAnnotations: mocks.getAnnotations,
+  getSagittalMetricsRegistry: mocks.getSagittalMetricsRegistry,
+  createThresholdFlag: mocks.createThresholdFlag,
 }));
 
 import ExpertAnalysisDetailPage from "@/pages/ExpertAnalysisDetailPage";

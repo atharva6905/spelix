@@ -19,6 +19,7 @@ import {
   type AnnotationCreate,
   type AnnotationResponse,
 } from "@/api/expert";
+import UnvalidatedMetricsPanel from "@/components/UnvalidatedMetricsPanel";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1055,6 +1056,12 @@ export default function ExpertAnalysisDetailPage() {
           </h2>
           <CoachingOutput coachingResult={analysis.coaching_result} />
         </section>
+
+        {/* ------------------------------------------------------------------ */}
+        {/* Unvalidated Metrics — Session 3 sagittal-view scaffold              */}
+        {/* (ADR-SAGITTAL-METRICS-REGISTRY)                                     */}
+        {/* ------------------------------------------------------------------ */}
+        <UnvalidatedMetricsPanel analysis={analysis} />
 
         {/* ------------------------------------------------------------------ */}
         {/* Bottom: previous annotations + annotation form                     */}
