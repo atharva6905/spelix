@@ -419,3 +419,17 @@ def test_technique_score_ignores_elbow_flare_deg_metric(
     score_with, badges_with = scorer.compute(metrics_with, None, cfg, "bench")
     assert score_with == score_without, "elbow_flare_deg must not affect score"
     assert badges_with == badges_without, "elbow_flare_deg must not produce badges"
+
+
+# ---------------------------------------------------------------------------
+# Session 4 — ThresholdConfig knobs
+# ---------------------------------------------------------------------------
+
+
+def test_threshold_config_has_session4_entries(cfg: ThresholdConfig) -> None:
+    """Session 4: thresholds_v1.json must expose depth_classification + ecc_con_ratio knobs."""
+    # Categorical default for squat depth gate.
+    assert cfg.get("squat", "depth_classification_min") == "at_parallel"
+    # Ecc/con ratio scoring window (Wilk et al. 1993 tempo prescription).
+    assert cfg.get("control", "ecc_con_ratio_target_min") == pytest.approx(1.0)
+    assert cfg.get("control", "ecc_con_ratio_target_max") == pytest.approx(3.0)

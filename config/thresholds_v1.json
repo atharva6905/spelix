@@ -45,6 +45,12 @@
       "unit": "degrees",
       "provenance_citation": "ADR-REPDET-02 — peak/valley fallback prominence threshold; conservative enough for state-machine fallback path",
       "last_modified_by": "cv_engineer"
+    },
+    "depth_classification_min": {
+      "value": "at_parallel",
+      "unit": "",
+      "provenance_citation": "Schoenfeld 2010 — parallel depth marker (depth_classification gate; allowed values: above_parallel, at_parallel, below_parallel)",
+      "last_modified_by": "cv_engineer"
     }
   },
 
@@ -186,6 +192,18 @@
       "unit": "seconds",
       "provenance_citation": "Sheiko — rep-to-rep consistency",
       "last_modified_by": "expert_reviewer"
+    },
+    "ecc_con_ratio_target_min": {
+      "value": 1.0,
+      "unit": "ratio",
+      "provenance_citation": "Wilk et al. 1993 tempo prescription — minimum eccentric/concentric ratio for hypertrophy and motor control",
+      "last_modified_by": "cv_engineer"
+    },
+    "ecc_con_ratio_target_max": {
+      "value": 3.0,
+      "unit": "ratio",
+      "provenance_citation": "Wilk et al. 1993 tempo prescription — maximum eccentric/concentric ratio before tempo becomes excessive",
+      "last_modified_by": "cv_engineer"
     }
   },
 
