@@ -93,29 +93,37 @@ class TestThresholdConfig:
         cfg = ThresholdConfig()
         assert cfg.version == "v1"
 
-    def test_get_squat_knee_valgus_caution(self) -> None:
+    def test_get_squat_depth_parallel(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5.0
+        assert cfg.get("squat", "depth_parallel_hip_angle_deg") == 90.0
 
-    def test_get_squat_knee_valgus_high(self) -> None:
+    def test_get_squat_torso_lean_caution(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "knee_valgus_high_deg") == 10.0
+        assert cfg.get("squat", "torso_lean_caution_deg") == 45.0
 
-    def test_get_squat_lumbar_flexion_caution(self) -> None:
+    def test_get_squat_torso_lean_high(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "lumbar_flexion_caution_deg") == 28.0
+        assert cfg.get("squat", "torso_lean_high_deg") == 60.0
 
-    def test_get_squat_lumbar_flexion_high(self) -> None:
+    def test_get_bench_elbow_angle_max(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "lumbar_flexion_high_deg") == 44.0
+        assert cfg.get("bench", "elbow_angle_at_bottom_max_deg") == 100.0
 
-    def test_get_bench_grip_width_ratio(self) -> None:
+    def test_get_deadlift_hip_hinge_min(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("bench", "grip_width_biacromial_ratio_max") == 1.5
+        assert cfg.get("deadlift", "hip_hinge_min_deg") == 70.0
 
-    def test_get_deadlift_lumbar_flexion_caution(self) -> None:
+    def test_v1_deferred_multi_camera_keys_not_in_active_section(self) -> None:
+        """Frontal-plane keys live in deferred_multi_camera, NOT in active
+        squat/bench/deadlift sections. Per ADR-AUDIT-2026-05-22.
+        """
         cfg = ThresholdConfig()
-        assert cfg.get("deadlift", "lumbar_flexion_caution_deg") == 28.0
+        with pytest.raises(KeyError):
+            cfg.get("squat", "knee_valgus_caution_deg")
+        with pytest.raises(KeyError):
+            cfg.get("bench", "elbow_flare_caution_deg")
+        with pytest.raises(KeyError):
+            cfg.get("bench", "grip_width_biacromial_ratio_max")
 
     def test_get_experience_tolerance_beginner(self) -> None:
         cfg = ThresholdConfig()
@@ -133,23 +141,23 @@ class TestThresholdConfig:
     def test_get_unknown_exercise_raises(self) -> None:
         cfg = ThresholdConfig()
         with pytest.raises(KeyError):
-            cfg.get("nonexistent_exercise", "knee_valgus_caution_deg")
+            cfg.get("nonexistent_exercise", "torso_lean_caution_deg")
 
     # --- v1-specific: nested object unwrapping ---
 
     def test_v1_get_unwraps_nested_value(self) -> None:
         """v1 thresholds are {value, unit, ...} objects; get() returns just the value."""
         cfg = ThresholdConfig()
-        raw = cfg.get_raw("squat", "knee_valgus_caution_deg")
+        raw = cfg.get_raw("squat", "depth_parallel_hip_angle_deg")
         assert isinstance(raw, dict)
-        assert raw["value"] == 5.0
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5.0
+        assert raw["value"] == 90.0
+        assert cfg.get("squat", "depth_parallel_hip_angle_deg") == 90.0
 
     def test_v1_get_citation(self) -> None:
         """get_citation() returns provenance string for nested thresholds."""
         cfg = ThresholdConfig()
-        citation = cfg.get_citation("squat", "knee_valgus_caution_deg")
-        assert citation == "Myer et al. 2010"
+        citation = cfg.get_citation("squat", "depth_parallel_hip_angle_deg")
+        assert "Schoenfeld" in citation
 
     def test_v1_get_citation_returns_none_for_flat_value(self) -> None:
         """get_citation() returns None for non-nested values (e.g. scoring_weights)."""
@@ -190,7 +198,7 @@ class TestThresholdConfig:
         """all_for_exercise() is backward-compat alias for get_section()."""
         cfg = ThresholdConfig()
         section = cfg.all_for_exercise("squat")
-        assert "knee_valgus_caution_deg" in section
+        assert "depth_parallel_hip_angle_deg" in section
 
     # --- v0 backward compat ---
 
@@ -203,7 +211,7 @@ class TestThresholdConfig:
             pytest.skip("thresholds_v0.json not present")
         cfg = ThresholdConfig(path=v0_path)
         assert cfg.version == "v0"
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5
+        assert cfg.get("squat", "depth_parallel_hip_angle_deg") == 90
 
     def test_v0_get_citation_returns_none(self) -> None:
         """v0 flat values have no provenance — get_citation() returns None."""
@@ -213,7 +221,7 @@ class TestThresholdConfig:
         if not v0_path.exists():
             pytest.skip("thresholds_v0.json not present")
         cfg = ThresholdConfig(path=v0_path)
-        assert cfg.get_citation("squat", "knee_valgus_caution_deg") is None
+        assert cfg.get_citation("squat", "depth_parallel_hip_angle_deg") is None
 
 
 # ---------------------------------------------------------------------------

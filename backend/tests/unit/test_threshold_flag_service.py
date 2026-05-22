@@ -37,10 +37,10 @@ async def test_get_listing_populates_provenance():
 
     listing = svc.get_listing()
     squat_rows = listing.sections["squat"]
-    valgus = next(r for r in squat_rows if r.key == "knee_valgus_caution_deg")
+    depth = next(r for r in squat_rows if r.key == "depth_parallel_hip_angle_deg")
 
-    assert valgus.unit == "degrees"
-    assert valgus.provenance_citation == "Myer et al. 2010"
+    assert depth.unit == "degrees"
+    assert "Schoenfeld" in depth.provenance_citation
 
 
 async def test_create_flag_snapshots_current_value_and_citation():
@@ -52,15 +52,15 @@ async def test_create_flag_snapshots_current_value_and_citation():
     result = await svc.create_flag(
         reviewer_id=reviewer_id,
         section="squat",
-        key="knee_valgus_caution_deg",
-        proposed_value=8.0,
-        proposed_citation="Krosshaug 2016 — 8° not replicated",
-        rationale="Original Myer finding did not replicate in larger cohorts.",
+        key="torso_lean_caution_deg",
+        proposed_value=50.0,
+        proposed_citation="Fry 2003 — revisit caution threshold",
+        rationale="An adequate-length rationale revisiting the torso-lean caution threshold for squats.",
     )
 
-    assert result.current_value == 5.0
-    assert result.current_citation == "Myer et al. 2010"
-    assert result.proposed_value == 8.0
+    assert result.current_value == 45.0
+    assert result.current_citation == "Fry et al. 2003"
+    assert result.proposed_value == 50.0
     assert result.reviewer_id == reviewer_id
     assert result.status == "open"
     repo.create.assert_awaited_once()

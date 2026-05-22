@@ -11,6 +11,24 @@ and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
 Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
 Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
+## Completed — L2 Sprint — CV audit Part 1 cleanup (2026-05-22, session 1)
+
+PR <PR_NUMBER> merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).
+Closes `docs/audit/cv-dimension-audit-2026-05-11.md` items A-1, B-1 through B-5,
+C-1 through C-11, D-5, E-1. Backend: 7 new regression tests (1 elbow_flare, 1
+bar-path key, 4 threshold-structure, 1 migration-static + 5 migration-equivalent
+unit tests). ruff + pyright clean. Migration `2371965f8072` applied. Frontend
+untouched (zero references to renamed metric).
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-AUDIT-CLEANUP-01 | Remove dead `elbow_flare_deg` branch from `scoring.py::TechniqueScore._score_bench`; delete MC/DC test class for it; add regression test asserting the metric is silently ignored if it appears. | done | S | — | FR-SCOR-02 | `135a21a` | `backend/app/cv/scoring.py`, `backend/tests/unit/test_scoring.py`, `backend/tests/mcdc/test_mcdc_scoring_technique.py`, `docs/mcdc/traceability.md` |
+| L2-AUDIT-CLEANUP-02 | Rename `lateral_deviation_px` → `ap_deviation_px` codebase-wide (production code + tests + JSONB migration). Sagittal x-axis IS the A-P axis from a side-view camera. | done | M | — | FR-SCOR-03 | `499a31e`, `9ee4577` | `backend/app/cv/{barbell_detection,scoring}.py`, `backend/app/services/pdf.py`, `backend/tests/unit/test_{barbell_detection,pipeline,pdf,scoring}.py`, `backend/alembic/versions/2371965f8072_rename_lateral_deviation_px_jsonb_key_.py`, `backend/tests/unit/test_migration_rename_ap_deviation.py` |
+| L2-AUDIT-CLEANUP-03 | Move dead threshold entries (knee_valgus_*, lumbar_flexion_*, grip_width_*, wrist_alignment_*, toe_out_*, elbow_flare_*) to a new `deferred_multi_camera` subsection in `thresholds_v1.json` preserving citations; delete the same keys from the `thresholds_v0.json` frozen snapshot. | done | S | — | FR-SCOR-11 | `eb0f4dc` | `config/thresholds_v0.json`, `config/thresholds_v1.json`, `backend/tests/unit/test_threshold_config.py`, `backend/tests/unit/test_expert_thresholds_api.py` |
+| L2-AUDIT-CLEANUP-04 | Rewrite SRS §3.7 dimension lists, §3.8 FR-REPM-10/11/12, §3.9 FR-SCOR-00/01/02/03, §6 training-mode table, Appendix D.5 example I/O — each unmeasurable-metric claim is either deleted or annotated as deferred to multi-camera phase. | done | M | — | FR-SCOR-01, FR-SCOR-02, FR-SCOR-03, FR-REPM-10, FR-REPM-11, FR-REPM-12 | `0efd602` | `docs/SRS.md` |
+| L2-AUDIT-CLEANUP-05 | Update `backend/CLAUDE.md` SafetyScore/TechniqueScore/PathBalanceScore feature lists to reflect sagittal-observable inputs and mark frontal-plane phenomena as deferred. | done | S | — | — | `336ec07` | `backend/CLAUDE.md` |
+| L2-AUDIT-CLEANUP-06 | Add canonical ADR-AUDIT-2026-05-22 to `decisions.md` (sagittal scope + deferred multi-camera roadmap + forward-references to per-session ADRs). | done | S | — | — | `a467745` | `decisions.md` |
+
 ## Completed — L2 Sprint Day 18 — Phase 3 transition gate cleared via 3 PRs closing 2026-04-27 audit (2026-04-27, session 62)
 
 The 2026-04-27 spelix-auditor sweep against the 8 Phase 3 Must FRs returned 0 CRITICAL / 3 HIGH / 5 MEDIUM. Three PRs (#126, #127, #128) closed all 8 findings 5 days before the 2026-05-03 hard gate. Backend tests: +7 across 3 PRs. Frontend tests: +1 net (M-04 vitest case landed then reverted; +1 from H-02 rendering). All ruff + pyright + tsc + eslint clean. CI 5/5 green on all three PRs. Deploy to Production succeeded for all three.
