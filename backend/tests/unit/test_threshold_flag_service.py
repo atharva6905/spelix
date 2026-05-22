@@ -123,6 +123,60 @@ async def test_get_listing_skips_non_dict_entries() -> None:
         assert all(row.key == "valid_key" for row in rows)
 
 
+async def test_create_flag_with_unvalidated_metrics_section_bypasses_config_lookup():
+    """Session 3 (ADR-SAGITTAL-METRICS-REGISTRY): the 'unvalidated_metrics'
+    section names sagittal metrics that have NO entry in thresholds_v1.json,
+    so the service must NOT raise InvalidThresholdKey. current_value defaults
+    to 0.0 and current_citation to None for these proposals."""
+    repo = AsyncMock()
+    repo.create.side_effect = lambda flag: flag  # echo the persisted flag
+    svc = _make_service(repo=repo)
+
+    reviewer_id = uuid4()
+    result = await svc.create_flag(
+        reviewer_id=reviewer_id,
+        section="unvalidated_metrics",
+        key="ankle_dorsiflexion_deg",
+        proposed_value=15.0,
+        proposed_citation="Smith 2023 -- ankle dorsiflexion ROM norms",
+        rationale=(
+            "Current threshold absent; literature suggests 15 deg minimum "
+            "for full squat depth without heel rise."
+        ),
+    )
+
+    assert result.section == "unvalidated_metrics"
+    assert result.key == "ankle_dorsiflexion_deg"
+    assert result.current_value == 0.0
+    assert result.current_citation is None
+    assert result.proposed_value == 15.0
+    assert result.reviewer_id == reviewer_id
+    assert result.status == "open"
+    repo.create.assert_awaited_once()
+
+
+async def test_create_flag_unvalidated_metrics_does_not_raise_on_missing_v1_key():
+    """The bypass must hold for ANY key under unvalidated_metrics --
+    Sessions 4-7 will write new keys to JSONB before threshold values exist."""
+    repo = AsyncMock()
+    repo.create.side_effect = lambda flag: flag
+    svc = _make_service(repo=repo)
+
+    # A key that absolutely does not exist in thresholds_v1.json.
+    result = await svc.create_flag(
+        reviewer_id=uuid4(),
+        section="unvalidated_metrics",
+        key="lumbar_flexion_proxy_delta_deg",
+        proposed_value=20.0,
+        proposed_citation="McGill 2014 -- spine flexion thresholds",
+        rationale=(
+            "Sagittal lumbar proxy uncomputed today; propose 20 deg as the "
+            "upper bound based on cadaver flexion-tolerance studies."
+        ),
+    )
+    assert result.current_value == 0.0
+
+
 async def test_resolve_flag_updates_status_and_resolver():
     repo = AsyncMock()
     flag_id = uuid4()
