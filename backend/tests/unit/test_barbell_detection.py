@@ -181,7 +181,7 @@ class TestComputeBarPath:
         result = compute_bar_path(centroids, frame_width=640, frame_height=480)
         assert result is not None
         assert "centroids" in result
-        assert "lateral_deviation_px" in result
+        assert "ap_deviation_px" in result
         assert "vertical_range_px" in result
         assert "path_consistency" in result
 
@@ -194,12 +194,12 @@ class TestComputeBarPath:
             assert 0.0 <= x <= 1.0, f"x={x} out of range"
             assert 0.0 <= y <= 1.0, f"y={y} out of range"
 
-    def test_lateral_deviation_zero_for_vertical_path(self):
-        """A perfectly vertical bar path should have lateral_deviation_px ≈ 0."""
+    def test_ap_deviation_zero_for_vertical_path(self):
+        """A perfectly vertical bar path should have ap_deviation_px ≈ 0."""
         centroids = [(320.0, float(200 - i * 10)) for i in range(8)]
         result = compute_bar_path(centroids, frame_width=640, frame_height=480)
         assert result is not None
-        assert result["lateral_deviation_px"] == pytest.approx(0.0, abs=1e-6)
+        assert result["ap_deviation_px"] == pytest.approx(0.0, abs=1e-6)
 
     def test_vertical_range_correct(self):
         """vertical_range_px should equal max_y - min_y of the trajectory."""
@@ -232,8 +232,8 @@ class TestComputeBarPath:
         # After interpolation, should have 3 centroids
         assert len(result["centroids"]) == 3
 
-    def test_lateral_deviation_known_value(self):
-        """Lateral deviation: x oscillates between 310 and 330, mean=320, max dev=10."""
+    def test_ap_deviation_known_value(self):
+        """A-P deviation: x oscillates between 310 and 330, mean=320, max dev=10."""
         centroids = [
             (310.0, 200.0),
             (330.0, 190.0),
@@ -242,7 +242,20 @@ class TestComputeBarPath:
         ]
         result = compute_bar_path(centroids, frame_width=640, frame_height=480)
         assert result is not None
-        assert result["lateral_deviation_px"] == pytest.approx(10.0, abs=1e-6)
+        assert result["ap_deviation_px"] == pytest.approx(10.0, abs=1e-6)
+
+    def test_emits_ap_deviation_px_not_lateral(self):
+        """Regression: bar-path dict uses the anatomically-correct key
+        ``ap_deviation_px`` (anterior-posterior — what we actually measure
+        from a sagittal view), NOT the misleading old name that was fixed
+        in cv-audit cleanup 2026-05-22 (audit item E-1).
+        """
+        old_key = "lateral" + "_deviation_px"  # avoid the rename touching this literal
+        centroids = [(320.0, float(200 - i * 10)) for i in range(8)]
+        result = compute_bar_path(centroids, frame_width=640, frame_height=480)
+        assert result is not None
+        assert "ap_deviation_px" in result, "new anatomical key must be present"
+        assert old_key not in result, "old misleading key must be gone"
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +302,7 @@ class TestComputeBarPathFromLandmarks:
         result = compute_bar_path_from_landmarks(lm_frames, exercise_type="squat")
         assert result is not None
         assert "centroids" in result
-        assert "lateral_deviation_px" in result
+        assert "ap_deviation_px" in result
         assert "vertical_range_px" in result
         assert "path_consistency" in result
 
@@ -307,13 +320,13 @@ class TestComputeBarPathFromLandmarks:
         result = compute_bar_path_from_landmarks([], exercise_type="squat")
         assert result is None
 
-    def test_lateral_deviation_zero_for_constant_wrist_x(self):
-        """Wrists at constant x → lateral_deviation_px ≈ 0 (in pixel terms, 0)."""
+    def test_ap_deviation_zero_for_constant_wrist_x(self):
+        """Wrists at constant x → ap_deviation_px ≈ 0 (in pixel terms, 0)."""
         lm_frames = self._make_landmarks_sequence()
         result = compute_bar_path_from_landmarks(lm_frames, exercise_type="deadlift")
         assert result is not None
         # All x positions are the same (0.5 normalised), so deviation = 0
-        assert result["lateral_deviation_px"] == pytest.approx(0.0, abs=1e-6)
+        assert result["ap_deviation_px"] == pytest.approx(0.0, abs=1e-6)
 
     def test_path_consistency_one_for_constant_x(self):
         """Constant x wrist position → path_consistency = 1.0."""

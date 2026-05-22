@@ -420,37 +420,6 @@ class TechniqueScore:
                     )
                 )
 
-        # NOTE: elbow_flare_deg is not currently produced by metric_extraction.py
-        # (requires frontal-plane camera). Branch retained for MC/DC test coverage
-        # and future multi-camera support. See cv-dimension-audit-2026-05-11.md.
-        elbow_flare = metrics.get("elbow_flare_deg")
-        if elbow_flare is not None:
-            caution = cfg.get("bench", "elbow_flare_caution_deg")
-            high = cfg.get("bench", "elbow_flare_high_deg")
-            if elbow_flare > high:
-                score -= 2.0
-                badges.append(
-                    BadgeResult(
-                        dimension="Technique",
-                        issue_key="elbow_flare_high",
-                        severity="High",
-                        message=f"Elbow flare {elbow_flare:.0f}° is excessive (>{high:.0f}°).",
-                    )
-                )
-            elif elbow_flare > caution:
-                score -= 1.0
-                badges.append(
-                    BadgeResult(
-                        dimension="Technique",
-                        issue_key="elbow_flare_caution",
-                        severity="Medium",
-                        message=(
-                            f"Elbow flare {elbow_flare:.0f}° is elevated "
-                            f"(caution >{caution:.0f}°)."
-                        ),
-                    )
-                )
-
         return score, badges
 
 
@@ -517,17 +486,17 @@ class PathBalanceScore:
                 )
             )
 
-        lateral_dev = bar_path.get("lateral_deviation_px", 0.0)
-        if lateral_dev > 0.05:
-            lat_penalty = min(2.0, (lateral_dev - 0.05) * 10.0)
-            score -= lat_penalty
+        ap_dev = bar_path.get("ap_deviation_px", 0.0)
+        if ap_dev > 0.05:
+            ap_penalty = min(2.0, (ap_dev - 0.05) * 10.0)
+            score -= ap_penalty
             badges.append(
                 BadgeResult(
                     dimension="Path & Balance",
-                    issue_key="lateral_deviation_high",
+                    issue_key="ap_deviation_high",
                     severity="Medium",
                     message=(
-                        f"Bar forward/backward deviation {lateral_dev:.2f} (normalised) is elevated. "
+                        f"Bar forward/backward deviation {ap_dev:.2f} (normalised) is elevated. "
                         "Keep the bar over midfoot throughout the lift."
                     ),
                 )

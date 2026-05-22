@@ -153,14 +153,14 @@ def test_path_balance_none_bar_path_returns_5(cfg: ThresholdConfig) -> None:
 
 def test_path_balance_consistent_path_high_score(cfg: ThresholdConfig) -> None:
     """path_consistency=0.98 → score ≥ 9.0."""
-    bar_path = {"path_consistency": 0.98, "lateral_deviation_px": 0.01}
+    bar_path = {"path_consistency": 0.98, "ap_deviation_px": 0.01}
     score, badges = PathBalanceScore().compute({}, bar_path, cfg, "squat")
     assert score >= 9.0
 
 
 def test_path_balance_poor_consistency_penalty(cfg: ThresholdConfig) -> None:
     """path_consistency=0.7 → score < 7.0."""
-    bar_path = {"path_consistency": 0.7, "lateral_deviation_px": 0.01}
+    bar_path = {"path_consistency": 0.7, "ap_deviation_px": 0.01}
     score, badges = PathBalanceScore().compute({}, bar_path, cfg, "squat")
     assert score < 7.0
 
@@ -376,7 +376,7 @@ def test_all_exercises_supported(cfg: ThresholdConfig) -> None:
         "confidence_score": 0.90,
         "knee_angle_at_lockout": 165.0,
     }
-    bar_path = {"path_consistency": 0.95, "lateral_deviation_px": 0.02}
+    bar_path = {"path_consistency": 0.95, "ap_deviation_px": 0.02}
 
     for exercise, metrics in [
         ("squat", squat_metrics),
@@ -395,3 +395,27 @@ def test_all_exercises_supported(cfg: ThresholdConfig) -> None:
             assert 1.0 <= dim.score <= 10.0, (
                 f"Dimension {dim.internal_name} score out of range: {dim.score}"
             )
+
+
+def test_technique_score_ignores_elbow_flare_deg_metric(
+    cfg: ThresholdConfig,
+) -> None:
+    """Regression: `elbow_flare_deg` is a frontal-plane metric that cannot be
+    measured from a single sagittal-view camera. The scoring branch that read
+    it was removed in cv-audit cleanup 2026-05-22 (audit item A-1). This test
+    asserts that feeding the (impossible) metric through scoring does NOT
+    mutate the score or produce a badge — it is silently ignored, NOT acted on.
+    """
+    scorer = TechniqueScore()
+    metrics_without = {
+        "confidence_score": 1.0,
+        "elbow_angle_at_bottom": 80.0,
+    }
+    metrics_with = {
+        **metrics_without,
+        "elbow_flare_deg": 90.0,  # impossible from sagittal view — must be ignored
+    }
+    score_without, badges_without = scorer.compute(metrics_without, None, cfg, "bench")
+    score_with, badges_with = scorer.compute(metrics_with, None, cfg, "bench")
+    assert score_with == score_without, "elbow_flare_deg must not affect score"
+    assert badges_with == badges_without, "elbow_flare_deg must not produce badges"

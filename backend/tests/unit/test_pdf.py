@@ -581,7 +581,7 @@ class TestGenerateBarPathPlot:
 
         bar_path = {
             "centroids": [(0.5, 0.1), (0.51, 0.3), (0.49, 0.5), (0.50, 0.7), (0.50, 0.9)],
-            "lateral_deviation_px": 0.02,
+            "ap_deviation_px": 0.02,
         }
         out = str(tmp_path / "bar_path.png")
         result = generate_bar_path_plot(bar_path, out)

@@ -4,7 +4,11 @@ Conditions tested
 -----------------
 1. TechniqueScore.compute — compound AND: depth_std is not None AND depth_std > 10.0
 2. TechniqueScore._score_bench — negated range: not (70.0 <= elbow_angle <= 90.0)
-3. TechniqueScore._score_bench — two-tier flare: elbow_flare > high / elif elbow_flare > caution
+
+Note: The two-tier elbow_flare branch was removed in cv-audit cleanup
+2026-05-22 (audit item A-1). It read a metric that metric_extraction.py never
+produces — it would require a frontal-plane camera. Its MC/DC truth table is
+no longer needed.
 """
 
 from pathlib import Path
@@ -134,71 +138,5 @@ class TestTechniqueBenchElbowRange:
         assert score == pytest.approx(10.0 - 1.5, abs=0.01)
 
 
-# ---------------------------------------------------------------------------
-# 3. Two-tier flare: elbow_flare > high / elif elbow_flare > caution
-# ---------------------------------------------------------------------------
-class TestTechniqueBenchElbowFlare:
-    """MC/DC truth table for two-tier elbow-flare penalty.
-
-    From thresholds_v1.json (bench):
-      elbow_flare_caution_deg = 45.0
-      elbow_flare_high_deg    = 60.0
-
-    Condition chain:
-      if   elbow_flare > high:    score -= 2.0  badge: elbow_flare_high
-      elif elbow_flare > caution: score -= 1.0  badge: elbow_flare_caution
-
-    Row | > high | > caution | outcome            | delta
-    ----|--------|-----------|--------------------|------
-    1   | False  | False     | no penalty         | 0
-    2   | False  | True      | caution badge      | -1.0
-    3   | True   | (True)    | high badge         | -2.0
-    """
-
-    def _bench_metrics(self, flare: float) -> dict:
-        # Use an in-range elbow angle to avoid conflating the elbow-range penalty
-        return {
-            "confidence_score": 1.0,
-            "elbow_angle_at_bottom": 80.0,
-            "elbow_flare_deg": flare,
-        }
-
-    def test_row1_flare_below_caution_no_penalty(
-        self, scorer: TechniqueScore, cfg: ThresholdConfig
-    ) -> None:
-        """Flare = 40° (<= caution 45°) → no penalty, no flare badge."""
-        caution = cfg.get("bench", "elbow_flare_caution_deg")
-        flare = caution - 5.0  # strictly below caution
-        metrics = self._bench_metrics(flare)
-        score, badges = scorer.compute(metrics, None, cfg, "bench")
-        badge_keys = [b.issue_key for b in badges]
-        assert "elbow_flare_caution" not in badge_keys
-        assert "elbow_flare_high" not in badge_keys
-        assert score == pytest.approx(10.0, abs=0.01)
-
-    def test_row2_flare_between_caution_and_high_caution_badge(
-        self, scorer: TechniqueScore, cfg: ThresholdConfig
-    ) -> None:
-        """Flare between caution (45°) and high (60°) → caution badge, -1.0 penalty."""
-        caution = cfg.get("bench", "elbow_flare_caution_deg")
-        high = cfg.get("bench", "elbow_flare_high_deg")
-        flare = (caution + high) / 2  # midpoint — strictly between both thresholds
-        metrics = self._bench_metrics(flare)
-        score, badges = scorer.compute(metrics, None, cfg, "bench")
-        badge_keys = [b.issue_key for b in badges]
-        assert "elbow_flare_caution" in badge_keys
-        assert "elbow_flare_high" not in badge_keys
-        assert score == pytest.approx(10.0 - 1.0, abs=0.01)
-
-    def test_row3_flare_above_high_high_badge(
-        self, scorer: TechniqueScore, cfg: ThresholdConfig
-    ) -> None:
-        """Flare > high (60°) → high badge, -2.0 penalty (caution badge NOT added)."""
-        high = cfg.get("bench", "elbow_flare_high_deg")
-        flare = high + 5.0  # strictly above high
-        metrics = self._bench_metrics(flare)
-        score, badges = scorer.compute(metrics, None, cfg, "bench")
-        badge_keys = [b.issue_key for b in badges]
-        assert "elbow_flare_high" in badge_keys
-        assert "elbow_flare_caution" not in badge_keys  # elif means only one fires
-        assert score == pytest.approx(10.0 - 2.0, abs=0.01)
+# Section 3 (two-tier elbow_flare branch) removed 2026-05-22 along with the
+# dead code in scoring.py. See cv-audit cleanup, audit item A-1.

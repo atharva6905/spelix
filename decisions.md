@@ -1247,3 +1247,31 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 
 **Consequences.** Expert can now cross-reference the skeleton overlay against the AI's coaching claims. No PII exposure — the overlay is anonymised by construction (MediaPipe skeleton + angle annotations, no raw pixels). The 7-day artifact retention means older analyses show no video, which is acceptable and documented in the Expert Reviewer Guide. Simultaneously replaced the raw `JSON.stringify` eval scores dump with structured `EvalScoresCard` (faithfulness percentage, CoVe pass/fail, unsupported claims list) — non-technical expert could not interpret raw JSON.
 
+
+## ADR-AUDIT-2026-05-22: Sagittal-view scope and deferred multi-camera roadmap
+
+**Context.** The 2026-05-11 audit (`docs/audit/cv-dimension-audit-2026-05-11.md`) found that the CV pipeline claimed to measure metrics that are physically unobservable from a single sagittal-view camera (knee valgus, elbow flare, grip width, lateral weight shift, true wrist alignment, scapular retraction, toe-out). These claims appeared in code (`scoring.py` elbow_flare branch), config (`thresholds_v0.json`, `thresholds_v1.json` dead entries), SRS prose (multiple sections of §3.7, §3.8, §3.9, Appendix D.5), and LLM-facing surfaces (coaching prompt, Coach Brain vocab, distillation examples — already addressed in PR #135). The audit also identified 16 sagittal-observable metrics not currently implemented but feasible from existing MediaPipe landmarks (Part 2 of the audit).
+
+The pipeline ran a `lateral_deviation_px` JSONB key on every `rep_metrics` row, but a sagittal camera observes anterior-posterior drift, not lateral.
+
+**Decision.**
+
+1. **Sagittal scope is the single source of truth for what the system measures.** All code, config, SRS prose, CLAUDE.md, and LLM-facing surfaces reflect only metrics computable from one side-view camera. Frontal-plane and top-down metrics are explicitly marked "deferred to multi-camera phase" wherever they appear in documentation.
+
+2. **Dead scoring code is removed.** The `elbow_flare_deg` branch in `scoring.py::TechniqueScore._score_bench` is deleted (not annotated as "retained for multi-camera"). The MC/DC truth table and tests for the deleted branch are removed in the same change. Future multi-camera work introduces fresh branches when the supporting CV is built.
+
+3. **Dead config entries are relocated, not deleted, in v1.** `thresholds_v1.json` gets a new top-level `deferred_multi_camera` subsection containing the frontal-plane threshold values + literature citations (knee_valgus, lumbar_flexion, grip_width, wrist_alignment, elbow_flare, toe_out). No code reads this subsection. `thresholds_v0.json` (Phase 0 frozen snapshot) deletes the dead entries outright — vestigial roadmap items do not belong in a frozen snapshot.
+
+4. **The `lateral_deviation_px` mislabel is corrected to `ap_deviation_px`.** From a sagittal camera the metric measures anterior-posterior drift, not lateral. The rename propagates through `barbell_detection.py` (dict key + docstring), `scoring.py` (local variable, badge `issue_key`, message text), `pdf.py` (annotation label), and every test fixture. Alembic migration `2371965f8072` rewrites the JSONB key in all historical `rep_metrics.metrics_json` rows. Migration is idempotent (`WHERE metrics_json ? 'lateral_deviation_px'`) and reversible (downgrade reverses the rename).
+
+5. **16 Part-2 sagittal-observable metrics are deferred to Sessions 2–7 of this cv-audit effort.** They ship as compute-only (visible to expert reviewer via FR-EXPV-08 panel) until expert validates thresholds. Two refinement metrics (`depth_classification`, `ecc_con_ratio`) auto-flow into existing scoring on first ship.
+
+**Consequences.**
+
+- Expert reviewer onboarding gates can begin without the system over-claiming. Future expert-flagged threshold refinements happen via the existing FR-EXPV-08 workflow against real measured metrics.
+- LLM coaching can no longer be biased toward unmeasurable phenomena (PR #135 already cleaned the LLM-facing surfaces; this ADR locks the broader cleanup in).
+- Multi-camera work is no longer a code-level claim — it's a roadmap entry in config and an ADR reference. Any future multi-camera scope opens with a fresh ADR superseding nothing (this ADR doesn't preclude multi-camera; it just stops pretending we have it).
+- The 14 compute-only metrics from Sessions 2–7 must NOT affect scoring until expert validates each via FR-EXPV-08. Standing Rules in `docs/superpowers/goals/2026-05-22-cv-audit-master.md` Section "Standing Rules" enforce this for the autonomous effort.
+- One regression test guards each removal: `test_technique_score_ignores_elbow_flare_deg_metric` (scoring), `test_emits_ap_deviation_px_not_lateral` (bar-path key), `TestThresholdsCvAuditCleanup` (no dead keys in active sections). These prevent silent re-introduction.
+
+**Related.** Audit source — `docs/audit/cv-dimension-audit-2026-05-11.md`. Design spec — `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md`. Goal manifest — `docs/superpowers/goals/2026-05-22-cv-audit-master.md`. ADRs scheduled for later sessions: ADR-LIFTER-SIDE-DETECTION (Session 2), ADR-SAGITTAL-METRICS-REGISTRY (Session 3), ADR-AUTO-FLOW-REFINEMENTS (Session 4), ADR-LUMBAR-FLEXION-PROXY-NAMING (Session 7).

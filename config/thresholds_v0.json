@@ -1,23 +1,12 @@
 {
   "version": "v0",
   "squat": {
-    "knee_valgus_caution_deg": 5,
-    "knee_valgus_high_deg": 10,
-    "lumbar_flexion_caution_deg": 28,
-    "lumbar_flexion_high_deg": 44,
     "depth_parallel_hip_angle_deg": 90,
     "torso_lean_caution_deg": 45,
     "torso_lean_high_deg": 60
   },
-  "bench": {
-    "grip_width_biacromial_ratio_max": 1.5,
-    "elbow_flare_caution_deg": 45,
-    "elbow_flare_high_deg": 60,
-    "wrist_alignment_tolerance_deg": 15
-  },
+  "bench": {},
   "deadlift": {
-    "lumbar_flexion_caution_deg": 28,
-    "lumbar_flexion_high_deg": 44,
     "hip_hinge_min_deg": 70,
     "bar_drift_caution_cm": 5,
     "bar_drift_high_cm": 10
