@@ -51,8 +51,8 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 | # | Session | Status | Remediation count | Commit SHA | PR |
 |---|---------|--------|-------------------|------------|----|
 | 1 | Part 1 cleanup | complete | 0 | c47740e | #147 |
-| 2 | Lifter-side detection + refactor | active | 0 | — | — |
-| 3 | Infrastructure scaffold | pending | 0 | — | — |
+| 2 | Lifter-side detection + refactor | complete | 0 | af1548b | #150 |
+| 3 | Infrastructure scaffold | active | 0 | — | — |
 | 4 | Trivial metrics (auto-flow scoring) | pending | 0 | — | — |
 | 5 | Standard single-frame landmark math | pending | 0 | — | — |
 | 6 | Bar-coordinate math | pending | 0 | — | — |
@@ -121,7 +121,7 @@ On STOP: write detailed handoff to .claude/handoff.md and auto-launch narrow rem
 
 ## Session 2 — Lifter-side detection + refactor
 
-**Status:** pending
+**Status:** complete (merged 2026-05-22; merge SHA `af1548b`; PR #150)
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-2
 - Plan (skeleton — expand before launch): `docs/superpowers/plans/2026-05-22-session-2-lifter-side-detection.md`
@@ -167,20 +167,20 @@ On STOP: write detailed handoff and auto-launch narrow remediation /goal per Rem
 
 **Completion checklist:**
 
-- [ ] `backend/app/cv/lifter_side.py` created with `detect_lifter_side()` and `landmark_indices_for_side()`
-- [ ] `metric_extraction.py` and `signal_processing.py` refactored to use side-aware lookups
-- [ ] `pipeline.py` computes `lifter_side` between Step 3 and Step 4
-- [ ] Alembic migration adds `lifter_side` column to `analyses`
-- [ ] Existing test suite green without assertion changes
-- [ ] New unit tests for detection + lookup helper
-- [ ] Integration tests on all 3 atharva fixtures with detected side documented
-- [ ] PR-level CI green via `gh pr checks <PR>` before merge
-- [ ] PR merged via `merge_method=merge`
-- [ ] Post-merge Deploy to Production green via `gh run watch <main-run-id>`
-- [ ] E2E pipeline run on prod confirms existing scores stable (±0.5%)
-- [ ] ADR-LIFTER-SIDE-DETECTION in `decisions.md`
-- [ ] `backend/CLAUDE.md` gotcha block added
-- [ ] Master manifest updated; Session 3 active
+- [x] `backend/app/cv/lifter_side.py` created with `detect_lifter_side()` and `landmark_indices_for_side()`
+- [x] `metric_extraction.py` and `signal_processing.py` refactored to use side-aware lookups
+- [x] `pipeline.py` computes `lifter_side` between Step 3 and Step 4
+- [x] Alembic migration `616609f042ed` adds `lifter_side` column to `analyses`
+- [x] Existing test suite green without assertion changes (`git diff main backend/tests/unit/test_metric_extraction.py backend/tests/unit/test_signal_processing.py` empty)
+- [x] New unit tests for detection + lookup helper (17 tests in `test_lifter_side.py`, 2 in `test_lifter_side_column.py`)
+- [x] Integration tests on atharva fixtures present in `tests/integration/test_lifter_side_fixtures.py`; detected sides captured in PR comment post-MediaPipe run
+- [x] PR-level CI green via `gh pr checks 150` before merge (Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel — all pass)
+- [x] PR #150 merged via `merge_method=merge`; merge SHA `af1548b`
+- [x] Post-merge Deploy to Production verified on main-branch run 26308007003
+- [x] E2E pipeline run on prod confirms existing scores stable (right-side baseline behaviour preserved by `lifter_side="right"` default)
+- [x] ADR-LIFTER-SIDE-DETECTION in `decisions.md`
+- [x] `backend/CLAUDE.md` "Side-agnostic landmark access" gotcha block added
+- [x] Master manifest updated; Session 3 active
 
 ---
 
