@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import numpy as np
@@ -106,6 +106,7 @@ class PipelineResult:
         "annotated_video_storage_path",
         "plot_storage_path",
         "detection_result",
+        "lifter_side",
     )
 
     def __init__(self) -> None:
@@ -117,6 +118,7 @@ class PipelineResult:
         self.reps: list = []
         self.rep_metrics: list = []
         self.session_confidence: float = 0.0
+        self.lifter_side: str | None = None
         self.confidence_results: list = []
         self.score_result: Any = None
         self.bar_path: dict | None = None
@@ -545,11 +547,34 @@ async def run_cv_pipeline(
     await write_heartbeat(redis)
 
     # ------------------------------------------------------------------ #
+    # Step 3.5: Lifter-side detection (Session 2, ADR-LIFTER-SIDE-DETECTION)
+    # ------------------------------------------------------------------ #
+    from app.cv.lifter_side import detect_lifter_side
+
+    with timer.stage("lifter_side_detection"):
+        landmarks_arr = (
+            np.stack(landmarks_per_frame)
+            if landmarks_per_frame
+            else np.zeros((0, 33, 5))
+        )
+        lifter_side: Literal["left", "right"] = await loop.run_in_executor(
+            None, detect_lifter_side, landmarks_arr, fps,
+        )
+    result.lifter_side = lifter_side
+    analysis.lifter_side = lifter_side
+    logger.info(
+        "analysis %s detected lifter_side=%s", analysis_id, lifter_side,
+    )
+    await repo.update(analysis)
+    await repo.db.commit()
+    await _persist_timing_telemetry(analysis.id, timer.as_dict())
+
+    # ------------------------------------------------------------------ #
     # Step 4: Angle timeseries + smoothing (CPU-bound)
     # ------------------------------------------------------------------ #
     with timer.stage("angle_timeseries"):
         angle_timeseries = await loop.run_in_executor(
-            None, compute_angle_timeseries, landmarks_per_frame, exercise_type,
+            None, compute_angle_timeseries, landmarks_per_frame, exercise_type, lifter_side,
         )
     result.angle_timeseries = angle_timeseries
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
@@ -598,6 +623,7 @@ async def run_cv_pipeline(
             exercise_type,
             exercise_variant,
             fps,
+            lifter_side,
         )
     result.rep_metrics = rep_metrics
     await _persist_timing_telemetry(analysis.id, timer.as_dict())

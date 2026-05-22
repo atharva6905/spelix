@@ -372,6 +372,7 @@ class TestGetAnalysisDetail:
         obj.summary_json = None
         obj.detection_result = None
         obj.timing_json = None
+        obj.lifter_side = None
         obj.form_score_safety = None
         obj.form_score_technique = None
         obj.form_score_path_balance = None
