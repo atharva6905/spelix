@@ -98,7 +98,7 @@ The system is structured in five development phases (numbered 0–4):
 | **SSE**                  | Server-Sent Events — used for streaming coaching output                                                                                                                                                                                    |
 | **Rep**                  | One complete repetition of an exercise                                                                                                                                                                                                     |
 | **Landmark**             | A body joint or keypoint detected by MediaPipe (33 per frame)                                                                                                                                                                              |
-| **Valgus**               | Inward collapse of the knee joint — a common squat injury risk                                                                                                                                                                             |
+| **Valgus**               | Inward collapse of the knee joint — a common squat form deviation (frontal-plane phenomenon; deferred to multi-camera phase per ADR-AUDIT-2026-05-22)                                                                                       |
 | **Bar Path**             | The trajectory of the barbell through space during a rep                                                                                                                                                                                   |
 | **Form Score**           | Composite 1.0–10.0 rating of form quality                                                                                                                                                                                                  |
 | **Expert Reviewer**      | A kinesiology-qualified collaborator who curates the RAG corpus, labels the golden dataset, validates angle thresholds, and scores coaching output quality                                                                                 |
@@ -1474,7 +1474,7 @@ System prompt (stable — candidate for prompt caching in Phase 1):
 
 - You are an expert barbell strength coach providing objective, evidence-based technique feedback. You are NOT a medical professional. All feedback is for educational and performance purposes only.
 
-- Prioritise safety issues above all else. Address: (1) movement quality / injury-risk patterns first, (2) technical position issues second, (3) bar path and balance third, (4) consistency and control fourth.
+- Prioritise movement quality issues above all else. Address: (1) movement quality / form breakdown patterns first, (2) technical position issues second, (3) bar path and balance third, (4) consistency and control fourth.
 
 - Be specific and actionable. Reference the exact rep number, joint, and movement phase. Do not give generic advice.
 
