@@ -73,7 +73,7 @@ def test_get_thresholds_returns_angle_sections_only(bare_app):
     assert body["version"] == "v1"
     assert set(body["sections"].keys()) == {"squat", "bench", "deadlift", "control"}
     squat_keys = {r["key"] for r in body["sections"]["squat"]}
-    assert "knee_valgus_caution_deg" in squat_keys
+    assert "torso_lean_caution_deg" in squat_keys
 
 
 def test_post_flag_creates_row(bare_app, reviewer_user):
@@ -81,7 +81,7 @@ def test_post_flag_creates_row(bare_app, reviewer_user):
     created = _make_flag(
         reviewer_id=reviewer_user["id"],
         section="squat",
-        key="knee_valgus_caution_deg",
+        key="torso_lean_caution_deg",
         proposed_value=8.0,
     )
     fake_service.create_flag.return_value = created
@@ -93,10 +93,10 @@ def test_post_flag_creates_row(bare_app, reviewer_user):
         "/api/v1/expert/thresholds/flags",
         json={
             "section": "squat",
-            "key": "knee_valgus_caution_deg",
+            "key": "torso_lean_caution_deg",
             "proposed_value": 8.0,
-            "proposed_citation": "Krosshaug 2016 — 8° not replicated",
-            "rationale": "Original Myer finding did not replicate in larger cohorts.",
+            "proposed_citation": "Fry 2003 — revisit caution threshold",
+            "rationale": "An adequate-length rationale revisiting the torso-lean caution threshold for squats.",
         },
     )
 
@@ -121,7 +121,7 @@ def test_post_flag_returns_422_for_unknown_key(bare_app):
         "/api/v1/expert/thresholds/flags",
         json={
             "section": "squat",
-            "key": "knee_valgus_caution_deg",
+            "key": "nonexistent_threshold_key",
             "proposed_value": 8.0,
             "proposed_citation": "Krosshaug 2016",
             "rationale": "An adequate-length rationale explaining the issue.",
@@ -136,13 +136,13 @@ def test_get_my_flags_returns_reviewer_flags(bare_app, reviewer_user):
     flag = _make_flag(
         reviewer_id=reviewer_user["id"],
         section="bench",
-        key="elbow_flare_caution_deg",
+        key="elbow_angle_at_bottom_min_deg",
         proposed_value=55.0,
     )
-    flag.current_value = 45.0
+    flag.current_value = 60.0
     flag.current_citation = "Green & Comfort 2007"
     flag.proposed_citation = "Nuckols 2024"
-    flag.rationale = "A more permissive flare may be biomechanically acceptable."
+    flag.rationale = "A slightly lower elbow-angle floor at the bottom may be biomechanically acceptable."
 
     fake_repo = AsyncMock()
     fake_repo.list_by_reviewer.return_value = [flag]
@@ -154,4 +154,4 @@ def test_get_my_flags_returns_reviewer_flags(bare_app, reviewer_user):
     assert resp.status_code == 200
     body = resp.json()
     assert len(body) == 1
-    assert body[0]["key"] == "elbow_flare_caution_deg"
+    assert body[0]["key"] == "elbow_angle_at_bottom_min_deg"

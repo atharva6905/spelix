@@ -35,20 +35,22 @@ class TestThresholdConfigV1:
 
     def test_get_unwraps_nested_value(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5.0
+        assert cfg.get("squat", "depth_parallel_hip_angle_deg") == 90.0
 
     def test_get_raw_returns_full_dict(self) -> None:
         cfg = ThresholdConfig()
-        raw = cfg.get_raw("squat", "knee_valgus_caution_deg")
+        raw = cfg.get_raw("squat", "depth_parallel_hip_angle_deg")
         assert isinstance(raw, dict)
-        assert raw["value"] == 5.0
+        assert raw["value"] == 90.0
         assert raw["unit"] == "degrees"
         assert "provenance_citation" in raw
         assert "last_modified_by" in raw
 
     def test_get_citation(self) -> None:
         cfg = ThresholdConfig()
-        assert cfg.get_citation("squat", "knee_valgus_caution_deg") == "Myer et al. 2010"
+        assert "Schoenfeld" in cfg.get_citation(
+            "squat", "depth_parallel_hip_angle_deg"
+        )
 
     def test_get_citation_returns_none_for_flat_section(self) -> None:
         cfg = ThresholdConfig()
@@ -59,14 +61,7 @@ class TestThresholdConfigV1:
     @pytest.mark.parametrize(
         "section,key,expected",
         [
-            ("squat", "knee_valgus_caution_deg", 5.0),
-            ("squat", "knee_valgus_high_deg", 10.0),
-            ("squat", "lumbar_flexion_caution_deg", 28.0),
-            ("squat", "lumbar_flexion_high_deg", 44.0),
             ("squat", "depth_parallel_hip_angle_deg", 90.0),
-            ("bench", "grip_width_biacromial_ratio_max", 1.5),
-            ("bench", "elbow_flare_caution_deg", 45.0),
-            ("deadlift", "lumbar_flexion_caution_deg", 28.0),
             ("deadlift", "hip_hinge_min_deg", 70.0),
             ("deadlift", "bar_drift_caution_cm", 5.0),
             ("experience_tolerance", "beginner_deg", 3.0),
@@ -165,7 +160,7 @@ class TestThresholdConfigV1:
     def test_all_for_exercise_returns_copy(self) -> None:
         cfg = ThresholdConfig()
         section = cfg.all_for_exercise("squat")
-        assert "knee_valgus_caution_deg" in section
+        assert "depth_parallel_hip_angle_deg" in section
         # Mutating the copy should not affect the original
         section["new_key"] = "test"
         assert "new_key" not in cfg.all_for_exercise("squat")
@@ -190,16 +185,16 @@ class TestThresholdConfigV0:
 
     def test_v0_get_returns_flat_value(self) -> None:
         cfg = ThresholdConfig(path=_V0_PATH)
-        assert cfg.get("squat", "knee_valgus_caution_deg") == 5
+        assert cfg.get("squat", "depth_parallel_hip_angle_deg") == 90
 
     def test_v0_get_citation_returns_none(self) -> None:
         cfg = ThresholdConfig(path=_V0_PATH)
-        assert cfg.get_citation("squat", "knee_valgus_caution_deg") is None
+        assert cfg.get_citation("squat", "depth_parallel_hip_angle_deg") is None
 
     def test_v0_get_raw_returns_flat_value(self) -> None:
         cfg = ThresholdConfig(path=_V0_PATH)
-        raw = cfg.get_raw("squat", "knee_valgus_caution_deg")
-        assert raw == 5
+        raw = cfg.get_raw("squat", "depth_parallel_hip_angle_deg")
+        assert raw == 90
 
 
 # ---------------------------------------------------------------------------
@@ -221,3 +216,102 @@ class TestThresholdVersionFrozen:
             pytest.skip("thresholds_v0.json not present")
         cfg = ThresholdConfig(path=_V0_PATH)
         assert cfg.version == "v0"
+
+
+# ---------------------------------------------------------------------------
+# cv-audit cleanup 2026-05-22 — deferred_multi_camera relocation
+# ---------------------------------------------------------------------------
+
+
+class TestThresholdsCvAuditCleanup:
+    """Per docs/audit/cv-dimension-audit-2026-05-11.md items B-1 through B-5,
+    frontal-plane threshold entries that no scoring code reads are relocated
+    to a ``deferred_multi_camera`` subsection in ``thresholds_v1.json``. The
+    Phase 0 snapshot ``thresholds_v0.json`` deletes them outright.
+    """
+
+    def test_v1_has_deferred_multi_camera_subsection(self) -> None:
+        import json
+
+        with _V1_PATH.open() as f:
+            cfg = json.load(f)
+        assert "deferred_multi_camera" in cfg
+        deferred = cfg["deferred_multi_camera"]
+        # squat group
+        assert "knee_valgus_caution_deg" in deferred.get("squat", {})
+        assert "knee_valgus_high_deg" in deferred.get("squat", {})
+        assert "lumbar_flexion_caution_deg" in deferred.get("squat", {})
+        assert "lumbar_flexion_high_deg" in deferred.get("squat", {})
+        assert "toe_out_nominal_deg" in deferred.get("squat", {})
+        assert "toe_out_tolerance_deg" in deferred.get("squat", {})
+        # bench group
+        assert "elbow_flare_caution_deg" in deferred.get("bench", {})
+        assert "elbow_flare_high_deg" in deferred.get("bench", {})
+        assert "grip_width_biacromial_ratio_max" in deferred.get("bench", {})
+        assert "wrist_alignment_tolerance_deg" in deferred.get("bench", {})
+        # deadlift group
+        assert "lumbar_flexion_caution_deg" in deferred.get("deadlift", {})
+        assert "lumbar_flexion_high_deg" in deferred.get("deadlift", {})
+
+    def test_v1_deferred_entries_preserve_citations(self) -> None:
+        """Each relocated entry preserves value + unit + provenance_citation."""
+        import json
+
+        with _V1_PATH.open() as f:
+            cfg = json.load(f)
+        entry = cfg["deferred_multi_camera"]["squat"]["knee_valgus_caution_deg"]
+        assert entry["value"] == 5.0
+        assert entry["unit"] == "degrees"
+        assert "provenance_citation" in entry
+        assert entry["provenance_citation"]  # non-empty
+
+    def test_v1_active_sections_have_no_unmeasurable_keys(self) -> None:
+        """Active squat/bench/deadlift sections must not contain frontal-plane keys."""
+        import json
+
+        with _V1_PATH.open() as f:
+            cfg = json.load(f)
+        forbidden = {
+            "knee_valgus_caution_deg",
+            "knee_valgus_high_deg",
+            "lumbar_flexion_caution_deg",
+            "lumbar_flexion_high_deg",
+            "elbow_flare_caution_deg",
+            "elbow_flare_high_deg",
+            "grip_width_biacromial_ratio_max",
+            "wrist_alignment_tolerance_deg",
+            "toe_out_nominal_deg",
+            "toe_out_tolerance_deg",
+        }
+        for section_name in ("squat", "bench", "deadlift"):
+            section = cfg.get(section_name, {})
+            for key in section:
+                assert key not in forbidden, (
+                    f"{section_name}.{key} is unmeasurable from sagittal view — "
+                    f"move to deferred_multi_camera."
+                )
+
+    def test_v0_has_no_unmeasurable_keys(self) -> None:
+        """v0 frozen snapshot deletes the dead entries outright."""
+        if not _V0_PATH.exists():
+            pytest.skip("thresholds_v0.json not present")
+        import json
+
+        with _V0_PATH.open() as f:
+            cfg = json.load(f)
+        forbidden = {
+            "knee_valgus_caution_deg",
+            "knee_valgus_high_deg",
+            "lumbar_flexion_caution_deg",
+            "lumbar_flexion_high_deg",
+            "elbow_flare_caution_deg",
+            "elbow_flare_high_deg",
+            "grip_width_biacromial_ratio_max",
+            "wrist_alignment_tolerance_deg",
+        }
+        for section_name in ("squat", "bench", "deadlift"):
+            section = cfg.get(section_name, {})
+            for key in section:
+                assert key not in forbidden, (
+                    f"{section_name}.{key} should be deleted in v0 snapshot."
+                )
