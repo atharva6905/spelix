@@ -13,7 +13,7 @@ Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
 ## Completed — L2 Sprint — CV audit Part 1 cleanup (2026-05-22, session 1)
 
-PR <PR_NUMBER> merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).
+PR #147 (merge SHA `c47740e`) merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).
 Closes `docs/audit/cv-dimension-audit-2026-05-11.md` items A-1, B-1 through B-5,
 C-1 through C-11, D-5, E-1. Backend: 7 new regression tests (1 elbow_flare, 1
 bar-path key, 4 threshold-structure, 1 migration-static + 5 migration-equivalent
