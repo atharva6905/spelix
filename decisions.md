@@ -1341,3 +1341,37 @@ The pipeline ran a `lateral_deviation_px` JSONB key on every `rep_metrics` row, 
 - **Treat `heel_rise_flag` as a separate 17th registry entry.** Rejected: design §Section-4 entry #1 explicitly bundles it with `ankle_dorsiflexion_deg`; matching that framing keeps the registry count synchronised with the audit's 16-metric framing.
 
 **Related.** ADR-AUDIT-2026-05-22, ADR-LIFTER-SIDE-DETECTION, future ADR-AUTO-FLOW-REFINEMENTS (Session 4), future ADR-LUMBAR-FLEXION-PROXY-NAMING (Session 7). Migration `7c4af3e51f08`. Module `backend/app/cv/sagittal_metrics_registry.py`. Endpoint `GET /api/v1/expert/sagittal-metrics-registry`. Component `frontend/src/components/UnvalidatedMetricsPanel.tsx`. Backlog IDs `L2-SAGITTAL-INFRA-01` through `-04`.
+
+
+## ADR-AUTO-FLOW-REFINEMENTS: Two refinement metrics bypass the compute-only-until-validated rule (Session 4)
+
+**Context.** ADR-SAGITTAL-METRICS-REGISTRY (Session 3) established that the 14 newly-added sagittal-view metrics are compute-only until an expert reviewer validates their threshold values via the FR-EXPV-08 flagging workflow. Two of the 16 metrics, however, are *refinements* of measurements whose underlying math is already validated and live in production scoring:
+
+- `depth_classification` is a categorical relabel of the existing `depth_angle` (already used by `TechniqueScore._score_squat`). The expert validates the categorical *label* (above/at/below parallel) and the band width (currently ±5°), but the angle math itself is unchanged.
+- `ecc_con_ratio` is a derived ratio of the existing per-rep `descent_duration_s` / `ascent_duration_s` (already exposed in `RepMetrics.metrics`). The expert validates the *target window* (`control.ecc_con_ratio_target_min..max`, currently 1.0..3.0), but the ratio computation is unchanged.
+
+The other 12 metrics (Sessions 5–7) introduce new measurements; they remain compute-only.
+
+**Decision.** `depth_classification` and `ecc_con_ratio` flip `in_scoring=True` in `sagittal_metrics_registry.py` on Session-4 day one. New scoring branches in `TechniqueScore._score_squat` (depth_classification: -1.5 with `at_parallel` threshold or -2.5 with `below_parallel`, severity Medium) and `ControlScore.compute` (ecc_con_ratio: -1.0/High when below `target_min`, -0.5/Medium when above `target_max`) dock the form score directly. `pause_duration_s` and `lockout_torso_lean_deg` flip `computed_yet=True` only and remain compute-only.
+
+Pipeline-level aggregator (`_aggregate_rep_metrics` in `services/pipeline.py`) forwards both keys to scoring: `depth_classification` as the modal label across reps; `ecc_con_ratio` as the mean across positive-valued reps (existing numeric-mean path).
+
+Frontend renders the same two values on the regular user's `ResultsPage` as small chips above the rep-metrics table (`<AutoFlowMetricsChips />`). The expert `UnvalidatedMetricsPanel` already renders values automatically via the registry's `computed_yet` flag (Session 3 wiring).
+
+**Consequences.**
+
+- (+) First user-visible scoring impact of the cv-audit work — squats above parallel and rushed eccentrics are now reflected in form scores AND in user-facing chips.
+- (+) Establishes a precedent: refinements of already-validated metrics may auto-flow; new measurements stay compute-only.
+- (+) The two new badge `issue_key`s (`squat_depth_classification_above`, `ecc_con_ratio_rushed`, `ecc_con_ratio_excessive`) flow into the LLM coaching prompt via the existing badges-in-prompt path with no template changes (per cv-audit design §Section-2).
+- (−) If the expert reviewer disagrees with either band width (±5°) or the ecc/con target window (1.0..3.0), thresholds are flipped via FR-EXPV-08 without code changes — but form scores produced between Session-4 deploy and the expert's revision use the initial defaults. Mitigated by conservative defaults and badge text written defensively ("aim for", "consider"), per design §Section-5 R3.
+- (−) `ControlScore.ecc_con_ratio` uses session-aggregate granularity (mean across reps) rather than per-rep docking. Per-rep docking is deferred to a post-onboarding refinement once thresholds are validated.
+
+**Stop condition (master manifest §Section-6).** If the expert validates the panel surface but objects to auto-flow scoring, revert both branches and downgrade both metrics to compute-only. Plan path back: single-commit revert of the scoring branches + flag flip on the two registry entries.
+
+**Alternatives considered.**
+
+- **Defer all 16 metrics to compute-only until expert review.** Rejected: leaves Session 4 with no user-visible deliverable and gives the expert nothing concrete to react to on the first onboarding pass.
+- **Auto-flow all 4 Session-4 metrics.** Rejected: `pause_duration_s` and `lockout_torso_lean_deg` are *new* measurements, not refinements; expert needs to validate the threshold values first per the master ADR-SAGITTAL-METRICS-REGISTRY contract.
+- **Persist `score_result.dimensions[].badges` to the DB and render directly on the ResultsPage.** Considered for the user-facing surface; rejected for scope — the new chip path reads existing JSONB without a schema change. Persisting scoring badges to the DB is a separate (worthy) refactor.
+
+**Related.** ADR-AUDIT-2026-05-22, ADR-SAGITTAL-METRICS-REGISTRY. Threshold config keys `squat.depth_classification_min`, `control.ecc_con_ratio_target_min`, `control.ecc_con_ratio_target_max`. Files `backend/app/cv/metric_extraction.py` (helpers `_classify_depth`, `_pause_duration_s`, `_lockout_torso_lean_deg`, `_default_parallel_angle`), `backend/app/cv/scoring.py` (TechniqueScore + ControlScore branches), `backend/app/cv/sagittal_metrics_registry.py` (flag flips), `backend/app/services/pipeline.py` (`_aggregate_rep_metrics` modal forwarding), `frontend/src/pages/ResultsPage.tsx` (`<AutoFlowMetricsChips />`). Backlog rows `L2-SAGITTAL-TRIVIAL-01..04`.

@@ -249,7 +249,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ## Session 4 — Trivial metrics (auto-flow scoring)
 
-**Status:** pending
+**Status:** in_progress (PR open; updates to `complete` on merge)
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-4
 - Plan (skeleton — expand before launch): `docs/superpowers/plans/2026-05-22-session-4-trivial-metrics.md`
