@@ -308,8 +308,20 @@ export async function labelGoldenDataset(
 // Threshold Validation (FR-EXPV-08)
 // ---------------------------------------------------------------------------
 
+// Session 3 (ADR-SAGITTAL-METRICS-REGISTRY): expert reviewers can flag
+// Unvalidated-Metrics rows via FR-EXPV-08 even though those keys don't yet
+// have current-value entries in config/thresholds_v1.json. The backend
+// service short-circuits the config lookup when section ===
+// "unvalidated_metrics".
+export type ThresholdSection =
+  | "squat"
+  | "bench"
+  | "deadlift"
+  | "control"
+  | "unvalidated_metrics";
+
 export interface ThresholdRow {
-  section: "squat" | "bench" | "deadlift" | "control";
+  section: ThresholdSection;
   key: string;
   value: number;
   unit: string;
@@ -319,11 +331,15 @@ export interface ThresholdRow {
 
 export interface ThresholdListing {
   version: string;
-  sections: Record<ThresholdRow["section"], ThresholdRow[]>;
+  // The /thresholds endpoint only populates the four config-backed sections;
+  // `unvalidated_metrics` rows never appear in this response. The Record key
+  // is still typed as ThresholdSection for ergonomic indexing from callers
+  // that already hold a ThresholdSection.
+  sections: Partial<Record<ThresholdSection, ThresholdRow[]>>;
 }
 
 export interface ThresholdFlagCreate {
-  section: ThresholdRow["section"];
+  section: ThresholdSection;
   key: string;
   proposed_value: number;
   proposed_citation: string;
@@ -333,7 +349,7 @@ export interface ThresholdFlagCreate {
 export interface ThresholdFlagResponse {
   id: string;
   reviewer_id: string;
-  section: ThresholdRow["section"];
+  section: ThresholdSection;
   key: string;
   current_value: number;
   current_citation: string | null;
@@ -346,6 +362,31 @@ export interface ThresholdFlagResponse {
   resolved_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Sagittal Metrics Registry (Session 3, L2-SAGITTAL-INFRA-02,
+// ADR-SAGITTAL-METRICS-REGISTRY)
+// ---------------------------------------------------------------------------
+
+export interface SagittalMetricRegistryEntry {
+  key_name: string;
+  display_label: string;
+  unit: string;
+  description: string;
+  exercise_applicability: Array<"squat" | "bench" | "deadlift">;
+  computed_yet: boolean;
+  in_scoring: boolean;
+}
+
+export interface SagittalMetricRegistryResponse {
+  entries: SagittalMetricRegistryEntry[];
+}
+
+export async function getSagittalMetricsRegistry(): Promise<SagittalMetricRegistryResponse> {
+  return expertFetch<SagittalMetricRegistryResponse>(
+    "/api/v1/expert/sagittal-metrics-registry",
+  );
 }
 
 export async function getThresholdListing(): Promise<ThresholdListing> {

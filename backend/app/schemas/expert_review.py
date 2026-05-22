@@ -118,3 +118,22 @@ class GoldenLabelAction(BaseModel):
     """Schema for golden dataset labeling (FR-EXPV-07)."""
 
     is_golden_dataset: bool
+
+
+class SagittalMetricRegistryEntry(BaseModel):
+    """One row in the sagittal metrics registry response (Session 3,
+    L2-SAGITTAL-INFRA-01 / ADR-SAGITTAL-METRICS-REGISTRY)."""
+
+    key_name: str
+    display_label: str
+    unit: str
+    description: str
+    exercise_applicability: list[str]
+    computed_yet: bool
+    in_scoring: bool
+
+
+class SagittalMetricRegistryResponse(BaseModel):
+    """Response envelope for GET /api/v1/expert/sagittal-metrics-registry."""
+
+    entries: list[SagittalMetricRegistryEntry]

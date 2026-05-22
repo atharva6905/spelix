@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_expert_reviewer_user
+from app.cv.sagittal_metrics_registry import SAGITTAL_METRICS_REGISTRY
 from app.db import get_db
 from app.models.rag_document import RagDocument
 from app.repositories.analysis import AnalysisRepository
@@ -26,6 +27,8 @@ from app.schemas.expert_review import (
     ExpertAnalysisDetail,
     ExpertQueueItem,
     GoldenLabelAction,
+    SagittalMetricRegistryEntry,
+    SagittalMetricRegistryResponse,
 )
 from app.schemas.rag_document import (
     RagDocumentCompleteResponse,
@@ -522,6 +525,43 @@ async def submit_threshold_flag(
             },
         ) from err
     return ThresholdFlagResponse.model_validate(flag, from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Sagittal Metrics Registry (Session 3, L2-SAGITTAL-INFRA-02,
+# ADR-SAGITTAL-METRICS-REGISTRY)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/sagittal-metrics-registry",
+    response_model=SagittalMetricRegistryResponse,
+)
+async def get_sagittal_metrics_registry(
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+) -> SagittalMetricRegistryResponse:
+    """Return the 16-entry sagittal metrics registry.
+
+    Single source of truth for the metrics Sessions 4-7 will populate.
+    Static data -- no DB lookup. Auth: expert_reviewer or admin.
+    """
+    entries = [
+        SagittalMetricRegistryEntry(
+            key_name=e.key_name,
+            display_label=e.display_label,
+            unit=e.unit,
+            description=e.description,
+            exercise_applicability=sorted(e.exercise_applicability),
+            computed_yet=e.computed_yet,
+            in_scoring=e.in_scoring,
+        )
+        # Sort for deterministic ordering -- display label gives a sensible
+        # UX ordering for the panel.
+        for e in sorted(
+            SAGITTAL_METRICS_REGISTRY, key=lambda x: x.display_label
+        )
+    ]
+    return SagittalMetricRegistryResponse(entries=entries)
 
 
 @router.get("/thresholds/flags", response_model=list[ThresholdFlagResponse])

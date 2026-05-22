@@ -68,11 +68,21 @@ class ThresholdFlagService:
     ) -> ThresholdFlag:
         # Snapshot current value + citation from the live config so the
         # flag records the threshold as-of submission (FR-EXPV-08).
-        try:
-            current_value = float(self._config.get(section, key))
-        except KeyError as exc:
-            raise InvalidThresholdKey(str(exc)) from exc
-        current_citation = self._config.get_citation(section, key)
+        #
+        # Session 3 (ADR-SAGITTAL-METRICS-REGISTRY): the 'unvalidated_metrics'
+        # section names compute-only sagittal metrics that have no current
+        # value in thresholds_v1.json -- expert reviewers flag them to
+        # PROPOSE the first threshold value, not to revise an existing one.
+        # Bypass the config lookup for that section.
+        if section == "unvalidated_metrics":
+            current_value = 0.0
+            current_citation: str | None = None
+        else:
+            try:
+                current_value = float(self._config.get(section, key))
+            except KeyError as exc:
+                raise InvalidThresholdKey(str(exc)) from exc
+            current_citation = self._config.get_citation(section, key)
 
         flag = ThresholdFlag(
             id=uuid4(),

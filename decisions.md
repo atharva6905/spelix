@@ -1307,3 +1307,37 @@ The pipeline ran a `lateral_deviation_px` JSONB key on every `rep_metrics` row, 
 - **Use only the first frame.** Rejected: MediaPipe needs several frames to stabilise; a single-frame visibility check is noisier than the 3-second mean.
 
 **Related.** ADR-AUDIT-2026-05-22, ADR-QGATE-COMMERCIAL-GYM. Migration `616609f042ed`. Module `backend/app/cv/lifter_side.py`. Backlog IDs `L2-LIFTER-SIDE-01` through `-05`.
+
+
+## ADR-SAGITTAL-METRICS-REGISTRY: Frozenset as single source of truth for the 16 sagittal-view metrics (Session 3)
+
+**Context.** The CV audit (`docs/audit/cv-dimension-audit-2026-05-11.md` Part-2) identified 16 sagittal-view metrics that the system can observe but doesn't compute. Sessions 4–7 add the extractors. Before extractors land, both backend and frontend need a single, immutable list of `(key_name, display_label, unit, description, exercise_applicability)` so the expert portal can show "Not yet computed" rows that flip to "computed + flaggable" as each session ships. Without a registry, backend extractors would write to JSONB keys the frontend doesn't know about, and the frontend panel would be a hardcoded list that drifts from reality.
+
+**Decision.**
+
+1. **Backend Python module is the source of truth.** `backend/app/cv/sagittal_metrics_registry.py` exposes `SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry]` with all 16 entries. Frozen dataclass, frozenset container — neither can be mutated at runtime. Companion key `heel_rise_flag` (written alongside `ankle_dorsiflexion_deg`) is noted in the latter's description rather than carrying its own registry row, keeping the count at 16 (matches design §Section-4 entry #1 framing).
+
+2. **Expose via `GET /api/v1/expert/sagittal-metrics-registry`** (auth: `expert_reviewer` + `admin` via `get_expert_reviewer_user`). The frontend fetches the list on mount; no hardcoded duplicate on the client. Response is deterministically sorted by `display_label`.
+
+3. **Sessions 4–7 only flip `computed_yet` and (for two metrics) `in_scoring` — they do NOT rename keys.** Key names are final. Renaming is a breaking change requiring a JSONB key migration.
+
+4. **`threshold_flags.section` accepts `'unvalidated_metrics'` via the existing FR-EXPV-08 flow.** The 14 compute-only metrics inherit the expert-flagging workflow used for `squat`/`bench`/`deadlift`/`control` threshold values; `ThresholdFlagService.create_flag` short-circuits the v1-config current-value lookup when section is `unvalidated_metrics` (returns `current_value=0.0`, `current_citation=None`). Alembic migration `7c4af3e51f08` adds the DB-level `CHECK (section IN (...))` constraint enumerating all 5 allowed values.
+
+5. **Naming honesty in descriptions.** `lumbar_flexion_proxy_delta_deg` description explicitly disclaims "Not lumbar-isolated" (R4 mitigation; ADR-LUMBAR-FLEXION-PROXY-NAMING forward-ref). `bar_path_classification` description names "Heuristic v0 — expect post-onboarding refinement" (R5 mitigation). `technique_consistency_std` description identifies it as a std-dev derivative.
+
+6. **No metric extraction, scoring, or coaching prompt changes ship in Session 3.** The panel renders empty rows; the LLM is not yet given new context.
+
+**Consequences.**
+
+- Adding a metric in Sessions 4–7 = three places: (a) extractor in `metric_extraction.py`, (b) flip `computed_yet=True` on the existing registry entry (do NOT add new entries — the 16 are fixed), (c) integration test asserting the key appears in `rep_metrics`. Frontend automatically picks up the new computed status via the registry response.
+- A drifted registry (entry exists but no extractor) silently shows "Not yet computed" — no crash, no missing data. Safe-by-default.
+- Threshold flagging the new metrics requires no schema changes for Sessions 4–7 — the section is already in the CHECK constraint.
+- Frontend `ThresholdSection` union widened to include `'unvalidated_metrics'`; `ExpertThresholdsPage`'s `SECTION_LABELS` narrowed to a local `ConfigBackedSection` subset since the `/thresholds` endpoint never returns unvalidated rows.
+
+**Alternatives considered.**
+
+- **Hardcode the 16-entry list on the frontend.** Rejected: drift risk between backend extractor output (JSONB keys) and frontend panel rendering.
+- **Database table for the registry.** Rejected: the list is static across deployments; a Python frozenset is simpler, faster, and ships with the code.
+- **Treat `heel_rise_flag` as a separate 17th registry entry.** Rejected: design §Section-4 entry #1 explicitly bundles it with `ankle_dorsiflexion_deg`; matching that framing keeps the registry count synchronised with the audit's 16-metric framing.
+
+**Related.** ADR-AUDIT-2026-05-22, ADR-LIFTER-SIDE-DETECTION, future ADR-AUTO-FLOW-REFINEMENTS (Session 4), future ADR-LUMBAR-FLEXION-PROXY-NAMING (Session 7). Migration `7c4af3e51f08`. Module `backend/app/cv/sagittal_metrics_registry.py`. Endpoint `GET /api/v1/expert/sagittal-metrics-registry`. Component `frontend/src/components/UnvalidatedMetricsPanel.tsx`. Backlog IDs `L2-SAGITTAL-INFRA-01` through `-04`.

@@ -65,6 +65,27 @@ vi.mock("@/api/expert", () => ({
   }),
   submitAnnotation: vi.fn().mockResolvedValue({ id: "annotation-1" }),
   getAnnotations: vi.fn().mockResolvedValue([]),
+  // Session 3: UnvalidatedMetricsPanel is mounted on this page and fetches
+  // the sagittal metrics registry. The mock returns 1 squat-applicable entry
+  // so the panel renders without errors.
+  getSagittalMetricsRegistry: vi.fn().mockResolvedValue({
+    entries: [
+      {
+        key_name: "depth_classification",
+        display_label: "Depth Classification",
+        unit: "",
+        description: "Categorical relabel of squat depth.",
+        exercise_applicability: ["squat"],
+        computed_yet: false,
+        in_scoring: false,
+      },
+    ],
+  }),
+  createThresholdFlag: vi.fn().mockResolvedValue({
+    id: "flag-1",
+    section: "unvalidated_metrics",
+    key: "depth_classification",
+  }),
 }));
 
 // Import after mocks
@@ -198,5 +219,22 @@ describe("ExpertAnalysisDetailPage", () => {
 
     // Raw decimal "0.72" must not appear
     expect(screen.queryByText("0.72")).not.toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Session 3 (L2-SAGITTAL-INFRA-04): UnvalidatedMetricsPanel mount.
+  // -------------------------------------------------------------------------
+
+  it("mounts UnvalidatedMetricsPanel below the Coaching Output section", async () => {
+    renderDetailPage();
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /Unvalidated Metrics \(computed, pending expert validation\)/i,
+        ),
+      ).toBeInTheDocument();
+    });
+    // The single squat-applicable registry entry in the mock should render.
+    expect(await screen.findByText("Depth Classification")).toBeInTheDocument();
   });
 });
