@@ -85,6 +85,39 @@ def _torso_lean_deg(landmarks: np.ndarray, side_idx: SideIndices) -> float:
     return float(np.degrees(np.arccos(cos_theta)))
 
 
+def _classify_depth(depth_angle: float, parallel_angle: float) -> str:
+    """Categorical relabel of squat depth (Session 4, design Section-4 #7).
+
+    Returns one of ``above_parallel``, ``at_parallel``, ``below_parallel``
+    based on a ±5° band around ``parallel_angle``. ``depth_angle`` is the
+    minimum hip angle for the rep (lower = deeper).
+
+    Boundaries are inclusive on both sides of the ±5° band so a value
+    exactly equal to ``parallel_angle - 5.0`` or ``parallel_angle + 5.0``
+    is classified ``at_parallel``.
+    """
+    upper = parallel_angle + 5.0
+    lower = parallel_angle - 5.0
+    if depth_angle > upper:
+        return "above_parallel"
+    if depth_angle < lower:
+        return "below_parallel"
+    return "at_parallel"
+
+
+def _default_parallel_angle() -> float:
+    """Load ``squat.depth_parallel_hip_angle_deg`` from ThresholdConfig.
+
+    Lazy import + lazy load so tests with no ThresholdConfig available
+    still work (returns 90.0 fallback, matching the Phase-0 default).
+    """
+    try:
+        from app.config import ThresholdConfig
+        return float(ThresholdConfig().get("squat", "depth_parallel_hip_angle_deg"))
+    except Exception:
+        return 90.0
+
+
 def _find_depth_frame(angle_series: np.ndarray, start: int, end: int) -> int:
     """
     Return the frame index (within [start, end]) with the minimum angle value.
@@ -113,6 +146,50 @@ def _find_descent_end_ascent_start(
     descent_frames = float(depth_frame - start)
     ascent_frames = float(end - depth_frame)
     return descent_frames, ascent_frames
+
+
+def _pause_duration_s(
+    primary_series: np.ndarray,
+    start: int,
+    end: int,
+    depth_frame: int,
+    fps: float,
+    band_deg: float = 2.0,
+) -> float:
+    """Time spent within ``band_deg`` of the rep-bottom angle (Session 4 #9).
+
+    Counts frames in ``primary_series[start:end+1]`` whose value is within
+    ``band_deg`` of ``primary_series[depth_frame]`` and divides by ``fps``.
+
+    Returns ``0.0`` on degenerate input (``end <= start`` or ``fps <= 0``).
+    """
+    if end <= start or fps <= 0.0:
+        return 0.0
+    if depth_frame < start or depth_frame > end:
+        return 0.0
+    if depth_frame >= primary_series.shape[0]:
+        return 0.0
+
+    bottom_angle = float(primary_series[depth_frame])
+    segment = primary_series[start : end + 1]
+    in_band = np.abs(segment - bottom_angle) <= band_deg
+    n_frames = int(np.sum(in_band))
+    return float(n_frames) / float(fps)
+
+
+def _lockout_torso_lean_deg(
+    landmarks_per_frame: list[np.ndarray],
+    end_frame: int,
+    side_idx: SideIndices,
+) -> float:
+    """Torso-vertical angle at rep peak-angle (lockout) frame (Session 4 #12).
+
+    Thin wrapper over ``_torso_lean_deg`` that picks the rep's last frame.
+    Returns ``0.0`` on out-of-bounds ``end_frame`` (degenerate-input safety).
+    """
+    if end_frame < 0 or end_frame >= len(landmarks_per_frame):
+        return 0.0
+    return _torso_lean_deg(landmarks_per_frame[end_frame], side_idx)
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +346,20 @@ def _squat_metrics(
         hip_series, start, end, depth_frame, threshold_angle=90.0,
     )
 
+    # Session 4: four refinement metrics derived from already-computed inputs.
+    parallel_angle = _default_parallel_angle()
+    depth_classification = _classify_depth(depth_angle, parallel_angle)
+    if ascent_duration_s > 0.0:
+        ecc_con_ratio = float(descent_duration_s / ascent_duration_s)
+    else:
+        ecc_con_ratio = 0.0
+    pause_duration = _pause_duration_s(
+        hip_series, start, end, depth_frame, fps,
+    )
+    lockout_torso_lean = _lockout_torso_lean_deg(
+        landmarks_per_frame, end, side_idx,
+    )
+
     return {
         "depth_angle": depth_angle,
         "knee_angle_at_depth": knee_angle_at_depth,
@@ -280,6 +371,10 @@ def _squat_metrics(
         "lockout_passed": float(lockout_passed),
         "lockout_confidence": lockout_conf,
         "phase_of_max_deviation": max_dev_phase,  # type: ignore[dict-item]
+        "depth_classification": depth_classification,  # type: ignore[dict-item]
+        "ecc_con_ratio": ecc_con_ratio,
+        "pause_duration_s": pause_duration,
+        "lockout_torso_lean_deg": lockout_torso_lean,
     }
 
 
@@ -325,6 +420,15 @@ def _bench_metrics(
         elbow_series, start, end, bottom_frame, threshold_angle=90.0,
     )
 
+    # Session 4: ecc_con_ratio + pause_duration_s (bench-applicable subset).
+    if ascent_duration_s > 0.0:
+        ecc_con_ratio = float(descent_duration_s / ascent_duration_s)
+    else:
+        ecc_con_ratio = 0.0
+    pause_duration = _pause_duration_s(
+        elbow_series, start, end, bottom_frame, fps,
+    )
+
     return {
         "elbow_angle_at_bottom": elbow_angle_at_bottom,
         "shoulder_angle_at_bottom": shoulder_angle_at_bottom,
@@ -335,6 +439,8 @@ def _bench_metrics(
         "lockout_passed": float(lockout_passed),
         "lockout_confidence": lockout_conf,
         "phase_of_max_deviation": max_dev_phase,
+        "ecc_con_ratio": ecc_con_ratio,
+        "pause_duration_s": pause_duration,
     }
 
 
@@ -386,6 +492,18 @@ def _deadlift_metrics(
         hip_series, start, end, bottom_frame, threshold_angle=90.0,
     )
 
+    # Session 4: ecc_con_ratio + pause_duration_s + lockout_torso_lean_deg.
+    if ascent_duration_s > 0.0:
+        ecc_con_ratio = float(descent_duration_s / ascent_duration_s)
+    else:
+        ecc_con_ratio = 0.0
+    pause_duration = _pause_duration_s(
+        hip_series, start, end, bottom_frame, fps,
+    )
+    lockout_torso_lean = _lockout_torso_lean_deg(
+        landmarks_per_frame, end, side_idx,
+    )
+
     return {
         "hip_angle_at_bottom": hip_angle_at_bottom,
         "knee_angle_at_lockout": knee_angle_at_lockout,
@@ -397,6 +515,9 @@ def _deadlift_metrics(
         "lockout_passed": float(lockout_passed),
         "lockout_confidence": lockout_conf,
         "phase_of_max_deviation": max_dev_phase,
+        "ecc_con_ratio": ecc_con_ratio,
+        "pause_duration_s": pause_duration,
+        "lockout_torso_lean_deg": lockout_torso_lean,
     }
 
 

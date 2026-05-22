@@ -245,6 +245,20 @@ def _aggregate_rep_metrics(
             sum((v - mean) ** 2 for v in vals) / len(vals)
         ) ** 0.5
 
+    # Session 4: modal aggregation for categorical depth_classification so it
+    # reaches the TechniqueScore.depth_classification auto-flow branch.
+    depth_labels = [
+        rm.metrics["depth_classification"]
+        for rm in rep_metrics
+        if isinstance(rm.metrics.get("depth_classification"), str)
+    ]
+    if depth_labels:
+        from collections import Counter
+        # Cast through dict so the str value rides through the dict[str, float] hint.
+        result["depth_classification"] = (  # type: ignore[assignment]
+            Counter(depth_labels).most_common(1)[0][0]
+        )
+
     result["confidence_score"] = session_confidence
     return result
 

@@ -116,23 +116,61 @@ class TestExerciseApplicability:
 
 
 # ---------------------------------------------------------------------------
-# Computed / scoring flags — Session 3 invariant: all-false
+# Computed / scoring flags — Session 4 invariant: 4 computed, 2 in_scoring
 # ---------------------------------------------------------------------------
 
 
-class TestSessionThreeFlags:
-    def test_no_metric_is_computed_yet(self) -> None:
-        for entry in SAGITTAL_METRICS_REGISTRY:
-            assert entry.computed_yet is False, (
-                f"Entry {entry.key_name!r} has computed_yet=True after Session 3. "
-                "Sessions 4-7 flip these to True per-metric."
+_SESSION_4_COMPUTED_KEYS = frozenset({
+    "depth_classification",
+    "ecc_con_ratio",
+    "pause_duration_s",
+    "lockout_torso_lean_deg",
+})
+
+_SESSION_4_IN_SCORING_KEYS = frozenset({
+    "depth_classification",
+    "ecc_con_ratio",
+})
+
+
+class TestSessionFourFlags:
+    def test_session4_computed_yet_flipped(self) -> None:
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        for key in _SESSION_4_COMPUTED_KEYS:
+            assert entries[key].computed_yet is True, (
+                f"Entry {key!r} should have computed_yet=True after Session 4."
             )
 
-    def test_no_metric_is_in_scoring_yet(self) -> None:
-        for entry in SAGITTAL_METRICS_REGISTRY:
-            assert entry.in_scoring is False, (
-                f"Entry {entry.key_name!r} has in_scoring=True after Session 3. "
-                "Session 4 will flip depth_classification + ecc_con_ratio."
+    def test_session4_in_scoring_flipped(self) -> None:
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        for key in _SESSION_4_IN_SCORING_KEYS:
+            assert entries[key].in_scoring is True, (
+                f"Entry {key!r} should have in_scoring=True after Session 4."
+            )
+
+    def test_compute_only_session4_metrics_stay_out_of_scoring(self) -> None:
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        for key in _SESSION_4_COMPUTED_KEYS - _SESSION_4_IN_SCORING_KEYS:
+            assert entries[key].in_scoring is False, (
+                f"Entry {key!r} is compute-only — in_scoring must be False."
+            )
+
+    def test_session_5_plus_entries_remain_pristine(self) -> None:
+        """Guard: only the 4 Session-4 metrics flip; Sessions 5-7 entries
+        keep computed_yet=False and in_scoring=False until their own session."""
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        for key in (
+            "ankle_dorsiflexion_deg", "wrist_alignment_deg", "bar_touch_height_pct",
+            "setup_shoulder_x_offset", "shin_angle_deg", "setup_knee_angle_deg",
+            "arch_deg", "bar_to_hip_distance", "shoulder_protraction_proxy_px",
+            "lumbar_flexion_proxy_delta_deg", "bar_path_classification",
+            "technique_consistency_std",
+        ):
+            assert entries[key].computed_yet is False, (
+                f"Entry {key!r} must stay computed_yet=False (Session 5+ scope)."
+            )
+            assert entries[key].in_scoring is False, (
+                f"Entry {key!r} must stay in_scoring=False (Session 5+ scope)."
             )
 
 

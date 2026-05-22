@@ -298,6 +298,68 @@ function ConfidenceBadge({ score }: ConfidenceBadgeProps) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// AutoFlowMetricsChips (Session 4, FR-SCOR-02/04 refinements)
+//
+// Reads depth_classification and ecc_con_ratio from rep_metrics[].metrics_json
+// and renders two small chips. depth_classification → modal label across reps;
+// ecc_con_ratio → mean across reps. When neither key is present (analyses
+// scored before Session 4 deploy), the chip row is hidden entirely.
+// ---------------------------------------------------------------------------
+
+interface AutoFlowMetricsChipsProps {
+  repMetrics: RepMetricDetail[];
+}
+
+function AutoFlowMetricsChips({ repMetrics }: AutoFlowMetricsChipsProps) {
+  const depthLabels: string[] = [];
+  const ratios: number[] = [];
+  for (const rep of repMetrics) {
+    const m = rep.metrics_json;
+    if (m && typeof m === "object") {
+      const depth = (m as Record<string, unknown>).depth_classification;
+      if (typeof depth === "string") depthLabels.push(depth);
+      const ratio = (m as Record<string, unknown>).ecc_con_ratio;
+      if (typeof ratio === "number" && ratio > 0) ratios.push(ratio);
+    }
+  }
+
+  let depthLabel: string | null = null;
+  if (depthLabels.length > 0) {
+    const counts: Record<string, number> = {};
+    for (const label of depthLabels) {
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+    depthLabel = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  }
+
+  const meanRatio =
+    ratios.length > 0 ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null;
+
+  if (depthLabel === null && meanRatio === null) return null;
+
+  return (
+    <div className="mb-4 flex flex-wrap gap-2" data-testid="auto-flow-metrics-row">
+      {depthLabel !== null && (
+        <span
+          className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-800"
+          data-testid="auto-flow-depth-chip"
+        >
+          Depth: {depthLabel.replace(/_/g, " ")}
+        </span>
+      )}
+      {meanRatio !== null && (
+        <span
+          className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800"
+          data-testid="auto-flow-ecc-con-chip"
+        >
+          Ecc/Con: {meanRatio.toFixed(1)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface RepMetricsTableProps {
   repMetrics: RepMetricDetail[];
 }
@@ -733,6 +795,7 @@ export default function ResultsPage() {
           <h2 className="mb-4 text-lg font-semibold text-gray-900">
             Rep Metrics
           </h2>
+          <AutoFlowMetricsChips repMetrics={analysis.rep_metrics} />
           <RepMetricsTable repMetrics={analysis.rep_metrics} />
         </div>
 

@@ -77,8 +77,8 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "or below_parallel. Derived from existing depth_angle."
         ),
         exercise_applicability=_SQ,
-        computed_yet=False,
-        in_scoring=False,
+        computed_yet=True,
+        in_scoring=True,
     ),
     SagittalMetricEntry(
         key_name="ecc_con_ratio",
@@ -89,8 +89,8 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Session mean drives the Control score."
         ),
         exercise_applicability=_ALL,
-        computed_yet=False,
-        in_scoring=False,
+        computed_yet=True,
+        in_scoring=True,
     ),
     SagittalMetricEntry(
         key_name="pause_duration_s",
@@ -101,7 +101,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Computed from rep-detection segment boundaries."
         ),
         exercise_applicability=_ALL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -113,7 +113,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "per rep. Zero degrees is upright."
         ),
         exercise_applicability=_SQ_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
 

@@ -367,6 +367,27 @@ class TechniqueScore:
                     )
                 )
 
+        # Session 4: depth_classification auto-flow (FR-SCOR-02 refinement).
+        # Categorical squat-depth gate co-existing with the continuous depth_angle
+        # penalty above. Threshold value lives in cfg.squat.depth_classification_min.
+        depth_classification = metrics.get("depth_classification")
+        if depth_classification == "above_parallel":
+            threshold = cfg.get("squat", "depth_classification_min")
+            # Stricter threshold (below_parallel) costs more than at_parallel.
+            dock = 2.5 if threshold == "below_parallel" else 1.5
+            score -= dock
+            badges.append(
+                BadgeResult(
+                    dimension="Technique",
+                    issue_key="squat_depth_classification_above",
+                    severity="Medium",
+                    message=(
+                        f"Squat reached above parallel — aim for "
+                        f"{threshold.replace('_', ' ')}."
+                    ),
+                )
+            )
+
         return score, badges
 
     def _score_deadlift(
@@ -574,6 +595,41 @@ class ControlScore:
                         message=(
                             f"Rep duration variation {rep_std:.2f}s is high "
                             f"(>{std_caution:.1f}s). Aim for consistent rep tempo."
+                        ),
+                    )
+                )
+
+        # Session 4: ecc_con_ratio auto-flow (FR-SCOR-04 refinement).
+        # Applies to all three exercises. Reads session-aggregate ratio and
+        # docks if outside the configured target window (cfg.control.ecc_con_ratio_*).
+        # A 0.0 sentinel (no ascent recorded) is treated as missing.
+        ecc_con = metrics.get("ecc_con_ratio")
+        if ecc_con is not None and ecc_con > 0.0:
+            target_min = cfg.get("control", "ecc_con_ratio_target_min")  # 1.0
+            target_max = cfg.get("control", "ecc_con_ratio_target_max")  # 3.0
+            if ecc_con < target_min:
+                score -= 1.0
+                badges.append(
+                    BadgeResult(
+                        dimension="Control",
+                        issue_key="ecc_con_ratio_rushed",
+                        severity="High",
+                        message=(
+                            f"Lower the bar with more control — eccentric phase "
+                            f"was rushed (ratio {ecc_con:.2f}, target ≥ {target_min:.1f})."
+                        ),
+                    )
+                )
+            elif ecc_con > target_max:
+                score -= 0.5
+                badges.append(
+                    BadgeResult(
+                        dimension="Control",
+                        issue_key="ecc_con_ratio_excessive",
+                        severity="Medium",
+                        message=(
+                            f"Eccentric tempo is excessive (ratio {ecc_con:.2f}, "
+                            f"target ≤ {target_max:.1f}). Consider a moderate descent."
                         ),
                     )
                 )

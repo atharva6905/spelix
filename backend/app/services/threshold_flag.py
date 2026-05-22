@@ -42,11 +42,19 @@ class ThresholdFlagService:
                     continue
                 if not isinstance(raw, dict) or "value" not in raw:
                     continue
+                # Session 4: thresholds_v1.json may carry categorical (string)
+                # values like squat.depth_classification_min. The angle-thresholds
+                # endpoint surfaces only numeric thresholds; skip the rest. The
+                # categorical flag-flow rides FR-EXPV-08 via the
+                # 'unvalidated_metrics' section, which has its own bypass below.
+                raw_value = raw["value"]
+                if not isinstance(raw_value, (int, float)):
+                    continue
                 rows.append(
                     ThresholdRow(
                         section=section,
                         key=key,
-                        value=float(raw["value"]),
+                        value=float(raw_value),
                         unit=str(raw.get("unit", "")),
                         provenance_citation=raw.get("provenance_citation"),
                         last_modified_by=raw.get("last_modified_by"),

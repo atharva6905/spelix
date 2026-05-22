@@ -91,7 +91,7 @@ def test_safety_caution_torso_lean_penalty(cfg: ThresholdConfig) -> None:
 
 
 def test_safety_caps_at_5_when_very_low_confidence(cfg: ThresholdConfig) -> None:
-    """Confidence < 0.50 → safety score capped at 5.0."""
+    """Confidence < 0.50 → Movement Quality score capped at 5.0."""
     metrics = {
         "torso_lean": 20.0,
         "confidence_score": 0.30,
@@ -419,3 +419,148 @@ def test_technique_score_ignores_elbow_flare_deg_metric(
     score_with, badges_with = scorer.compute(metrics_with, None, cfg, "bench")
     assert score_with == score_without, "elbow_flare_deg must not affect score"
     assert badges_with == badges_without, "elbow_flare_deg must not produce badges"
+
+
+# ---------------------------------------------------------------------------
+# Session 4 — ThresholdConfig knobs
+# ---------------------------------------------------------------------------
+
+
+def test_threshold_config_has_session4_entries(cfg: ThresholdConfig) -> None:
+    """Session 4: thresholds_v1.json must expose depth_classification + ecc_con_ratio knobs."""
+    # Categorical default for squat depth gate.
+    assert cfg.get("squat", "depth_classification_min") == "at_parallel"
+    # Ecc/con ratio scoring window (Wilk et al. 1993 tempo prescription).
+    assert cfg.get("control", "ecc_con_ratio_target_min") == pytest.approx(1.0)
+    assert cfg.get("control", "ecc_con_ratio_target_max") == pytest.approx(3.0)
+
+
+# ---------------------------------------------------------------------------
+# Session 4 — TechniqueScore.depth_classification branch
+# ---------------------------------------------------------------------------
+
+
+def test_session4_technique_depth_classification_at_parallel_no_new_dock(cfg: ThresholdConfig) -> None:
+    """depth_classification == 'at_parallel' → no NEW depth_classification badge."""
+    metrics = {
+        "depth_classification": "at_parallel",
+    }
+    score, badges = TechniqueScore().compute(metrics, None, cfg, "squat")
+    issue_keys = [b.issue_key for b in badges]
+    assert "squat_depth_classification_above" not in issue_keys
+
+
+def test_session4_technique_depth_classification_above_parallel_docks_1_5(
+    cfg: ThresholdConfig,
+) -> None:
+    """above_parallel + threshold 'at_parallel' → -1.5 dock, severity Medium."""
+    metrics = {
+        # No legacy depth_angle key — isolates the new branch.
+        "depth_classification": "above_parallel",
+    }
+    score, badges = TechniqueScore().compute(metrics, None, cfg, "squat")
+    assert score == pytest.approx(10.0 - 1.5, abs=0.01)
+    new_badges = [b for b in badges if b.issue_key == "squat_depth_classification_above"]
+    assert len(new_badges) == 1
+    assert new_badges[0].severity == "Medium"
+    assert new_badges[0].dimension == "Technique"
+    assert "above parallel" in new_badges[0].message.lower()
+
+
+def test_session4_technique_depth_classification_above_with_strict_threshold_docks_2_5(
+    cfg: ThresholdConfig, tmp_path,
+) -> None:
+    """Stricter threshold (below_parallel) → -2.5 dock instead of -1.5."""
+    import json
+    base = json.loads(_V1_PATH.read_text(encoding="utf-8"))
+    base["squat"]["depth_classification_min"]["value"] = "below_parallel"
+    tweaked = tmp_path / "thresholds_strict.json"
+    tweaked.write_text(json.dumps(base), encoding="utf-8")
+    strict_cfg = ThresholdConfig(tweaked)
+
+    metrics = {"depth_classification": "above_parallel"}
+    score, badges = TechniqueScore().compute(metrics, None, strict_cfg, "squat")
+    assert score == pytest.approx(10.0 - 2.5, abs=0.01)
+    new_badges = [b for b in badges if b.issue_key == "squat_depth_classification_above"]
+    assert len(new_badges) == 1
+
+
+def test_session4_technique_depth_classification_below_parallel_no_dock(cfg: ThresholdConfig) -> None:
+    """Going below parallel with at_parallel threshold → no dock from new branch."""
+    metrics = {"depth_classification": "below_parallel"}
+    score, badges = TechniqueScore().compute(metrics, None, cfg, "squat")
+    new_badges = [b for b in badges if b.issue_key == "squat_depth_classification_above"]
+    assert new_badges == []
+    assert score == 10.0
+
+
+def test_session4_technique_depth_classification_ignored_for_bench(cfg: ThresholdConfig) -> None:
+    """Bench must NOT read depth_classification — squat-only metric."""
+    metrics = {"depth_classification": "above_parallel"}
+    score, badges = TechniqueScore().compute(metrics, None, cfg, "bench")
+    new_badges = [b for b in badges if b.issue_key == "squat_depth_classification_above"]
+    assert new_badges == []
+
+
+# ---------------------------------------------------------------------------
+# Session 4 — ControlScore.ecc_con_ratio branch
+# ---------------------------------------------------------------------------
+
+
+def test_session4_control_ecc_con_balanced_no_dock(cfg: ThresholdConfig) -> None:
+    """Aggregate ratio inside [1.0, 3.0] → no dock from ecc_con_ratio branch."""
+    metrics = {"ecc_con_ratio": 1.8}
+    score, badges = ControlScore().compute(metrics, None, cfg, "squat")
+    keys = [b.issue_key for b in badges]
+    assert "ecc_con_ratio_rushed" not in keys
+    assert "ecc_con_ratio_excessive" not in keys
+    assert score == 10.0
+
+
+def test_session4_control_ecc_con_rushed_docks_1_0_high(cfg: ThresholdConfig) -> None:
+    """ratio < target_min → dock 1.0, severity High."""
+    metrics = {"ecc_con_ratio": 0.5}
+    score, badges = ControlScore().compute(metrics, None, cfg, "squat")
+    assert score == pytest.approx(10.0 - 1.0, abs=0.01)
+    rushed = [b for b in badges if b.issue_key == "ecc_con_ratio_rushed"]
+    assert len(rushed) == 1
+    assert rushed[0].severity == "High"
+    assert rushed[0].dimension == "Control"
+    assert "eccentric" in rushed[0].message.lower()
+
+
+def test_session4_control_ecc_con_excessive_docks_0_5_medium(cfg: ThresholdConfig) -> None:
+    """ratio > target_max → dock 0.5, severity Medium."""
+    metrics = {"ecc_con_ratio": 4.0}
+    score, badges = ControlScore().compute(metrics, None, cfg, "squat")
+    assert score == pytest.approx(10.0 - 0.5, abs=0.01)
+    excessive = [b for b in badges if b.issue_key == "ecc_con_ratio_excessive"]
+    assert len(excessive) == 1
+    assert excessive[0].severity == "Medium"
+
+
+def test_session4_control_ecc_con_works_for_all_three_exercises(cfg: ThresholdConfig) -> None:
+    """ControlScore.ecc_con_ratio applies to squat / bench / deadlift identically."""
+    for ex in ("squat", "bench", "deadlift"):
+        metrics = {"ecc_con_ratio": 0.5}
+        score, badges = ControlScore().compute(metrics, None, cfg, ex)
+        rushed = [b for b in badges if b.issue_key == "ecc_con_ratio_rushed"]
+        assert len(rushed) == 1, f"missing dock for exercise={ex}"
+
+
+def test_session4_control_ecc_con_no_metric_no_dock(cfg: ThresholdConfig) -> None:
+    """Missing key (analyses scored before Session 4) → no dock from new branch."""
+    metrics: dict[str, float] = {}
+    score, badges = ControlScore().compute(metrics, None, cfg, "squat")
+    new = [b for b in badges if b.issue_key.startswith("ecc_con_ratio_")]
+    assert new == []
+    assert score == 10.0
+
+
+def test_session4_control_ecc_con_zero_value_no_dock(cfg: ThresholdConfig) -> None:
+    """Sentinel 0.0 (no ascent) is treated as missing — no dock."""
+    metrics = {"ecc_con_ratio": 0.0}
+    score, badges = ControlScore().compute(metrics, None, cfg, "squat")
+    new = [b for b in badges if b.issue_key.startswith("ecc_con_ratio_")]
+    assert new == []
+    assert score == 10.0

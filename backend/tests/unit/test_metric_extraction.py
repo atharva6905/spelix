@@ -149,7 +149,9 @@ class TestSquatMetrics:
 
     def test_squat_has_all_metrics(self):
         rm = self._run()
-        expected_keys = {
+        # Minimum required Phase-1 keys; Session-4+ adds keys additively, so
+        # assert subset rather than exact-equal (per backend/CLAUDE.md gotcha).
+        required_keys = {
             "depth_angle",
             "knee_angle_at_depth",
             "torso_lean",
@@ -161,7 +163,15 @@ class TestSquatMetrics:
             "lockout_confidence",
             "phase_of_max_deviation",
         }
-        assert expected_keys == set(rm.metrics.keys())
+        # Session 4 additions for squat.
+        session4_keys = {
+            "depth_classification",
+            "ecc_con_ratio",
+            "pause_duration_s",
+            "lockout_torso_lean_deg",
+        }
+        assert required_keys.issubset(set(rm.metrics.keys()))
+        assert session4_keys.issubset(set(rm.metrics.keys()))
 
     def test_squat_rep_index(self):
         rm = self._run()
@@ -238,7 +248,8 @@ class TestBenchMetrics:
 
     def test_bench_has_all_metrics(self):
         rm = self._run()
-        expected_keys = {
+        # Subset assertions — Session-4 grows the schema additively.
+        required_keys = {
             "elbow_angle_at_bottom",
             "shoulder_angle_at_bottom",
             "rep_duration_s",
@@ -249,7 +260,10 @@ class TestBenchMetrics:
             "lockout_confidence",
             "phase_of_max_deviation",
         }
-        assert expected_keys == set(rm.metrics.keys())
+        # Session 4 additions for bench (no depth_classification, no lockout_torso_lean_deg).
+        session4_keys = {"ecc_con_ratio", "pause_duration_s"}
+        assert required_keys.issubset(set(rm.metrics.keys()))
+        assert session4_keys.issubset(set(rm.metrics.keys()))
 
     def test_bench_rep_duration_s(self):
         rm = self._run(fps=25.0, start=0, end=49)
@@ -301,7 +315,8 @@ class TestDeadliftMetrics:
 
     def test_deadlift_has_all_metrics(self):
         rm = self._run()
-        expected_keys = {
+        # Session 4 grows the schema additively — assert subset, not exact-equal.
+        required_keys = {
             "hip_angle_at_bottom",
             "knee_angle_at_lockout",
             "torso_lean_at_start",
@@ -313,7 +328,10 @@ class TestDeadliftMetrics:
             "lockout_confidence",
             "phase_of_max_deviation",
         }
-        assert expected_keys == set(rm.metrics.keys())
+        # Session 4 deadlift: ecc_con_ratio + pause_duration_s + lockout_torso_lean_deg.
+        session4_keys = {"ecc_con_ratio", "pause_duration_s", "lockout_torso_lean_deg"}
+        assert required_keys.issubset(set(rm.metrics.keys()))
+        assert session4_keys.issubset(set(rm.metrics.keys()))
 
     def test_deadlift_rep_duration_s(self):
         rm = self._run(fps=30.0, start=0, end=59)
@@ -523,9 +541,11 @@ class TestMetricValueRanges:
             exercise_variant="standard",
             fps=30.0,
         )
+        # Categorical string-valued keys (ADR-022): phase_of_max_deviation
+        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         for key, val in result[0].metrics.items():
-            # phase_of_max_deviation is a string (phase name); all others are floats
-            if key == "phase_of_max_deviation":
+            if key in _categorical_keys:
                 assert isinstance(val, str)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
@@ -542,9 +562,11 @@ class TestMetricValueRanges:
             exercise_variant="standard",
             fps=30.0,
         )
+        # Categorical string-valued keys (ADR-022): phase_of_max_deviation
+        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         for key, val in result[0].metrics.items():
-            # phase_of_max_deviation is a string (phase name); all others are floats
-            if key == "phase_of_max_deviation":
+            if key in _categorical_keys:
                 assert isinstance(val, str)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
@@ -561,9 +583,11 @@ class TestMetricValueRanges:
             exercise_variant="conventional",
             fps=30.0,
         )
+        # Categorical string-valued keys (ADR-022): phase_of_max_deviation
+        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         for key, val in result[0].metrics.items():
-            # phase_of_max_deviation is a string (phase name); all others are floats
-            if key == "phase_of_max_deviation":
+            if key in _categorical_keys:
                 assert isinstance(val, str)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
