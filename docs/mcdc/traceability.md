@@ -167,25 +167,14 @@ elif torso_lean > caution: -1.5 penalty
 
 ---
 
-### 9. TechniqueScore._score_bench — elbow_flare two-tier elif chain
+### 9. TechniqueScore._score_bench — elbow_flare two-tier elif chain — REMOVED
 
-**File:** `backend/app/cv/scoring.py`
-
-**Expression:**
-```
-if elbow_flare > high: -2.0 penalty   (high = 60.0°)
-elif elbow_flare > caution: -1.0 penalty  (caution = 45.0°)
-```
-
-| Row | > high (60°) | > caution (45°) | outcome         | Independent Effect       |
-|-----|--------------|-----------------|-----------------|--------------------------|
-| 1   | F            | F               | no penalty      | baseline                 |
-| 2   | F            | T               | caution badge   | caution flips (C2=F)     |
-| 3   | T            | (True implied)  | high badge      | high flips (short-circuit)|
-
-**Tests:** `test_mcdc_scoring_technique.py::TestTechniqueBenchElbowFlare`
-
-**MC/DC satisfied:** Rows {1, 3} for high condition; Rows {1, 2} for caution condition.
+The dead elbow_flare branch was removed from `scoring.py` on 2026-05-22
+(cv-audit cleanup, audit item A-1). The branch read a metric that
+`metric_extraction.py` never produces — it would require a frontal-plane
+camera. Its MC/DC truth table and tests
+(`test_mcdc_scoring_technique.py::TestTechniqueBenchElbowFlare`) were
+removed in the same change. See `decisions.md` ADR-AUDIT-2026-05-22.
 
 ---
 

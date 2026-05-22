@@ -420,37 +420,6 @@ class TechniqueScore:
                     )
                 )
 
-        # NOTE: elbow_flare_deg is not currently produced by metric_extraction.py
-        # (requires frontal-plane camera). Branch retained for MC/DC test coverage
-        # and future multi-camera support. See cv-dimension-audit-2026-05-11.md.
-        elbow_flare = metrics.get("elbow_flare_deg")
-        if elbow_flare is not None:
-            caution = cfg.get("bench", "elbow_flare_caution_deg")
-            high = cfg.get("bench", "elbow_flare_high_deg")
-            if elbow_flare > high:
-                score -= 2.0
-                badges.append(
-                    BadgeResult(
-                        dimension="Technique",
-                        issue_key="elbow_flare_high",
-                        severity="High",
-                        message=f"Elbow flare {elbow_flare:.0f}° is excessive (>{high:.0f}°).",
-                    )
-                )
-            elif elbow_flare > caution:
-                score -= 1.0
-                badges.append(
-                    BadgeResult(
-                        dimension="Technique",
-                        issue_key="elbow_flare_caution",
-                        severity="Medium",
-                        message=(
-                            f"Elbow flare {elbow_flare:.0f}° is elevated "
-                            f"(caution >{caution:.0f}°)."
-                        ),
-                    )
-                )
-
         return score, badges
 
 

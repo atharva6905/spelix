@@ -395,3 +395,27 @@ def test_all_exercises_supported(cfg: ThresholdConfig) -> None:
             assert 1.0 <= dim.score <= 10.0, (
                 f"Dimension {dim.internal_name} score out of range: {dim.score}"
             )
+
+
+def test_technique_score_ignores_elbow_flare_deg_metric(
+    cfg: ThresholdConfig,
+) -> None:
+    """Regression: `elbow_flare_deg` is a frontal-plane metric that cannot be
+    measured from a single sagittal-view camera. The scoring branch that read
+    it was removed in cv-audit cleanup 2026-05-22 (audit item A-1). This test
+    asserts that feeding the (impossible) metric through scoring does NOT
+    mutate the score or produce a badge — it is silently ignored, NOT acted on.
+    """
+    scorer = TechniqueScore()
+    metrics_without = {
+        "confidence_score": 1.0,
+        "elbow_angle_at_bottom": 80.0,
+    }
+    metrics_with = {
+        **metrics_without,
+        "elbow_flare_deg": 90.0,  # impossible from sagittal view — must be ignored
+    }
+    score_without, badges_without = scorer.compute(metrics_without, None, cfg, "bench")
+    score_with, badges_with = scorer.compute(metrics_with, None, cfg, "bench")
+    assert score_with == score_without, "elbow_flare_deg must not affect score"
+    assert badges_with == badges_without, "elbow_flare_deg must not produce badges"
