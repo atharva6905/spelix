@@ -11,6 +11,23 @@ and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
 Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
 Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
+## Completed — L2 Sprint — CV audit Session 2 lifter-side detection + refactor (2026-05-22, session 2)
+
+PR #150 (merge SHA `af1548b`) merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).
+Closes `docs/audit/cv-dimension-audit-2026-05-11.md` lifter-side prerequisite for Sessions 4–7.
+Backend: 17 new unit tests (`test_lifter_side.py`), 2 migration/model tests (`test_lifter_side_column.py`),
+3 integration fixture tests. 59 pre-existing tests for metric_extraction + signal_processing remain
+green WITHOUT assertion changes (invariant gate). ruff + pyright clean. Migration `616609f042ed` applied.
+ADR-LIFTER-SIDE-DETECTION + `backend/CLAUDE.md` side-agnostic landmark gotcha block added.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-LIFTER-SIDE-01 | Implement `detect_lifter_side(landmarks_session, fps)` + `landmark_indices_for_side(side)` in new `backend/app/cv/lifter_side.py`. Visibility-weighted, anchor-restricted, ambiguous→"right" with WARNING log. | done | M | — | — | `a8ccb6c` | `backend/app/cv/lifter_side.py`, `backend/tests/unit/test_lifter_side.py` |
+| L2-LIFTER-SIDE-02 | Add `lifter_side VARCHAR(10) CHECK` column to `analyses` via Alembic migration; update SQLAlchemy model. | done | S | L2-LIFTER-SIDE-01 | — | `ddd2157` | `backend/alembic/versions/616609f042ed_add_lifter_side_to_analyses.py`, `backend/app/models/analysis.py`, `backend/tests/unit/test_lifter_side_column.py` |
+| L2-LIFTER-SIDE-03 | Refactor `metric_extraction.py` to delete `_SHOULDER`/`_HIP`/`_KNEE`/`_ANKLE`/`_ELBOW`/`_WRIST` constants and route through `landmark_indices_for_side(lifter_side)` with default `"right"`. Existing test assertions unchanged. | done | M | L2-LIFTER-SIDE-01 | FR-REPM-02, FR-REPM-03 | `ab1d435` | `backend/app/cv/metric_extraction.py` |
+| L2-LIFTER-SIDE-04 | Refactor `signal_processing.py::calculate_joint_angles` + `compute_angle_timeseries` to delete `_BENCH_*_L` and `_SQUAT_*_L` constants and route through `landmark_indices_for_side(lifter_side)`. Existing test assertions unchanged. | done | M | L2-LIFTER-SIDE-01 | FR-CVPL-14 | `ab1d435` | `backend/app/cv/signal_processing.py` |
+| L2-LIFTER-SIDE-05 | Wire `services/pipeline.py` Step 3.5 to call `detect_lifter_side`, persist on `analyses.lifter_side`, thread into `compute_angle_timeseries` + `extract_rep_metrics`. Expose `lifter_side` on `AnalysisDetail` schema. Update mock factories. | done | M | L2-LIFTER-SIDE-02..04 | — | `ca90307` | `backend/app/services/pipeline.py`, `backend/app/schemas/analysis.py`, `backend/tests/unit/test_analysis_api.py`, `backend/tests/unit/test_analysis_crud.py`, `backend/tests/integration/test_lifter_side_fixtures.py` |
+
 ## Completed — L2 Sprint — CV audit Part 1 cleanup (2026-05-22, session 1)
 
 PR #147 (merge SHA `c47740e`) merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).
