@@ -9,6 +9,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+// Mock @/lib/supabase BEFORE any module-level imports that touch it. The
+// real client calls createClient(VITE_SUPABASE_URL, ...) at import time,
+// which fails in CI where those env vars are absent. Same pattern as the
+// other component tests.
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: vi
+        .fn()
+        .mockResolvedValue({ data: { session: { access_token: "t" } } }),
+    },
+  },
+}));
+
 import UnvalidatedMetricsPanel from "@/components/UnvalidatedMetricsPanel";
 import type {
   ExpertAnalysisDetail,
