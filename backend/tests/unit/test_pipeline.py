@@ -113,7 +113,7 @@ def _make_angle_timeseries(n: int = _NUM_FRAMES) -> dict[str, np.ndarray]:
 def _make_bar_path() -> dict:
     return {
         "centroids": [(0.5, 0.5)] * _NUM_FRAMES,
-        "lateral_deviation_px": 0.01,
+        "ap_deviation_px": 0.01,
         "vertical_range_px": 0.2,
         "path_consistency": 0.95,
     }

@@ -486,17 +486,17 @@ class PathBalanceScore:
                 )
             )
 
-        lateral_dev = bar_path.get("lateral_deviation_px", 0.0)
-        if lateral_dev > 0.05:
-            lat_penalty = min(2.0, (lateral_dev - 0.05) * 10.0)
-            score -= lat_penalty
+        ap_dev = bar_path.get("ap_deviation_px", 0.0)
+        if ap_dev > 0.05:
+            ap_penalty = min(2.0, (ap_dev - 0.05) * 10.0)
+            score -= ap_penalty
             badges.append(
                 BadgeResult(
                     dimension="Path & Balance",
-                    issue_key="lateral_deviation_high",
+                    issue_key="ap_deviation_high",
                     severity="Medium",
                     message=(
-                        f"Bar forward/backward deviation {lateral_dev:.2f} (normalised) is elevated. "
+                        f"Bar forward/backward deviation {ap_dev:.2f} (normalised) is elevated. "
                         "Keep the bar over midfoot throughout the lift."
                     ),
                 )

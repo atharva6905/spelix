@@ -154,7 +154,9 @@ def compute_bar_path(
 
     Otherwise a dict with:
     - ``"centroids"``: list of (x, y) tuples normalised to [0, 1]
-    - ``"lateral_deviation_px"``: max absolute horizontal deviation from mean x
+    - ``"ap_deviation_px"``: max absolute anterior-posterior (forward/backward)
+      deviation from mean x-coordinate, measured in pixels. From a sagittal-
+      view (side) camera, x-axis drift IS the A-P axis of the lifter.
     - ``"vertical_range_px"``: max y − min y
     - ``"path_consistency"``: 1 − (std(x) / mean(x)), clamped to [0, 1]
     """
@@ -174,7 +176,7 @@ def compute_bar_path(
     ys = np.array([c[1] for c in filled], dtype=float)
 
     mean_x = float(np.mean(xs))
-    lateral_deviation_px = float(np.max(np.abs(xs - mean_x)))
+    ap_deviation_px = float(np.max(np.abs(xs - mean_x)))
     vertical_range_px = float(np.max(ys) - np.min(ys))
 
     std_x = float(np.std(xs))
@@ -191,7 +193,7 @@ def compute_bar_path(
 
     return {
         "centroids": norm_centroids,
-        "lateral_deviation_px": lateral_deviation_px,
+        "ap_deviation_px": ap_deviation_px,
         "vertical_range_px": vertical_range_px,
         "path_consistency": path_consistency,
     }
@@ -241,7 +243,7 @@ def compute_bar_path_from_landmarks(
     ys = np.array([c[1] for c in centroids], dtype=float)
 
     mean_x = float(np.mean(xs))
-    lateral_deviation_px = float(np.max(np.abs(xs - mean_x)))
+    ap_deviation_px = float(np.max(np.abs(xs - mean_x)))
     vertical_range_px = float(np.max(ys) - np.min(ys))
 
     std_x = float(np.std(xs))
@@ -255,7 +257,7 @@ def compute_bar_path_from_landmarks(
 
     return {
         "centroids": norm_centroids,
-        "lateral_deviation_px": lateral_deviation_px,
+        "ap_deviation_px": ap_deviation_px,
         "vertical_range_px": vertical_range_px,
         "path_consistency": path_consistency,
     }

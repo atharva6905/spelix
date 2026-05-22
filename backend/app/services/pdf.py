@@ -382,10 +382,10 @@ def generate_bar_path_plot(bar_path: dict, output_path: str) -> str:
     ax.tick_params(labelsize=7)
 
     # Add stats annotation
-    lateral = bar_path.get("lateral_deviation_px") or bar_path.get("horizontal_drift")
-    if lateral is not None:
+    ap_dev = bar_path.get("ap_deviation_px") or bar_path.get("horizontal_drift")
+    if ap_dev is not None:
         ax.annotate(
-            f"Lateral dev: {float(lateral):.3f}",
+            f"A-P dev: {float(ap_dev):.3f}",
             xy=(0.02, 0.98), xycoords="axes fraction",
             fontsize=7, va="top", color="#666",
         )
