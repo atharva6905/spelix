@@ -4,12 +4,22 @@ Signal processing utilities for the Phase 0 CV pipeline (FR-CVPL-14).
 All functions are pure — no side effects, no DB, no IO.
 Landmark arrays are (33, 5) per frame: [x, y, z, visibility, presence].
 Phase 0 is sagittal (side) view only — angles use x, y coordinates only.
+
+Landmark indices are resolved per-analysis via
+``landmark_indices_for_side(lifter_side)`` (Session 2,
+ADR-LIFTER-SIDE-DETECTION). The default ``"right"`` matches the
+pre-refactor hardcoded subject-right indices, so existing test
+assertions remain green without modification.
 """
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 from scipy.signal import savgol_filter
+
+from app.cv.lifter_side import landmark_indices_for_side
 
 # ---------------------------------------------------------------------------
 # Column indices within a (33, 5) landmark array
@@ -17,35 +27,6 @@ from scipy.signal import savgol_filter
 
 _COL_X = 0
 _COL_Y = 1
-
-# ---------------------------------------------------------------------------
-# Landmark index definitions
-#
-# MediaPipe BlazePose naming (subject-perspective, mirrored from the
-# camera's point of view):
-#   ODD indices  11/13/15/23/25/27 = subject's LEFT  (left_shoulder, etc.)
-#   EVEN indices 12/14/16/24/26/28 = subject's RIGHT (right_shoulder, etc.)
-#
-# The legacy Spelix task spec defined an "even indices" convention and
-# labelled those constants with a trailing `_L`. That `_L` is a spec
-# artefact, NOT a body-side indicator — the EVEN-indexed landmarks it
-# refers to are the subject's RIGHT side under MediaPipe's own naming.
-# Session 44 ADR-REPDET-01 investigation hit this confusion; we keep the
-# `_L` suffix for minimal diff risk but DO NOT assume it means "subject's
-# left".
-# ---------------------------------------------------------------------------
-
-# Squat / Deadlift — subject's RIGHT side (even indices per task spec).
-_SQUAT_SHOULDER_L = 12
-_SQUAT_HIP_L = 24
-_SQUAT_KNEE_L = 26
-_SQUAT_ANKLE_L = 28
-
-# Bench — subject's RIGHT side (even indices per task spec).
-_BENCH_SHOULDER_L = 12
-_BENCH_ELBOW_L = 14
-_BENCH_WRIST_L = 16
-_BENCH_HIP_L = 24  # for shoulder_angle: shoulder–hip vector
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +118,7 @@ def calculate_angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
 def calculate_joint_angles(
     landmarks: np.ndarray,
     exercise_type: str,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float]:
     """
     Compute relevant joint angles for a single frame.
@@ -147,6 +129,9 @@ def calculate_joint_angles(
         Shape (33, 5) array for one frame.
     exercise_type:
         One of ``"squat"``, ``"deadlift"``, ``"bench"`` (case-insensitive).
+    lifter_side:
+        ``"left"`` or ``"right"`` (subject-perspective). Defaults to
+        ``"right"`` to preserve pre-refactor behaviour.
 
     Returns
     -------
@@ -159,6 +144,7 @@ def calculate_joint_angles(
         If *exercise_type* is not recognised.
     """
     ex = exercise_type.lower()
+    side_idx = landmark_indices_for_side(lifter_side)
 
     def xy(idx: int) -> np.ndarray:
         """Extract (x, y) for landmark *idx*."""
@@ -166,14 +152,14 @@ def calculate_joint_angles(
 
     if ex in ("squat", "deadlift"):
         hip_angle = calculate_angle(
-            xy(_SQUAT_SHOULDER_L),
-            xy(_SQUAT_HIP_L),
-            xy(_SQUAT_KNEE_L),
+            xy(side_idx.shoulder),
+            xy(side_idx.hip),
+            xy(side_idx.knee),
         )
         knee_angle = calculate_angle(
-            xy(_SQUAT_HIP_L),
-            xy(_SQUAT_KNEE_L),
-            xy(_SQUAT_ANKLE_L),
+            xy(side_idx.hip),
+            xy(side_idx.knee),
+            xy(side_idx.ankle),
         )
         return {
             "hip_angle": hip_angle,
@@ -182,14 +168,14 @@ def calculate_joint_angles(
 
     if ex == "bench":
         elbow_angle = calculate_angle(
-            xy(_BENCH_SHOULDER_L),
-            xy(_BENCH_ELBOW_L),
-            xy(_BENCH_WRIST_L),
+            xy(side_idx.shoulder),
+            xy(side_idx.elbow),
+            xy(side_idx.wrist),
         )
         shoulder_angle = calculate_angle(
-            xy(_BENCH_ELBOW_L),
-            xy(_BENCH_SHOULDER_L),
-            xy(_BENCH_HIP_L),
+            xy(side_idx.elbow),
+            xy(side_idx.shoulder),
+            xy(side_idx.hip),
         )
         return {
             "elbow_angle": elbow_angle,
@@ -210,6 +196,7 @@ def calculate_joint_angles(
 def compute_angle_timeseries(
     landmarks_per_frame: list[np.ndarray],
     exercise_type: str,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, np.ndarray]:
     """
     Compute smoothed joint-angle time-series for an entire clip.
@@ -223,6 +210,9 @@ def compute_angle_timeseries(
         List of (33, 5) arrays, one per frame.
     exercise_type:
         One of ``"squat"``, ``"deadlift"``, ``"bench"`` (case-insensitive).
+    lifter_side:
+        ``"left"`` or ``"right"`` (subject-perspective). Defaults to
+        ``"right"`` to preserve pre-refactor behaviour.
 
     Returns
     -------
@@ -234,7 +224,7 @@ def compute_angle_timeseries(
     raw: dict[str, list[float]] = {}
 
     for frame in landmarks_per_frame:
-        angles = calculate_joint_angles(frame, exercise_type)
+        angles = calculate_joint_angles(frame, exercise_type, lifter_side)
         for joint, angle in angles.items():
             raw.setdefault(joint, []).append(angle)
 

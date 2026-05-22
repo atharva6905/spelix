@@ -7,28 +7,22 @@ All functions are pure — no side effects, no DB, no IO.
 Phase 0: sagittal (side) view only. Angles use x, y coordinates.
 Landmark layout (33, 5) per frame: [x, y, z, visibility, presence].
 
-Landmark indices used (left/even side per task spec):
-  Squat/Deadlift: shoulder=12, hip=24, knee=26, ankle=28
-  Bench:          shoulder=12, elbow=14, wrist=16, hip=24
+Landmark indices are resolved per-analysis via
+``landmark_indices_for_side(lifter_side)`` (Session 2,
+ADR-LIFTER-SIDE-DETECTION). The default ``"right"`` matches the
+pre-refactor hardcoded subject-right indices, so existing test
+assertions remain green without modification.
 """
 
 from __future__ import annotations
 
-import numpy as np
 from dataclasses import dataclass
+from typing import Literal
 
+import numpy as np
+
+from app.cv.lifter_side import SideIndices, landmark_indices_for_side
 from app.cv.rep_detection import DetectedRep
-
-# ---------------------------------------------------------------------------
-# Landmark index constants
-# ---------------------------------------------------------------------------
-
-_SHOULDER = 12
-_HIP = 24
-_KNEE = 26
-_ANKLE = 28
-_ELBOW = 14
-_WRIST = 16
 
 # Column indices within a landmark row
 _COL_X = 0
@@ -60,7 +54,7 @@ def _xy(landmarks: np.ndarray, idx: int) -> np.ndarray:
     return landmarks[idx, :2]
 
 
-def _torso_lean_deg(landmarks: np.ndarray) -> float:
+def _torso_lean_deg(landmarks: np.ndarray, side_idx: SideIndices) -> float:
     """
     Compute torso lean — the angle between the shoulder–hip line and vertical.
 
@@ -69,8 +63,8 @@ def _torso_lean_deg(landmarks: np.ndarray) -> float:
 
     Returns angle in [0, 90] degrees.
     """
-    shoulder = _xy(landmarks, _SHOULDER)
-    hip = _xy(landmarks, _HIP)
+    shoulder = _xy(landmarks, side_idx.shoulder)
+    hip = _xy(landmarks, side_idx.hip)
 
     # Vector from hip to shoulder
     dx = float(shoulder[0] - hip[0])
@@ -131,6 +125,7 @@ def _assess_lockout_quality(
     end_frame: int,
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
+    side_idx: SideIndices,
 ) -> tuple[bool, float]:
     """
     Assess lockout quality at rep end for squat, bench, or deadlift (FR-REPM-08).
@@ -150,18 +145,20 @@ def _assess_lockout_quality(
     if exercise_type == "squat":
         hip_ok = angle_timeseries["hip_angle"][end_frame] >= 165.0
         knee_ok = angle_timeseries["knee_angle"][end_frame] >= 165.0
-        vis = float(np.mean([frame[_HIP, 3], frame[_KNEE, 3]]))
+        vis = float(np.mean([frame[side_idx.hip, 3], frame[side_idx.knee, 3]]))
         return (bool(hip_ok and knee_ok), vis)
     if exercise_type == "bench":
         elbow_ok = angle_timeseries["elbow_angle"][end_frame] >= 165.0
-        vis = float(frame[_ELBOW, 3])
+        vis = float(frame[side_idx.elbow, 3])
         return (bool(elbow_ok), vis)
     if exercise_type == "deadlift":
         hip_ok = angle_timeseries["hip_angle"][end_frame] >= 165.0
         # Shoulders behind bar: shoulder x should be at or behind hip x
         # (sagittal view, right-facing = x increases forward)
-        shoulder_behind = bool(frame[_SHOULDER, 0] <= frame[_HIP, 0] + 0.02)
-        vis = float(np.mean([frame[_HIP, 3], frame[_SHOULDER, 3]]))
+        shoulder_behind = bool(
+            frame[side_idx.shoulder, 0] <= frame[side_idx.hip, 0] + 0.02
+        )
+        vis = float(np.mean([frame[side_idx.hip, 3], frame[side_idx.shoulder, 3]]))
         return (bool(hip_ok and shoulder_behind), vis)
     return (False, 0.0)
 
@@ -233,6 +230,7 @@ def _squat_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
+    side_idx: SideIndices,
 ) -> dict[str, float | str]:
     """
     Extract squat metrics for one rep.
@@ -255,7 +253,7 @@ def _squat_metrics(
 
     depth_angle = float(hip_series[depth_frame])
     knee_angle_at_depth = float(knee_series[depth_frame])
-    torso_lean = _torso_lean_deg(landmarks_per_frame[depth_frame])
+    torso_lean = _torso_lean_deg(landmarks_per_frame[depth_frame], side_idx)
 
     rep_duration_s = float(end - start) / fps
     descent_frames, ascent_frames = _find_descent_end_ascent_start(
@@ -265,7 +263,7 @@ def _squat_metrics(
     ascent_duration_s = ascent_frames / fps
 
     lockout_passed, lockout_conf = _assess_lockout_quality(
-        "squat", end, landmarks_per_frame, angle_timeseries,
+        "squat", end, landmarks_per_frame, angle_timeseries, side_idx,
     )
     max_dev_phase = _phase_of_max_deviation(
         hip_series, start, end, depth_frame, threshold_angle=90.0,
@@ -290,6 +288,7 @@ def _bench_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
+    side_idx: SideIndices,
 ) -> dict[str, float | str]:
     """
     Extract bench press metrics for one rep.
@@ -320,7 +319,7 @@ def _bench_metrics(
     ascent_duration_s = ascent_frames / fps
 
     lockout_passed, lockout_conf = _assess_lockout_quality(
-        "bench", end, landmarks_per_frame, angle_timeseries,
+        "bench", end, landmarks_per_frame, angle_timeseries, side_idx,
     )
     max_dev_phase = _phase_of_max_deviation(
         elbow_series, start, end, bottom_frame, threshold_angle=90.0,
@@ -344,6 +343,7 @@ def _deadlift_metrics(
     landmarks_per_frame: list[np.ndarray],
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
+    side_idx: SideIndices,
 ) -> dict[str, float | str]:
     """
     Extract deadlift metrics for one rep.
@@ -370,7 +370,7 @@ def _deadlift_metrics(
     knee_angle_at_lockout = float(knee_series[end])
 
     # Torso lean at start of pull (start frame)
-    torso_lean_at_start = _torso_lean_deg(landmarks_per_frame[start])
+    torso_lean_at_start = _torso_lean_deg(landmarks_per_frame[start], side_idx)
 
     rep_duration_s = float(end - start) / fps
     descent_frames, ascent_frames = _find_descent_end_ascent_start(
@@ -380,7 +380,7 @@ def _deadlift_metrics(
     ascent_duration_s = ascent_frames / fps
 
     lockout_passed, lockout_conf = _assess_lockout_quality(
-        "deadlift", end, landmarks_per_frame, angle_timeseries,
+        "deadlift", end, landmarks_per_frame, angle_timeseries, side_idx,
     )
     max_dev_phase = _phase_of_max_deviation(
         hip_series, start, end, bottom_frame, threshold_angle=90.0,
@@ -423,6 +423,7 @@ def extract_rep_metrics(
     exercise_type: str,
     exercise_variant: str,
     fps: float,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> list[RepMetrics]:
     """
     Extract per-rep biomechanical metrics for each detected rep.
@@ -447,6 +448,10 @@ def extract_rep_metrics(
         "rdl") — reserved for future variant-specific logic.
     fps:
         Frames per second of the source video.
+    lifter_side:
+        ``"left"`` or ``"right"`` (subject-perspective). Defaults to
+        ``"right"`` to preserve pre-refactor behaviour. Resolved to
+        MediaPipe landmark indices via ``landmark_indices_for_side``.
 
     Returns
     -------
@@ -469,9 +474,11 @@ def extract_rep_metrics(
             f"Expected one of: {sorted(_ANALYZER_MAP.keys())}"
         )
 
+    side_idx = landmark_indices_for_side(lifter_side)
+
     result: list[RepMetrics] = []
     for rep in reps:
-        metrics = analyzer(rep, landmarks_per_frame, angle_timeseries, fps)
+        metrics = analyzer(rep, landmarks_per_frame, angle_timeseries, fps, side_idx)
         result.append(
             RepMetrics(
                 rep_index=rep.rep_index,
