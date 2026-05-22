@@ -105,13 +105,27 @@ class TestSagittalMetricsRegistryEndpoint:
             assert isinstance(entry["computed_yet"], bool)
             assert isinstance(entry["in_scoring"], bool)
 
-    def test_after_session3_no_metric_is_computed(
+    def test_after_session4_four_metrics_computed_two_in_scoring(
         self, expert_client: TestClient
     ) -> None:
+        """Session 4 flipped flags on 4 entries (and in_scoring on 2 of them).
+        The other 12 entries stay computed_yet=False until Sessions 5-7."""
         resp = expert_client.get("/api/v1/expert/sagittal-metrics-registry")
-        for entry in resp.json()["entries"]:
-            assert entry["computed_yet"] is False
-            assert entry["in_scoring"] is False
+        entries = {e["key_name"]: e for e in resp.json()["entries"]}
+        session4_computed = {
+            "depth_classification", "ecc_con_ratio",
+            "pause_duration_s", "lockout_torso_lean_deg",
+        }
+        session4_in_scoring = {"depth_classification", "ecc_con_ratio"}
+        for key, entry in entries.items():
+            if key in session4_computed:
+                assert entry["computed_yet"] is True, f"{key} computed_yet should be True"
+            else:
+                assert entry["computed_yet"] is False, f"{key} computed_yet should be False"
+            if key in session4_in_scoring:
+                assert entry["in_scoring"] is True, f"{key} in_scoring should be True"
+            else:
+                assert entry["in_scoring"] is False, f"{key} in_scoring should be False"
 
     def test_lumbar_flexion_proxy_carries_naming_honesty(
         self, expert_client: TestClient
