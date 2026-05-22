@@ -26,6 +26,10 @@ class Analysis(TimestampMixin, Base):
             "'processing','coaching','completed','failed')",
             name="ck_analyses_status",
         ),
+        CheckConstraint(
+            "lifter_side IS NULL OR lifter_side IN ('left','right')",
+            name="ck_analyses_lifter_side",
+        ),
         Index("ix_analyses_user_created", "user_id", desc("created_at")),
     )
 
@@ -68,6 +72,7 @@ class Analysis(TimestampMixin, Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     threshold_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     weight_kg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lifter_side: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     flagged_for_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_golden_dataset: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

@@ -168,6 +168,7 @@ class AnalysisDetail(BaseModel):
     exercise_type: str
     exercise_variant: str
     confidence_score: float | None
+    lifter_side: Literal["left", "right"] | None = None
     form_score_safety: float | None = None
     form_score_technique: float | None = None
     form_score_path_balance: float | None = None

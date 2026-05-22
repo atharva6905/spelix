@@ -1275,3 +1275,35 @@ The pipeline ran a `lateral_deviation_px` JSONB key on every `rep_metrics` row, 
 - One regression test guards each removal: `test_technique_score_ignores_elbow_flare_deg_metric` (scoring), `test_emits_ap_deviation_px_not_lateral` (bar-path key), `TestThresholdsCvAuditCleanup` (no dead keys in active sections). These prevent silent re-introduction.
 
 **Related.** Audit source — `docs/audit/cv-dimension-audit-2026-05-11.md`. Design spec — `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md`. Goal manifest — `docs/superpowers/goals/2026-05-22-cv-audit-master.md`. ADRs scheduled for later sessions: ADR-LIFTER-SIDE-DETECTION (Session 2), ADR-SAGITTAL-METRICS-REGISTRY (Session 3), ADR-AUTO-FLOW-REFINEMENTS (Session 4), ADR-LUMBAR-FLEXION-PROXY-NAMING (Session 7).
+
+
+## ADR-LIFTER-SIDE-DETECTION: Visibility-weighted lifter-side detection with anchor robustness (Session 2)
+
+**Context.** Before Session 2, every metric extractor and angle calculator in `backend/app/cv/` hardcoded even-numbered MediaPipe landmark indices (12, 14, 16, 24, 26, 28). MediaPipe BlazePose names odd indices = subject's left, even = subject's right; the codebase silently assumed every video was filmed from the lifter's right side. Fixtures filmed from the left returned subtly wrong angles because we read the offside body landmarks. The CV audit (`docs/audit/cv-dimension-audit-2026-05-11.md` E-1) called for a single side-detection helper to drive all current and Part-2 sagittal metrics.
+
+**Decision.**
+
+1. **Detection algorithm — visibility-weighted, anchor-restricted.** Compute mean visibility for the 8 left-side landmarks (11/13/15/23/25/27/29/31) vs the 8 right-side landmarks (12/14/16/24/26/28/30/32) across the first ~3 seconds of pose data (or full session when fps is unknown). Higher mean wins. Visibility samples are restricted to landmarks within ±0.25 (normalised) of the lifter centroid x to suppress bystander interference — re-uses the `check_single_person` anchor pattern from ADR-QGATE-COMMERCIAL-GYM (`_ANCHOR_FROM_FIRST_N_SAMPLES=3`, `_OFF_ANCHOR_DISTANCE_FRAC=0.25`).
+
+2. **Tie-break and ambiguous-default to `"right"`.** When the relative visibility difference is <5% (`_AMBIGUOUS_RELATIVE_DIFF=0.05`), log a WARNING with both means and return `"right"`. This matches the pre-refactor hardcoded default, so right-side fixtures see zero behavioural change. Existing test assertions remain green without modification (verified by the Session 2 invariant gate: `git diff main tests/unit/test_metric_extraction.py tests/unit/test_signal_processing.py` is empty).
+
+3. **Persist detected side on `analyses.lifter_side`.** Nullable `VARCHAR(10) CHECK (lifter_side IN ('left','right'))`. Expert portal (Session 3) surfaces this; users do not see it. Alembic migration `616609f042ed` adds the column; reversible.
+
+4. **`barbell_detection.py` wrist-midpoint fallback stays unchanged.** That function averages both wrists (15 + 16) by design; it is already side-agnostic.
+
+5. **Public entry points accept `lifter_side: Literal["left","right"]` with default `"right"`.** Default preserves all pre-existing test assertions verbatim; the pipeline (`services/pipeline.py::run_cv_pipeline` Step 3.5) supplies the detected value at runtime to `compute_angle_timeseries`, `extract_rep_metrics`, and lockout/torso helpers.
+
+**Consequences.**
+
+- Fixtures filmed from the lifter's left now read the correct landmarks and yield correct angles. Right-side fixtures see ≤0.5% drift per the calibration gate in Session 2 (any larger drift is a hard STOP).
+- Adding any Part-2 sagittal metric (Sessions 4–7) requires no side-handling code in the new extractor — it just takes a `SideIndices` and reads the requested landmarks.
+- Ambiguous-detection WARNING logs surface during routine pipeline runs in worker logs; pipeline never blocks on ambiguity.
+- Mock factories for `Analysis` must explicitly set `lifter_side=None` (per the standing MagicMock + Pydantic gotcha). `test_analysis_api.py::_make_detail_analysis` and `test_analysis_crud.py::_make_mock_analysis` updated in the same PR.
+
+**Alternatives considered.**
+
+- **Always trust the higher-indexed-landmark visibility.** Rejected: encodes the same hardcoded-right assumption we are removing.
+- **Ask the user at upload time which side they are filming.** Rejected: every other CV feature is fully automatic; this would add a UX burden for a piece of metadata the system can infer reliably.
+- **Use only the first frame.** Rejected: MediaPipe needs several frames to stabilise; a single-frame visibility check is noisier than the 3-second mean.
+
+**Related.** ADR-AUDIT-2026-05-22, ADR-QGATE-COMMERCIAL-GYM. Migration `616609f042ed`. Module `backend/app/cv/lifter_side.py`. Backlog IDs `L2-LIFTER-SIDE-01` through `-05`.
