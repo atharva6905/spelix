@@ -91,7 +91,7 @@ def test_safety_caution_torso_lean_penalty(cfg: ThresholdConfig) -> None:
 
 
 def test_safety_caps_at_5_when_very_low_confidence(cfg: ThresholdConfig) -> None:
-    """Confidence < 0.50 → safety score capped at 5.0."""
+    """Confidence < 0.50 → Movement Quality score capped at 5.0."""
     metrics = {
         "torso_lean": 20.0,
         "confidence_score": 0.30,
