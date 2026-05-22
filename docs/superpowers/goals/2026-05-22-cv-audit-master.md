@@ -131,8 +131,9 @@ On STOP: write detailed handoff to .claude/handoff.md and auto-launch narrow rem
 
 ```
 Complete Session 2 of cv-audit. Reference documents:
+- Handoff from Session 1: .claude/handoff.md
 - Design spec: docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md §Session-2 (architecture, decisions, scope)
-- Implementation plan: docs/superpowers/plans/2026-05-22-session-2-lifter-side-detection.md — THIS IS A SKELETON PLAN. Before proceeding with task execution, STOP and expand the skeleton into full TDD code blocks via superpowers:writing-plans. The expanded plan must be committed to repo before this /goal continues. Skeleton expansion preserves task ordering, file lists, gates, and acceptance criteria; only adds concrete pytest test bodies and exact git commit messages.
+- Implementation plan: docs/superpowers/plans/2026-05-22-session-2-lifter-side-detection.md (full TDD task list — execution recipe; follow task order, do not improvise).
 - Master manifest: docs/superpowers/goals/2026-05-22-cv-audit-master.md (Standing Rules and Remediation Policy apply throughout)
 
 Definition of done — all of these must be surfaced in THIS chat:
