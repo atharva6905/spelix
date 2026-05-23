@@ -157,16 +157,17 @@ class TestSessionFourFlags:
 
     def test_session_6_plus_entries_remain_pristine(self) -> None:
         """Guard: Session 6 flipped bar_to_hip_distance and
-        shoulder_protraction_proxy_px. Only Session 7 keys
-        (lumbar_flexion_proxy_delta_deg, bar_path_classification,
-        technique_consistency_std) remain pristine."""
+        shoulder_protraction_proxy_px to computed_yet=True. Session 7 has
+        now also flipped lumbar_flexion_proxy_delta_deg, bar_path_classification,
+        and technique_consistency_std to computed_yet=True. All 16 entries remain
+        in_scoring=False except the two Session-4 scoring entries."""
         entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
         for key in (
             "lumbar_flexion_proxy_delta_deg", "bar_path_classification",
             "technique_consistency_std",
         ):
-            assert entries[key].computed_yet is False, (
-                f"Entry {key!r} must stay computed_yet=False (Session 7 scope)."
+            assert entries[key].computed_yet is True, (
+                f"Entry {key!r} must be computed_yet=True after Session 7."
             )
             assert entries[key].in_scoring is False, (
                 f"Entry {key!r} must stay in_scoring=False (Session 7 scope)."
@@ -304,6 +305,51 @@ class TestDisplayMetadata:
                     f"Entry {entry.key_name!r} description uses forbidden "
                     f"phrase {term!r}: {entry.description!r}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Session 7 flags (computed_yet flipped)
+# ---------------------------------------------------------------------------
+
+
+_SESSION7_KEYS = frozenset({
+    "lumbar_flexion_proxy_delta_deg",
+    "bar_path_classification",
+    "technique_consistency_std",
+})
+
+
+class TestRegistrySession7Flips:
+    def test_session7_registry_flags_computed(self) -> None:
+        """Session 7 implementation flips computed_yet=True for all 3 keys."""
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        for key in _SESSION7_KEYS:
+            assert entries[key].computed_yet is True, (
+                f"Entry {key!r} should have computed_yet=True after Session 7."
+            )
+
+    def test_session7_lumbar_naming_honesty(self) -> None:
+        """#2 description must include the exact em-dash disclaimer phrase."""
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        entry = entries["lumbar_flexion_proxy_delta_deg"]
+        # The em-dash phrasing from ADR-LUMBAR-FLEXION-PROXY-NAMING:
+        # "composite torso angle — not lumbar-isolated"
+        assert "composite torso angle" in entry.description, (
+            f"Description missing 'composite torso angle': {entry.description!r}"
+        )
+        assert "not lumbar-isolated" in entry.description, (
+            f"Description missing 'not lumbar-isolated': {entry.description!r}"
+        )
+
+    def test_session7_barpath_names_v0_heuristic(self) -> None:
+        """bar_path_classification description must acknowledge v0 heuristic status."""
+        entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
+        entry = entries["bar_path_classification"]
+        lower = entry.description.lower()
+        assert "heuristic" in lower or "v0" in lower, (
+            f"bar_path_classification description must name v0/heuristic status; "
+            f"got: {entry.description!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

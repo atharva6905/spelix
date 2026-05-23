@@ -244,12 +244,12 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
         display_label="Lumbar Flexion Proxy (Delta)",
         unit="deg",
         description=(
-            "Composite trunk-flexion proxy: shoulder-hip-vertical angle at "
-            "rep bottom minus the same angle at the standing baseline. "
-            "Not lumbar-isolated -- see ADR-LUMBAR-FLEXION-PROXY-NAMING."
+            "Delta of composite torso angle — not lumbar-isolated: "
+            "shoulder-hip-vertical angle at rep bottom minus the same angle "
+            "at the standing baseline. See ADR-LUMBAR-FLEXION-PROXY-NAMING."
         ),
         exercise_applicability=_SQ_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -261,7 +261,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Heuristic v0 -- expect post-onboarding refinement."
         ),
         exercise_applicability=_BN,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -274,7 +274,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Lower = more consistent."
         ),
         exercise_applicability=_SQ_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
 })
