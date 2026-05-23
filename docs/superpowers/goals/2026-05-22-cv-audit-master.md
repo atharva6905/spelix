@@ -54,8 +54,8 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 | 2 | Lifter-side detection + refactor | complete | 0 | af1548b | #150 |
 | 3 | Infrastructure scaffold | complete | 0 | fc5e6ca | #153 |
 | 4 | Trivial metrics (auto-flow scoring) | complete | 0 | e17c1d6 | #157 |
-| 5 | Standard single-frame landmark math | active | 0 | — | — |
-| 6 | Bar-coordinate math | pending | 0 | — | — |
+| 5 | Standard single-frame landmark math | complete | 0 | b9ab8fa | #161 |
+| 6 | Bar-coordinate math | active | 0 | — | — |
 | 7 | Complex multi-frame analysis | pending | 0 | — | — |
 
 ---
@@ -354,13 +354,14 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 **Completion checklist:**
 
-- [ ] 7 extractors in `metric_extraction.py`: #1, #3, #5, #10, #11, #13, #15
-- [ ] Unit tests with side-agnosticism mirror tests
-- [ ] Integration tests on matching fixtures
-- [ ] Smoke script with CSV output across 3 fixtures
-- [ ] PR-level CI green via `gh pr checks <PR>`; PR merged via `merge_method=merge`; post-merge Deploy to Production green via `gh run watch <main-run-id>`
-- [ ] E2E confirms each metric in expert panel
-- [ ] Master manifest updated; Session 6 active
+- [x] 7 extractors in `metric_extraction.py`: #1 (ankle_dorsiflexion_deg + heel_rise_flag), #3 (wrist_alignment_deg), #5 (bar_touch_height_pct), #10 (setup_shoulder_x_offset), #11 (shin_angle_deg), #13 (setup_knee_angle_deg), #15 (arch_deg). Wired via `_facing_sign(side)` helper for x-direction signed metrics (#3, #10, #11, #15). Analyzer signatures extended to receive `lifter_side`.
+- [x] Unit tests with side-agnosticism mirror tests — 92 new tests in `test_metric_extraction_sagittal.py`; per-metric happy / edge / degenerate + parametrised mirror tests + per-exercise analyzer key-emission tests + defensive-guard coverage.
+- [x] Integration tests on matching fixtures — `test_pipeline_sagittal_metrics.py` runs full pipeline on all 3 atharva fixtures; squat (6 reps) covers #1+#11, bench (13 reps) covers #3+#5+#15, deadlift (5 reps) covers #10+#13. Sanity ranges are wide (full atan2/ratio domain for compute-only metrics) — expert calibrates meaningful sub-ranges post-onboarding via FR-EXPV-08.
+- [x] Smoke script with CSV output across 3 fixtures — `backend/scripts/oneoff/smoke_sagittal_metrics_session5.py` produces per-rep CSV per fixture; output dumped to chat.
+- [x] PR-level CI green via `gh pr checks 161` (all 6: Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel); PR #161 merged via `mcp__github__merge_pull_request` with `merge_method="merge"`; merge SHA `b9ab8fa328081965466c55b5146f5aa1215897cb`; post-merge Deploy to Production `conclusion=success` on main-branch run `26322038184`.
+- [x] Droplet HEAD matches merge SHA (`b9ab8fa Merge pull request #161 from atharva6905/feat/sagittal-standard-metrics`); containers `(healthy)` per `docker ps`.
+- [x] E2E confirms each metric in expert panel — re-uploaded all 3 atharva fixtures on prod (analyses `48a32cad-…` squat, `b86496f2-…` bench, `29cd3b51-…` deadlift); applicable Session-5 keys populated in `<UnvalidatedMetricsPanel />` on each `/expert/analyses/<id>` page; screenshots saved under `e2e/screenshots/session5-{squat,bench,deadlift}-expert-panel.png`.
+- [x] Master manifest updated; Session 6 active. `.claude/handoff.md` written with Session 6 launch guidance. Plan expansion: PR #160 (merge SHA `3560cec`).
 
 ---
 
