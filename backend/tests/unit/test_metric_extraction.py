@@ -547,12 +547,18 @@ class TestMetricValueRanges:
         # Session 7 nullable keys: lumbar_flexion_proxy_delta_deg (requires baseline
         # frame cross-rep context), technique_consistency_std (requires ≥2 reps),
         # bar_path_classification (string or None).
+        # L2-CV-DEPTHFRAME-DROPOUT-R1 nullable keys: ankle_dorsiflexion_deg and
+        # shin_angle_deg return None when geometric plausibility guard fires (mis-
+        # tracked lower-body landmarks on occluded frames, or synthetic fixtures
+        # where foot_index is not populated).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         _dict_keys = {"bar_to_hip_distance"}
         _SESSION7_NULLABLE = {
             "lumbar_flexion_proxy_delta_deg",
             "technique_consistency_std",
             "bar_path_classification",
+            "ankle_dorsiflexion_deg",
+            "shin_angle_deg",
         }
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
@@ -648,3 +654,58 @@ class TestMetricValueRanges:
                 )
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
+
+
+# ---------------------------------------------------------------------------
+# L2-CV-DEPTHFRAME-DROPOUT: _find_depth_frame validity-mask tests
+# ---------------------------------------------------------------------------
+
+
+class TestFindDepthFrameWithMask:
+    """RED-1 and RED-2: dropout-aware depth-frame selection.
+
+    Imported directly so we test the function's new signature, not the
+    pipeline wrapper (which has its own regression test below).
+    """
+
+    def test_valid_mask_skips_global_min_on_invalid_index(self) -> None:
+        """RED-1: the global-min angle sits on an INVALID frame; a higher
+        (minimal-among-valid) angle sits on a VALID frame — must return
+        the valid frame index, not the dropout."""
+        from app.cv.metric_extraction import _find_depth_frame
+
+        # angle_series: dropout at index 5 with the global minimum (-30 deg),
+        # valid minimum at index 3 (65 deg).
+        angles = np.array([170.0, 160.0, 140.0, 65.0, 120.0, -30.0, 130.0, 170.0])
+        valid_mask = np.array([True, True, True, True, True, False, True, True])
+
+        result = _find_depth_frame(angles, start=0, end=7, valid_mask=valid_mask)
+
+        # Must return the valid minimum at index 3, NOT the global min at index 5.
+        assert result == 3
+
+    def test_all_invalid_mask_falls_back_to_global_argmin(self) -> None:
+        """RED-2: all frames in [start, end] are invalid -> fall back to plain
+        argmin over the full segment (identical to no-mask behaviour)."""
+        from app.cv.metric_extraction import _find_depth_frame
+
+        angles = np.array([170.0, 160.0, 65.0, 80.0, 130.0])
+        valid_mask = np.array([False, False, False, False, False])
+
+        result = _find_depth_frame(angles, start=0, end=4, valid_mask=valid_mask)
+
+        # Fallback: global argmin is index 2 (65 deg).
+        assert result == 2
+
+    def test_no_mask_behaves_identically_to_original(self) -> None:
+        """Backward-compat: valid_mask=None must produce the same result as
+        the pre-fix plain argmin."""
+        from app.cv.metric_extraction import _find_depth_frame
+
+        angles = np.array([170.0, 160.0, 65.0, 80.0, 130.0])
+
+        result_no_mask = _find_depth_frame(angles, start=0, end=4)
+        result_none_mask = _find_depth_frame(angles, start=0, end=4, valid_mask=None)
+
+        assert result_no_mask == 2
+        assert result_none_mask == 2

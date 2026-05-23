@@ -2254,3 +2254,416 @@ def test_session7_lumbar_proxy_none_when_shoulder_below_hip_occlusion() -> None:
         side_idx=right_idx, lifter_side="right",
     )
     assert delta is None
+
+
+# ---------------------------------------------------------------------------
+# L2-CV-DEPTHFRAME-DROPOUT: pipeline regression — squat dropout depth frame
+# ---------------------------------------------------------------------------
+
+
+def _make_squat_dropout_session():
+    """Build a synthetic squat rep (20 frames) where the global-minimum
+    hip-angle frame (index 10, hip_angle=-25.0) is a zero-vis dropout, but
+    the adjacent frame (index 9, hip_angle=65.0) is fully valid.
+
+    Rep spans frames 0-19. Standing baseline = frame 0 start (valid, upright).
+    All frames use the 5-column convention with col4=presence.
+    """
+    right_idx = landmark_indices_for_side("right")
+    n = 20
+
+    # Build a realistic hip-angle series (standing→depth→standing) with
+    # a garbage spike at the bottom imposed by zero-fill dropout.
+    # Normal bottom of rep would be near frame 9-10 at ~65 deg.
+    hip_angles = np.full(n, 170.0)
+    # Descend from 170 deg to 65 deg between frames 1-9.
+    hip_angles[1:10] = np.linspace(170.0, 65.0, 9)
+    # Frame 10: dropout injects garbage angle (-25 deg).
+    hip_angles[10] = -25.0
+    # Ascend from 65 deg back to 170 deg between frames 11-19.
+    hip_angles[11:20] = np.linspace(65.0, 170.0, 9)
+
+    knee_angles = np.full(n, 170.0)
+    knee_angles[1:10] = np.linspace(170.0, 80.0, 9)
+    knee_angles[10] = -20.0  # also garbage at the dropout frame
+    knee_angles[11:20] = np.linspace(80.0, 170.0, 9)
+
+    angle_timeseries = {
+        "hip_angle": hip_angles,
+        "knee_angle": knee_angles,
+    }
+
+    # Build landmark frames.
+    frames: list[np.ndarray] = []
+    for i in range(n):
+        lm = np.zeros((33, 5), dtype=float)
+        if i == 10:
+            # Dropout frame: zero-fill entire array (all vis=0).
+            # This is the MediaPipe VIDEO-mode tracking-loss signature.
+            frames.append(lm)
+            continue
+
+        # Valid frame: populate the right-side landmarks.
+        # Visibility = 0.9, presence pre-sigmoid (col 4) = 5.0 -> ~1.0.
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0  # col 4 = presence (required for Tier 1-5 confidence -- do not omit)
+
+        # Standing posture at frames 0 and 19, squatting at frames 9/11.
+        # We only need shoulder, hip, knee for the visibility gate.
+        lm[right_idx.shoulder, :2] = [0.50, 0.15]
+        lm[right_idx.hip, :2] = [0.50, 0.50]
+        lm[right_idx.knee, :2] = [0.50, 0.75]
+        lm[right_idx.ankle, :2] = [0.50, 0.92]
+        frames.append(lm)
+
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=19,
+        confidence_score=0.9, min_angle=65.0,
+    )
+    return frames, angle_timeseries, [rep]
+
+
+def test_dropout_squat_depth_frame_uses_valid_frame_not_dropout() -> None:
+    """RED-3: with the dropout-aware mask fix, _find_depth_frame must select
+    the valid bottom frame (index 9, hip_angle=65.0) rather than the zero-vis
+    dropout (index 10, hip_angle=-25.0).
+
+    Asserts:
+    - depth_angle == 65.0 (from valid frame 9), NOT -25.0 (dropout frame 10).
+    - lumbar_flexion_proxy_delta_deg is not None (shoulder+hip both visible at
+      the valid bottom frame).
+    """
+    frames, angle_timeseries, reps = _make_squat_dropout_session()
+    out = extract_rep_metrics(
+        reps=reps,
+        landmarks_per_frame=frames,
+        angle_timeseries=angle_timeseries,
+        exercise_type="squat",
+        exercise_variant="standard",
+        fps=30.0,
+        lifter_side="right",
+    )
+    assert len(out) == 1
+    metrics = out[0].metrics
+
+    # Pre-fix: depth_angle would be -25.0 (the dropout garbage).
+    # Post-fix: depth_angle must be 65.0 (the valid minimum).
+    assert metrics["depth_angle"] == pytest.approx(65.0, abs=0.5), (
+        f"Expected depth_angle=65.0 (valid bottom), got {metrics['depth_angle']} "
+        f"(likely still selecting dropout frame -25.0)"
+    )
+
+    # Pre-fix: lumbar_flexion_proxy_delta_deg is None because the dropout frame
+    # has zero visibility and _vis_ok returns False.
+    # Post-fix: the valid bottom frame has visible shoulder+hip, so it must
+    # compute successfully.
+    assert metrics["lumbar_flexion_proxy_delta_deg"] is not None, (
+        "lumbar_flexion_proxy_delta_deg must be non-None when a valid bottom "
+        "frame is selected (pre-fix: None because dropout frame was selected)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# L2-CV-DEPTHFRAME-DROPOUT-R1: geometric plausibility guards on ankle/shin
+# ---------------------------------------------------------------------------
+# Visibility threshold (0.30) does NOT cleanly separate good from garbage
+# frames on real footage (knee vis 0.36→garbage, 0.43→good, 0.48→garbage).
+# A geometric y-ordering invariant is more reliable:
+#   • knee_y < ankle_y   (knee above ankle in image; y increases downward)
+#   • ankle_y <= foot_y  (ankle above or at same level as toe; for dorsiflexion)
+# Violations indicate MediaPipe mis-tracking → both functions return None.
+#
+# Pipeline wrapper in _squat_metrics must propagate None directly (not 0.0).
+
+
+def _make_mistrack_ankle_frame(
+    *,
+    knee_xy: tuple[float, float],
+    ankle_xy: tuple[float, float],
+    foot_index_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    """Build a (33, 5) frame for ankle/shin geometry tests.
+
+    All named landmarks get vis=0.9 and presence=5.0 (pre-sigmoid ~1.0).
+    """
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.knee, :2] = knee_xy
+    lm[idx.ankle, :2] = ankle_xy
+    lm[idx.foot_index, :2] = foot_index_xy
+    lm[idx.heel, :2] = (ankle_xy[0] - 0.05, ankle_xy[1])  # plausible heel
+    return lm
+
+
+def test_geometric_guard_ankle_dorsiflexion_foot_above_ankle_returns_none() -> None:
+    """RED-GEO-1: foot_index_y < ankle_y (foot appears above ankle in image —
+    impossible in a squat). With only the vis-guard (current code) this returns
+    a float. With the geometric guard it must return None.
+
+    This is the mis-tracking signature observed on reps 0/2/5 in atharva-squat
+    after R1 shifted the depth frame onto frames where lower-body landmarks
+    are flipped (ankle_dorsiflexion_deg = 138-170 deg before this fix).
+    """
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    # foot_index_y (0.50) < ankle_y (0.90): foot appears ABOVE ankle — impossible.
+    frame = _make_mistrack_ankle_frame(
+        knee_xy=(0.50, 0.55),
+        ankle_xy=(0.50, 0.90),
+        foot_index_xy=(0.50, 0.50),  # mis-tracked: above ankle
+    )
+    result = _ankle_dorsiflexion_deg(frame, right_idx)
+    assert result is None, (
+        f"Expected None for foot-above-ankle mis-tracking, got {result}. "
+        "Geometric guard (ankle_y <= foot_y) not yet implemented."
+    )
+
+
+def test_geometric_guard_ankle_dorsiflexion_knee_below_ankle_returns_none() -> None:
+    """RED-GEO-2: knee_y > ankle_y (knee appears below ankle in image —
+    anatomically impossible for squat). Must return None.
+    """
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    # knee_y (0.95) > ankle_y (0.55): knee appears BELOW ankle — impossible.
+    frame = _make_mistrack_ankle_frame(
+        knee_xy=(0.50, 0.95),   # mis-tracked: knee below ankle
+        ankle_xy=(0.50, 0.55),
+        foot_index_xy=(0.65, 0.70),
+    )
+    result = _ankle_dorsiflexion_deg(frame, right_idx)
+    assert result is None, (
+        f"Expected None for knee-below-ankle mis-tracking, got {result}. "
+        "Geometric guard (knee_y < ankle_y) not yet implemented."
+    )
+
+
+def test_geometric_guard_shin_angle_knee_below_ankle_returns_none() -> None:
+    """RED-GEO-3: knee_y > ankle_y (knee below ankle in image) — anatomically
+    impossible. _shin_angle_deg must return None.
+    """
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    lm[right_idx.knee, :2] = [0.50, 0.95]   # knee BELOW ankle — mis-tracked
+    lm[right_idx.ankle, :2] = [0.50, 0.55]
+    result = _shin_angle_deg(lm, right_idx, "right")
+    assert result is None, (
+        f"Expected None for knee-below-ankle mis-tracking, got {result}. "
+        "Geometric guard (knee_y < ankle_y) not yet implemented."
+    )
+
+
+def test_geometric_guard_valid_squat_geometry_still_returns_float() -> None:
+    """Sanity: a valid squat geometry (knee_y < ankle_y < foot_y) must still
+    produce a float from both guards — no regression on the happy path."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg, _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    # knee(0.55) < ankle(0.90) < foot(0.92) — all valid
+    frame = _make_mistrack_ankle_frame(
+        knee_xy=(0.50, 0.55),
+        ankle_xy=(0.50, 0.90),
+        foot_index_xy=(0.65, 0.92),
+    )
+    ankle_result = _ankle_dorsiflexion_deg(frame, right_idx)
+    shin_result = _shin_angle_deg(frame, right_idx, "right")
+    assert ankle_result is not None, "Valid geometry should not return None for ankle_dorsiflexion"
+    assert isinstance(ankle_result, float)
+    assert shin_result is not None, "Valid geometry should not return None for shin_angle"
+    assert isinstance(shin_result, float)
+
+
+def test_geometric_guard_pipeline_propagates_none_not_zero() -> None:
+    """RED-GEO-4: when _ankle_dorsiflexion_deg / _shin_angle_deg return None
+    due to mis-tracking, the _squat_metrics pipeline wrapper must store None
+    (not 0.0) in the output dict.
+
+    Current code: float(ankle_dorsiflexion) if ... else 0.0 → stores 0.0.
+    Required: None propagated directly so downstream can distinguish
+    'could not compute' from 'no dorsiflexion observed'.
+    """
+    frames, angle_timeseries, reps = _make_squat_dropout_session()
+    # Override frame 9 (the valid bottom after R1) so that the ankle landmark
+    # has knee_y > ankle_y → geometric guard fires → None.
+    right_idx = landmark_indices_for_side("right")
+    # Depth frame is index 9 (hip_angle=65.0). Corrupt ankle/foot geometry there.
+    frames[9][right_idx.knee, :2] = [0.50, 0.95]   # knee below ankle
+    frames[9][right_idx.ankle, :2] = [0.50, 0.55]
+    frames[9][right_idx.foot_index, :2] = [0.65, 0.70]
+
+    out = extract_rep_metrics(
+        reps=reps,
+        landmarks_per_frame=frames,
+        angle_timeseries=angle_timeseries,
+        exercise_type="squat",
+        exercise_variant="standard",
+        fps=30.0,
+        lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert metrics["ankle_dorsiflexion_deg"] is None, (
+        f"Expected None when geometric guard fires, got {metrics['ankle_dorsiflexion_deg']}. "
+        "Pipeline must propagate None, not convert to 0.0."
+    )
+    assert metrics["shin_angle_deg"] is None, (
+        f"Expected None when geometric guard fires, got {metrics['shin_angle_deg']}. "
+        "Pipeline must propagate None, not convert to 0.0."
+    )
+
+
+# ---------------------------------------------------------------------------
+# L2-CV-DEPTHFRAME-DROPOUT-R1b: anatomical-plausibility envelope guards
+# ---------------------------------------------------------------------------
+# The y-ordering guard catches gross spatial inversions but misses a second
+# class of mis-tracking where the landmarks are y-ordered correctly yet the
+# computed angle is anatomically impossible:
+#
+#   • rep 2 shin_angle_deg = -81.26° — landmark x-coordinates mis-placed
+#     horizontally while y-ordering holds; atan2 wraps to ~-81°.
+#   • rep 5 ankle_dorsiflexion_deg = 138.24° — foot_index nearly behind the
+#     ankle (foot vector anti-parallel to knee vector); cos < 0 → >90°.
+#
+# Rationale for chosen bounds (anatomy-first; expert refines the clinically
+# meaningful sub-range via FR-EXPV-08):
+#
+#   ankle_dorsiflexion_deg: joint angle at the ankle (knee-ankle-foot
+#     triangle). Full squat ROM spans ~45°–110°. Absolute anatomical ceiling
+#     ~120° (maximum plantarflexion, toes pointing straight down). Values at
+#     or above 120° mean foot_index vector points backward relative to the
+#     tibia — impossible in a squat. Lower bound ~10° (extreme dorsiflexion
+#     with heel-elevated technique; <10° would require >80° dorsiflexion
+#     which exceeds bony-joint ROM).
+#     Guard: 10° <= value < 120°.
+#
+#   shin_angle_deg (shin deviation from vertical, positive = knee-forward):
+#     Maximum forward knee travel is ~45°; extreme heel-elevated cases reach
+#     ~60–70°. A backward shin (negative) of more than ~30–45° is impossible
+#     in any standing or squatting posture. Guard: -45° <= value <= 80°.
+
+
+
+
+def test_anatomical_envelope_ankle_above_120_returns_none() -> None:
+    """RED-ENV-1: ankle_dorsiflexion_deg >= 120 is anatomically impossible
+    in a squat (foot_index nearly behind ankle). Must return None even when
+    y-ordering holds.
+
+    Coordinates mirror rep-5 fixture frame (atharva-squat, left side, frame
+    1087) which produced 138.24 deg. Mirrored to right side (x_prime = 1-x).
+    """
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    # Original left-side: knee=(0.7989,0.5630) ankle=(0.8716,0.6087) foot=(0.8786,0.6329)
+    # Mirrored to right (x_prime = 1 - x):
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    lm[right_idx.knee, :2]       = [1 - 0.7989, 0.5630]
+    lm[right_idx.ankle, :2]      = [1 - 0.8716, 0.6087]
+    lm[right_idx.foot_index, :2] = [1 - 0.8786, 0.6329]
+    lm[right_idx.heel, :2]       = [1 - 0.8851, 0.6118]
+    result = _ankle_dorsiflexion_deg(lm, right_idx)
+    assert result is None, (
+        f"Expected None for ankle_dorsiflexion_deg >= 120 (rep-5 garbage coords, "
+        f"raw ~138 deg), got {result}. Anatomical-plausibility envelope not yet "
+        f"implemented."
+    )
+
+
+def test_anatomical_envelope_ankle_below_10_returns_none() -> None:
+    """RED-ENV-2: ankle_dorsiflexion_deg < 10 deg always co-occurs with
+    foot_index above ankle (y-ordering guard fires first). This test
+    confirms the combined guard (y-ordering + envelope) works together.
+    """
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    # Small angle: foot nearly co-directional with v_kn (upward), so foot_y < ankle_y.
+    # y-ordering guard fires -> None. This is the anatomical lower-bound scenario.
+    lm[right_idx.knee, :2]       = [0.50, 0.40]
+    lm[right_idx.ankle, :2]      = [0.50, 0.70]
+    lm[right_idx.foot_index, :2] = [0.50 + 0.01, 0.41]  # foot nearly at knee height
+    lm[right_idx.heel, :2]       = [0.46, 0.71]
+    result = _ankle_dorsiflexion_deg(lm, right_idx)
+    assert result is None, (
+        f"Expected None when foot is above ankle (y-ordering guard), got {result}"
+    )
+
+
+def test_anatomical_envelope_shin_below_neg45_returns_none() -> None:
+    """RED-ENV-3: shin_angle_deg < -45 (knee far behind ankle) is
+    anatomically impossible in a squat. Must return None.
+
+    Coordinates mirror rep-2 fixture frame (atharva-squat, left side, frame
+    423) which produced -81.26 deg. Mirrored to right side (x_prime = 1-x).
+    """
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    # Original left-side: knee=(0.9532,0.5872) ankle=(0.9274,0.5912)
+    # Mirrored to right (x_prime = 1 - x):
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    lm[right_idx.knee, :2]  = [1 - 0.9532, 0.5872]  # (0.0468, 0.5872)
+    lm[right_idx.ankle, :2] = [1 - 0.9274, 0.5912]  # (0.0726, 0.5912)
+    result = _shin_angle_deg(lm, right_idx, "right")
+    assert result is None, (
+        f"Expected None for shin_angle_deg < -45 (rep-2 garbage coords, "
+        f"raw ~-81 deg), got {result}. Anatomical-plausibility envelope not yet "
+        f"implemented."
+    )
+
+
+def test_anatomical_envelope_shin_above_80_returns_none() -> None:
+    """RED-ENV-4: shin_angle_deg > 80 is beyond any recorded squat ROM.
+    Must return None.
+
+    Constructed: knee far forward of ankle (right-facing). atan2(dx, dy)
+    with small dy and large dx gives > 80 deg.
+    """
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    # knee far forward (+x) with small dy: atan2(0.14, 0.02) ~ 82 deg
+    lm[right_idx.knee, :2]  = [0.64, 0.68]
+    lm[right_idx.ankle, :2] = [0.50, 0.70]
+    result = _shin_angle_deg(lm, right_idx, "right")
+    assert result is None, (
+        f"Expected None for shin_angle_deg > 80 (extreme forward knee), "
+        f"got {result}. Anatomical-plausibility envelope not yet implemented."
+    )
+
+
+def test_anatomical_envelope_valid_values_still_return_float() -> None:
+    """Sanity: values well within the physiological range must be returned
+    as floats. Uses realistic right-facing squat-bottom geometry.
+    """
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg, _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    # Realistic right-facing squat bottom: knee forward-and-above ankle.
+    lm[right_idx.knee, :2]       = [0.62, 0.55]
+    lm[right_idx.ankle, :2]      = [0.50, 0.75]
+    lm[right_idx.foot_index, :2] = [0.60, 0.80]
+    lm[right_idx.heel, :2]       = [0.46, 0.77]
+    r_ankle = _ankle_dorsiflexion_deg(lm, right_idx)
+    assert r_ankle is not None and isinstance(r_ankle, float), (
+        f"Expected float for valid squat geometry (dorsiflexion), got {r_ankle}"
+    )
+    assert 10.0 < r_ankle < 120.0, f"Expected within (10, 120), got {r_ankle}"
+    r_shin = _shin_angle_deg(lm, right_idx, "right")
+    assert r_shin is not None and isinstance(r_shin, float), (
+        f"Expected float for valid squat geometry (shin angle), got {r_shin}"
+    )
+    assert -45.0 <= r_shin <= 80.0, f"Expected within [-45, 80], got {r_shin}"

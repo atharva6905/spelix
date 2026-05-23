@@ -256,6 +256,11 @@ docs/superpowers/
 # Debug inspection frames
 _inspection/
 
+# CV investigation landmark cache (large .npz, regenerated on demand by oneoff scripts)
+backend/scripts/oneoff/.occl_cache/
+# CV occlusion-investigation annotated frames (bulky evidence captures)
+e2e/screenshots/occlusion/
+
 # Claude Code lock files
 .claude/scheduled_tasks.lock
 
