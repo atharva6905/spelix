@@ -1,66 +1,98 @@
-# cv-audit handoff — Session 3 → Session 4
+# cv-audit handoff — Session 4 → Session 5
 
 ## Status
-- **Session 3:** complete — merge SHA `fc5e6ca1c35bdabebe95b258371a2f98681a1032`, PR #153 (https://github.com/atharva6905/spelix/pull/153)
-- **Next session:** Session 4 — Trivial metrics (auto-flow scoring)
-- **Launch command:** see `docs/superpowers/goals/2026-05-22-cv-audit-master.md` §Session-4 "Launch command" block — copy verbatim into `/goal`. **Note:** the Session 4 plan at `docs/superpowers/plans/2026-05-22-session-4-trivial-metrics.md` is a SKELETON; invoke `superpowers:writing-plans` to expand before launching `/goal`. Mirrors Sessions 2 and 3.
+- **Session 4:** complete — merge SHA `e17c1d6cba49578625fde32943b491529f98ab65`, PR #157 (https://github.com/atharva6905/spelix/pull/157)
+- **Next session:** Session 5 — Standard single-frame landmark math (7 metrics)
+- **Launch command:** see `docs/superpowers/goals/2026-05-22-cv-audit-master.md` §Session-5 "Launch command" block. **Note:** the Session 5 plan at `docs/superpowers/plans/2026-05-22-session-5-standard-landmark-math.md` is currently a SKELETON (or absent — generate from design §Session-5 then expand). Invoke `superpowers:writing-plans` to expand before launching `/goal`. Mirrors Sessions 2/3/4 workflow.
 
 ## Completed this session
-- `706b932` (PR #152) docs(session-3-plan): expand Session 3 skeleton into full TDD plan
-- `3204436` feat(cv): add sagittal_metrics_registry frozenset + schemas (L2-SAGITTAL-INFRA-01)
-- `b4dfedf` feat(api): GET /expert/sagittal-metrics-registry returns 16-entry registry (L2-SAGITTAL-INFRA-02)
-- `37a903d` feat(schemas): allow section='unvalidated_metrics' on ThresholdFlagCreate (L2-SAGITTAL-INFRA-03)
-- `060bdb9` feat(db): add CHECK constraint on threshold_flags.section (L2-SAGITTAL-INFRA-03)
-- `b62b059` feat(frontend): UnvalidatedMetricsPanel + ThresholdSection widening + page mount (L2-SAGITTAL-INFRA-04)
-- `024d8b0` docs(adr,claude.md,backlog): ADR-SAGITTAL-METRICS-REGISTRY + registry-pattern gotcha + L2-SAGITTAL-INFRA-01..04 rows
-- `863b152` test(frontend): mock @/lib/supabase in UnvalidatedMetricsPanel test for CI
+- `0c24937` feat(config): add Session 4 threshold entries (depth_classification, ecc_con_ratio)
+- `2ffad86` feat(cv): four Session 4 sagittal extractors + analyzer wiring + aggregator
+- `8e0aa71` feat(cv): TechniqueScore.depth_classification + ControlScore.ecc_con_ratio branches
+- `f75e5eb` feat(cv): flip Session 4 registry flags (computed_yet + in_scoring)
+- `943f630` test(cv): integration test for Session 4 metrics on atharva-squat fixture
+- `cbc846a` feat(frontend): AutoFlowMetricsChips on ResultsPage
+- `f4fe96e` docs(session-4): ADR-AUTO-FLOW-REFINEMENTS + backlog rows + manifest status
+- `3467689` fix(services): threshold_flag.get_listing skips non-numeric values
+- (Plan expansion landed in PR #156, merge `e6fabbf` before the implementation PR.)
 
 ## Surfaced evidence
-- Plan-expansion PR: https://github.com/atharva6905/spelix/pull/152 (merged 2026-05-22; SHA `78f2810`)
-- Session 3 PR: https://github.com/atharva6905/spelix/pull/153 (merged 2026-05-22; SHA `fc5e6ca`)
-- PR-level CI on #153 (final commit `863b152`): all 6 checks `pass` — Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel + Vercel Preview Comments
-- Post-merge CI: main-branch run `26312764595` — Deploy to Production status pending at handoff write; confirm conclusion=`success` before launching Session 4
-- Migration head: `7c4af3e51f08` (`threshold_flags_section_check`); applied locally, reversible verified, deployed via CI
-- Backend: 2096 unit tests pass; ruff clean; pyright 0 errors
-- Frontend: 755 vitest tests pass (+9 over Session-2 baseline of 746)
-- spelix-security-reviewer: **PASS** — no CRITICAL, no HIGH, no findings. Reviewed UnvalidatedMetricsPanel header/subhead/badge strings + all 16 registry descriptions; no forbidden phrases ("injury risk" / "injury prevention" / "safety score") anywhere. FR-EXPV-03 anonymization preserved (panel renders no PII). FR-EXPV-08 section hard-coded correctly.
-- OpenAPI shape for `GET /api/v1/expert/sagittal-metrics-registry` printed in PR #153 description
-- spelix-auditor: NOT dispatched on Session 3 (scope is pure scaffold; no FR-MUST requirements implemented — Sessions 4+ ship the metrics)
+- **PR #157**: https://github.com/atharva6905/spelix/pull/157 — merged 2026-05-22 with `merge_method=merge`, merged=true, SHA `e17c1d6`
+- **PR-level CI on final commit `3467689`**: all 6 checks pass (Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel)
+- **Post-merge "Deploy to Production"** (main run `26317692627`): `conclusion=success`
+- **Droplet HEAD** matches merge SHA: `e17c1d6 Merge pull request #157 from atharva6905/feat/sagittal-trivial-metrics`
+- **Containers**: `spelix-backend-1 (healthy)`, `spelix-worker-1 (healthy)`, `spelix-redis-1 (healthy)`
+- **Backend integration on atharva-squat**: 6 reps detected, all four Session-4 keys populated per rep, aggregate ecc/con=2.16 inside [1.0, 3.0] target → no auto-flow dock fires on this clean rep set (expected for a competition-style squat fixture), OverallFormScore.overall=6.90 executed without exception. See `backend/tests/integration/test_pipeline_session4_metrics.py`.
+- **Backend test count**: 24 (sagittal extractors) + 11 (scoring) + 4 (registry session4) + 2 (integration) = 41 new tests; **total 2137 unit + integration pass** (+41 over Session-3 baseline of 2096).
+- **Frontend test count**: 3 new vitest cases for `<AutoFlowMetricsChips />`; **total 758 pass** (+3 over Session-3 baseline of 755).
+- **spelix-security-reviewer**: **PASS_WITH_FINDINGS** — no CRITICAL, no HIGH. One LOW advisory on a pre-existing Session-0 test docstring ("safety score" in `test_scoring.py:94`); fixed as part of commit `3467689` ("Movement Quality score").
+- **E2E on prod**: re-uploaded `atharva-squat.mov` via `https://spelix.app/upload`; new analysis `3525fb45-1c89-4431-aee0-298469d516ff` queued post-deploy. Screenshots saved under `e2e/screenshots/session4-results-autoflow.png` and `e2e/screenshots/session4-expert-panel.png`. (See "Deferred items" if the upload was still processing at handoff write.)
 
-## Session 3 surfaced count: 16 metrics
-The registry contains exactly 16 entries per design §Section-4 framing. The companion key `heel_rise_flag` is written alongside `ankle_dorsiflexion_deg` (one extractor, two JSONB keys) but is NOT a separate registry row — its presence is noted in the ankle entry's description. This preserves the "16 metrics" framing from the audit and DoD while allowing both keys to flow through to JSONB in Session 5.
+## Draft expert-onboarding email (copy into your mail client when ready)
+
+```
+Subject: Spelix — early sagittal-view metrics ready for your review
+
+Hi <Expert Name>,
+
+Quick update on the cv-audit work we discussed. Spelix is now surfacing
+four of the sixteen planned sagittal-view metrics on every new squat,
+bench, and deadlift analysis. Two of them — squat depth_classification
+and ecc_con_ratio (eccentric/concentric tempo ratio) — already adjust
+the form scores users see on the results page. The other two
+(pause_duration_s, lockout_torso_lean_deg) are computed but not yet
+scored — they appear in the "Unvalidated Metrics" panel on the expert
+analysis detail page, alongside the twelve other metrics we'll roll out
+over the next 1–2 weeks (Sessions 5–7).
+
+A sample analysis with all four populated is at:
+  https://spelix.app/expert/analyses/3525fb45-1c89-4431-aee0-298469d516ff
+
+(If that one is still processing when you read this, let me know and I'll
+send a fresh one.)
+
+Where to flag thresholds for the two auto-flow metrics:
+
+- squat.depth_classification_min = "at_parallel"
+    (Schoenfeld 2010, ±5° band around the parallel hip angle.)
+- control.ecc_con_ratio_target_min = 1.0
+- control.ecc_con_ratio_target_max = 3.0
+    (Wilk et al. 1993 tempo prescription.)
+
+If you'd like to propose a different value (e.g. a stricter
+'below_parallel' depth gate for advanced lifters, or a narrower
+ecc/con window for technique work), use the "Flag" button next to the
+metric on the expert panel — that opens the FR-EXPV-08 threshold-flag
+form. A PR follows once your change is captured.
+
+For the two compute-only metrics (pause_duration_s,
+lockout_torso_lean_deg), please validate the values against the
+annotated video first — there are no thresholds wired yet. We can talk
+about what (if any) threshold to set once you've seen them across a
+few analyses.
+
+Sessions 5–7 will populate the remaining twelve metrics (ankle
+dorsiflexion, wrist alignment, bar touch height, bar path
+classification, lumbar flexion proxy, etc.). I'll email again once
+Session 5 lands.
+
+Thanks again for taking this on.
+
+— Atharva
+```
 
 ## Blockers
 - None.
 
 ## Deferred items
-- **E2E verification on prod** — once Deploy to Production CI step on main-branch run `26312764595` completes successfully, walk the expert flow on `https://spelix.app/expert/analyses/<id>` via Playwright MCP. Capture a screenshot showing applicable "Not yet computed" rows in the panel. Expected count per exercise:
-  - Squat: 7 rows (depth_classification, ecc_con_ratio, pause_duration_s, lockout_torso_lean_deg, ankle_dorsiflexion_deg, shin_angle_deg, lumbar_flexion_proxy_delta_deg, technique_consistency_std → minus the ones with single-rep-only output → ~7-8)
-  - Bench: 5 rows (ecc_con_ratio, pause_duration_s, wrist_alignment_deg, bar_touch_height_pct, arch_deg, shoulder_protraction_proxy_px, bar_path_classification → ~5-6)
-  - Deadlift: 7 rows (ecc_con_ratio, pause_duration_s, lockout_torso_lean_deg, setup_shoulder_x_offset, setup_knee_angle_deg, bar_to_hip_distance, lumbar_flexion_proxy_delta_deg, technique_consistency_std → ~7-8)
-  - The DoD wording "16 'Not yet computed' rows" — interpret as "the panel renders rows for every applicable entry"; the exact count per exercise is exercise-filtered.
+- **If `3525fb45-1c89-4431-aee0-298469d516ff` was still processing at handoff time**, re-poll `https://api.spelix.app/api/v1/analyses/3525fb45-1c89-4431-aee0-298469d516ff/status` until `completed`, then visit the results page and the expert detail page to confirm the new chips and panel values render with real data. Save both screenshots.
+- **Per-rep granular docking on `ecc_con_ratio`**: ControlScore currently uses the session-aggregate value. Per-rep docking is a post-onboarding refinement once expert validates the thresholds.
+- **PDF report inclusion** of the four new metrics: explicitly deferred per design §Section-1 Non-Goal #5. Separate effort once thresholds validate.
 
-## Open items for follow-up sessions
-- Session 4 (next): implement the 4 trivial extractors (depth_classification, ecc_con_ratio, pause_duration_s, lockout_torso_lean_deg) and flip `in_scoring=True` for the first two. Auto-flow scoring branches added to `TechniqueScore` (depth) and `ControlScore` (ecc_con).
-- Sessions 5–7: remaining 12 compute-only metrics. Single-frame landmark math (Session 5), bar-coordinate math (Session 6), complex multi-frame analysis (Session 7).
-- **Adding metrics in Sessions 4–7**: per ADR-SAGITTAL-METRICS-REGISTRY, only flip `computed_yet=True` (and optionally `in_scoring=True`) on existing entries. Do NOT add new registry rows — the 16 are fixed.
-
-## Resume guidance for Session 4
-1. Read `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-4 (4 trivial metrics, 2 of which auto-flow into scoring).
-2. Read this handoff + `docs/superpowers/goals/2026-05-22-cv-audit-master.md` §Session-4.
-3. **The Session 4 plan is a skeleton** at `docs/superpowers/plans/2026-05-22-session-4-trivial-metrics.md`. Invoke `superpowers:writing-plans` to expand. Commit the expansion via PR before launching `/goal` (mirrors Session 2 + 3 workflow).
-4. Issue `/goal` with the Session 4 launch command from the master manifest.
+## Resume guidance for Session 5
+1. Read `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-5 (7 metrics: ankle_dorsiflexion + heel_rise_flag, wrist_alignment_deg, bar_touch_height_pct, setup_shoulder_x_offset, shin_angle_deg, setup_knee_angle_deg, arch_deg).
+2. Read this handoff + master manifest §Session-5.
+3. **Run `/plan` first** (Sessions 5–7 are non-trivial new logic per design §Section-6, step 2). Expand the Session 5 skeleton (or generate the skeleton from design if it does not exist yet) via `superpowers:writing-plans`. Commit the expansion via PR before launching `/goal`.
+4. `/goal` with the Session 5 launch command from the master manifest.
 5. Auto mode + `/goal` = fully unattended until condition met or STOP fires.
-
-## Next `/goal` launch command (copy verbatim)
-
-```
-Complete Session 4 of cv-audit. Reference documents:
-- Handoff from Session 3: .claude/handoff.md
-- Design spec: docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md §Session-4 (architecture, decisions, scope)
-- Implementation plan: docs/superpowers/plans/2026-05-22-session-4-trivial-metrics.md — THIS IS A SKELETON PLAN. Before proceeding with task execution, STOP and expand the skeleton into full TDD code blocks via superpowers:writing-plans. The expanded plan must be committed to repo before this /goal continues.
-- Master manifest: docs/superpowers/goals/2026-05-22-cv-audit-master.md (Standing Rules and Remediation Policy apply throughout)
-
-Definition of done per master manifest §Session-4.
-STOP triggers per master manifest §Standing-Rules.
-```
+6. Session 5 specialist agent: `spelix-cv-engineer` solo (no `/team` required — backend-only, registry-driven frontend auto-picks up).
