@@ -105,15 +105,15 @@ class TestSagittalMetricsRegistryEndpoint:
             assert isinstance(entry["computed_yet"], bool)
             assert isinstance(entry["in_scoring"], bool)
 
-    def test_after_session5_eleven_metrics_computed_two_in_scoring(
+    def test_after_session6_thirteen_metrics_computed_two_in_scoring(
         self, expert_client: TestClient
     ) -> None:
-        """Sessions 4+5 flipped computed_yet on 11 entries (4 in Session 4,
-        7 in Session 5). in_scoring remains True only for the 2 Session-4
-        scoring entries. Sessions 6-7 entries (5 entries) stay False."""
+        """Sessions 4+5+6 flipped computed_yet on 13 entries (4 in Session 4,
+        7 in Session 5, 2 in Session 6). in_scoring remains True only for
+        the 2 Session-4 scoring entries. Session 7 entries (3 entries) stay False."""
         resp = expert_client.get("/api/v1/expert/sagittal-metrics-registry")
         entries = {e["key_name"]: e for e in resp.json()["entries"]}
-        sessions_4_5_computed = {
+        sessions_4_to_6_computed = {
             # Session 4 (4)
             "depth_classification", "ecc_con_ratio",
             "pause_duration_s", "lockout_torso_lean_deg",
@@ -121,10 +121,12 @@ class TestSagittalMetricsRegistryEndpoint:
             "ankle_dorsiflexion_deg", "wrist_alignment_deg", "bar_touch_height_pct",
             "setup_shoulder_x_offset", "shin_angle_deg", "setup_knee_angle_deg",
             "arch_deg",
+            # Session 6 (2)
+            "bar_to_hip_distance", "shoulder_protraction_proxy_px",
         }
         session4_in_scoring = {"depth_classification", "ecc_con_ratio"}
         for key, entry in entries.items():
-            if key in sessions_4_5_computed:
+            if key in sessions_4_to_6_computed:
                 assert entry["computed_yet"] is True, f"{key} computed_yet should be True"
             else:
                 assert entry["computed_yet"] is False, f"{key} computed_yet should be False"
