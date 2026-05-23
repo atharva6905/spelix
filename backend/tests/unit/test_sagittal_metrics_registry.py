@@ -155,23 +155,54 @@ class TestSessionFourFlags:
                 f"Entry {key!r} is compute-only — in_scoring must be False."
             )
 
-    def test_session_5_plus_entries_remain_pristine(self) -> None:
-        """Guard: only the 4 Session-4 metrics flip; Sessions 5-7 entries
-        keep computed_yet=False and in_scoring=False until their own session."""
+    def test_session_6_plus_entries_remain_pristine(self) -> None:
+        """Guard: only Sessions 4-5 metrics flip; Sessions 6-7 entries
+        keep computed_yet=False and in_scoring=False until their own session.
+        Session 5 keys were narrowed out of this guard in Session 5 when
+        their extractors were implemented."""
         entries = {e.key_name: e for e in SAGITTAL_METRICS_REGISTRY}
         for key in (
-            "ankle_dorsiflexion_deg", "wrist_alignment_deg", "bar_touch_height_pct",
-            "setup_shoulder_x_offset", "shin_angle_deg", "setup_knee_angle_deg",
-            "arch_deg", "bar_to_hip_distance", "shoulder_protraction_proxy_px",
+            "bar_to_hip_distance", "shoulder_protraction_proxy_px",
             "lumbar_flexion_proxy_delta_deg", "bar_path_classification",
             "technique_consistency_std",
         ):
             assert entries[key].computed_yet is False, (
-                f"Entry {key!r} must stay computed_yet=False (Session 5+ scope)."
+                f"Entry {key!r} must stay computed_yet=False (Session 6+ scope)."
             )
             assert entries[key].in_scoring is False, (
-                f"Entry {key!r} must stay in_scoring=False (Session 5+ scope)."
+                f"Entry {key!r} must stay in_scoring=False (Session 6+ scope)."
             )
+
+
+class TestRegistrySession5Flips:
+    SESSION5_KEYS = frozenset({
+        "ankle_dorsiflexion_deg",
+        "wrist_alignment_deg",
+        "bar_touch_height_pct",
+        "setup_shoulder_x_offset",
+        "shin_angle_deg",
+        "setup_knee_angle_deg",
+        "arch_deg",
+    })
+
+    def test_session5_entries_have_computed_yet_true(self) -> None:
+        flipped = {
+            e.key_name for e in SAGITTAL_METRICS_REGISTRY
+            if e.key_name in self.SESSION5_KEYS and e.computed_yet
+        }
+        assert flipped == self.SESSION5_KEYS, (
+            f"Missing flips: {self.SESSION5_KEYS - flipped}"
+        )
+
+    def test_session5_entries_remain_out_of_scoring(self) -> None:
+        in_scoring = {
+            e.key_name for e in SAGITTAL_METRICS_REGISTRY
+            if e.key_name in self.SESSION5_KEYS and e.in_scoring
+        }
+        # Per design Section-4: Session 5 metrics are compute-only.
+        assert in_scoring == frozenset(), (
+            f"These Session 5 keys are unexpectedly in scoring: {in_scoring}"
+        )
 
 
 # ---------------------------------------------------------------------------
