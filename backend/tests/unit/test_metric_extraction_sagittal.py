@@ -2082,3 +2082,57 @@ def test_session7_barpath_jcurve_precedence_over_neardrift() -> None:
 
 def test_session7_barpath_degenerate_none() -> None:
     assert _classify_bar_path(None, None, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #16 — technique_consistency_std + session-modal bar-path
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import (  # noqa: E402
+    _inject_technique_consistency_std,
+    session_modal_bar_path_classification,
+)
+from app.cv.metric_extraction import RepMetrics  # noqa: E402
+
+
+def _rep_with(metrics: dict) -> RepMetrics:
+    return RepMetrics(rep_index=0, start_frame=0, end_frame=1, metrics=dict(metrics))
+
+
+def test_session7_consistency_identical_reps_zero() -> None:
+    reps = [_rep_with({"depth_angle": 90.0}) for _ in range(3)]
+    _inject_technique_consistency_std(reps, "squat")
+    assert all(r.metrics["technique_consistency_std"] == pytest.approx(0.0) for r in reps)
+
+
+def test_session7_consistency_fatigued_reps_positive() -> None:
+    reps = [_rep_with({"depth_angle": v}) for v in (90.0, 95.0, 105.0)]
+    _inject_technique_consistency_std(reps, "squat")
+    std = reps[0].metrics["technique_consistency_std"]
+    assert std == pytest.approx(float(np.std([90.0, 95.0, 105.0])))  # ddof=0
+    assert std > 0.0
+
+
+def test_session7_consistency_deadlift_uses_lockout_lean() -> None:
+    reps = [_rep_with({"lockout_torso_lean_deg": v}) for v in (5.0, 9.0)]
+    _inject_technique_consistency_std(reps, "deadlift")
+    assert reps[0].metrics["technique_consistency_std"] == pytest.approx(2.0)
+
+
+def test_session7_consistency_single_rep_none() -> None:
+    reps = [_rep_with({"depth_angle": 90.0})]
+    _inject_technique_consistency_std(reps, "squat")
+    assert reps[0].metrics["technique_consistency_std"] is None
+
+
+def test_session7_session_modal_bar_path() -> None:
+    reps = [
+        _rep_with({"bar_path_classification": "vertical"}),
+        _rep_with({"bar_path_classification": "vertical"}),
+        _rep_with({"bar_path_classification": "drift"}),
+    ]
+    assert session_modal_bar_path_classification(reps) == "vertical"
+
+
+def test_session7_session_modal_all_none() -> None:
+    reps = [_rep_with({"bar_path_classification": None})]
+    assert session_modal_bar_path_classification(reps) is None

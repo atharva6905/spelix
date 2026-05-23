@@ -1034,6 +1034,46 @@ def _classify_bar_path(
     return "drift"
 
 
+_S7_CONSISTENCY_KEY = {
+    "squat": "depth_angle",
+    "deadlift": "lockout_torso_lean_deg",
+}
+
+
+def _inject_technique_consistency_std(
+    result: list[RepMetrics], exercise_type: str,
+) -> None:
+    """Session 7 #16 — population std (ddof=0) of the chosen technique metric
+    across reps, written into EVERY rep's dict. Single-rep -> None (one
+    observation has no measurable consistency). In-place mutation."""
+    key = _S7_CONSISTENCY_KEY.get(exercise_type.lower())
+    if key is None:
+        return
+    values = [
+        float(r.metrics[key]) for r in result
+        if isinstance(r.metrics.get(key), (int, float))
+    ]
+    std: float | None = float(np.std(values)) if len(values) >= 2 else None
+    for r in result:
+        r.metrics["technique_consistency_std"] = std
+
+
+def session_modal_bar_path_classification(
+    rep_metrics_list: list[RepMetrics],
+) -> str | None:
+    """Most common non-None bar_path_classification across reps (smoke/
+    calibration only — NOT persisted to JSONB)."""
+    from collections import Counter
+    labels = [
+        rm.metrics.get("bar_path_classification")
+        for rm in rep_metrics_list
+        if isinstance(rm.metrics.get("bar_path_classification"), str)
+    ]
+    if not labels:
+        return None
+    return Counter(labels).most_common(1)[0][0]
+
+
 def _wrist_midpoint_trajectory(
     landmarks_per_frame: list[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
