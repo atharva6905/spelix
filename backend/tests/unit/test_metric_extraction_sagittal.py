@@ -2136,3 +2136,59 @@ def test_session7_session_modal_bar_path() -> None:
 def test_session7_session_modal_all_none() -> None:
     reps = [_rep_with({"bar_path_classification": None})]
     assert session_modal_bar_path_classification(reps) is None
+
+
+# ---------------------------------------------------------------------------
+# Session 7 Task 5 — wiring tests
+# ---------------------------------------------------------------------------
+
+
+def _make_full_bench_session_with_landmarks(n_frames: int = 60):
+    """Bench session helper: full landmarks + elbow/shoulder timeseries + one rep."""
+    frames = []
+    right_idx = landmark_indices_for_side("right")
+    for i in range(n_frames):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.30, 0.55]
+        lm[right_idx.elbow, :2] = [0.40, 0.42]
+        lm[right_idx.wrist, :2] = [0.42, 0.30]
+        lm[right_idx.hip, :2] = [0.60, 0.50]
+        # Bilateral wrist midpoint for bar-x trajectory (landmarks 15 + 16)
+        lm[15, :2] = [0.42, 0.30]
+        lm[16, :2] = [0.42, 0.30]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    ts = {
+        "elbow_angle": 115.0 + 50.0 * np.cos(t),
+        "shoulder_angle": 70.0 + 20.0 * np.cos(t),
+    }
+    rep = DetectedRep(
+        rep_index=0, start_frame=5, end_frame=n_frames - 5,
+        confidence_score=0.9, min_angle=65.0,
+    )
+    return frames, ts, rep
+
+
+def test_session7_squat_emits_lumbar_and_consistency_keys() -> None:
+    frames, angles, _ = _make_full_squat_session_with_landmarks(80)
+    reps = [
+        DetectedRep(rep_index=0, start_frame=2, end_frame=38, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=42, end_frame=78, confidence_score=0.9, min_angle=80.0),
+    ]
+    out = extract_rep_metrics(reps, frames, angles, "squat", "standard", 30.0, "right")
+    assert "lumbar_flexion_proxy_delta_deg" in out[0].metrics
+    assert "technique_consistency_std" in out[0].metrics
+    # consistency identical across reps
+    assert out[0].metrics["technique_consistency_std"] == out[1].metrics["technique_consistency_std"]
+    # bench-only key absent
+    assert "bar_path_classification" not in out[0].metrics
+
+
+def test_session7_bench_emits_bar_path_only() -> None:
+    frames, angles, rep = _make_full_bench_session_with_landmarks(60)
+    out = extract_rep_metrics([rep], frames, angles, "bench", "standard", 30.0, "right")
+    assert "bar_path_classification" in out[0].metrics
+    assert "lumbar_flexion_proxy_delta_deg" not in out[0].metrics
+    assert "technique_consistency_std" not in out[0].metrics
