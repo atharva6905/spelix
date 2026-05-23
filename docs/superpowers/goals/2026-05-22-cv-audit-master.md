@@ -9,6 +9,12 @@ This file is the source of truth for the multi-session cv-audit effort. It track
 
 ---
 
+## Completion Summary (2026-05-23 — ALL 7 SESSIONS COMPLETE)
+
+The cv-dimension-audit cleanup effort is **complete**. All 16 sagittal-view metrics are implemented and `computed_yet=True`; 2 feed the form score (Session 4 auto-flow), 14 are compute-only pending expert threshold validation (FR-EXPV-08). Across the 7 sessions: 8 implementation PRs merged (#147, #150, #153, #157/#158, #161, #164, #167) + 1 calibration-remediation PR (#168) + per-session plan-expansion PRs; 5 ADRs (ADR-AUDIT-2026-05-22, ADR-LIFTER-SIDE-DETECTION, ADR-SAGITTAL-METRICS-REGISTRY, ADR-AUTO-FLOW-REFINEMENTS, ADR-LUMBAR-FLEXION-PROXY-NAMING); a lifter-side detector + side-agnostic refactor; an expert registry endpoint + Unvalidated Metrics panel; Expert Reviewer Guide bumped to v2.2. Post-onboarding follow-ups (threshold validation + scoring wiring for the 14 compute-only metrics, PDF inclusion, multi-camera) are tracked in `.claude/handoff.md`.
+
+---
+
 ## Standing Rules (apply to all sessions and remediations)
 
 These rules are referenced by every per-session `/goal` condition string. Violation of any of these by a remediation /goal is grounds for immediate user escalation.
@@ -56,7 +62,7 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 | 4 | Trivial metrics (auto-flow scoring) | complete | 0 | e17c1d6 | #157 |
 | 5 | Standard single-frame landmark math | complete | 0 | b9ab8fa | #161 |
 | 6 | Bar-coordinate math | complete | 0 | cc30829 | #164 |
-| 7 | Complex multi-frame analysis | active | 0 | — | — |
+| 7 | Complex multi-frame analysis | complete | 1 | 75f6d0d | #167, #168 |
 
 ---
 
@@ -424,7 +430,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ## Session 7 — Complex multi-frame analysis
 
-**Status:** active
+**Status:** complete (merged 2026-05-23; impl PR #167 `f93d1ee`; calibration-remediation PR #168 `75f6d0d`; remediation count 1; ALL 7 SESSIONS COMPLETE)
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-7
 - Plan (skeleton — expand before launch; mandatory /plan spike first): `docs/superpowers/plans/2026-05-22-session-7-complex-multi-frame.md`
