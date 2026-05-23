@@ -974,6 +974,44 @@ def identify_standing_baseline_frame(
     return None
 
 
+def _lumbar_proxy_angle(
+    landmarks: np.ndarray, side_idx: SideIndices, side: Literal["left", "right"],
+) -> float | None:
+    """Composite trunk-flexion proxy angle at one frame:
+    ``degrees(atan2((shoulder_x - hip_x)*facing_sign, hip_y - shoulder_y))``.
+    NOT lumbar-isolated (ADR-LUMBAR-FLEXION-PROXY-NAMING). Returns None on
+    low visibility or degenerate (zero-length) torso vector."""
+    if not _vis_ok(landmarks, side_idx.shoulder, side_idx.hip):
+        return None
+    shoulder = _xy(landmarks, side_idx.shoulder)
+    hip = _xy(landmarks, side_idx.hip)
+    dx = (float(shoulder[0]) - float(hip[0])) * _facing_sign(side)
+    dy = float(hip[1]) - float(shoulder[1])  # +ve: hip below shoulder (normal)
+    if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float(np.degrees(np.arctan2(dx, dy)))
+
+
+def extract_lumbar_flexion_proxy_delta_deg(
+    landmarks_per_frame: list[np.ndarray],
+    bottom_frame: int,
+    baseline_frame: int | None,
+    side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
+) -> float | None:
+    """Session 7 #2 — composite trunk-flexion proxy delta (NOT lumbar-isolated).
+    ``proxy(bottom) - proxy(baseline)``. Returns None if baseline is None,
+    a frame is out of bounds, or either proxy angle is None."""
+    n = len(landmarks_per_frame)
+    if baseline_frame is None or not (0 <= baseline_frame < n) or not (0 <= bottom_frame < n):
+        return None
+    base = _lumbar_proxy_angle(landmarks_per_frame[baseline_frame], side_idx, lifter_side)
+    bot = _lumbar_proxy_angle(landmarks_per_frame[bottom_frame], side_idx, lifter_side)
+    if base is None or bot is None:
+        return None
+    return bot - base
+
+
 def _wrist_midpoint_trajectory(
     landmarks_per_frame: list[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:

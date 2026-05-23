@@ -1974,3 +1974,80 @@ def test_session7_baseline_deadlift_first_rep_no_liftoff_falls_back_to_start() -
         "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
     )
     assert out == 3
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #2 — lumbar_flexion_proxy_delta_deg extractor
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import extract_lumbar_flexion_proxy_delta_deg  # noqa: E402
+
+
+def _upright_then_flexed_frames(flex_dx: float) -> list[np.ndarray]:
+    """Frame 0 = upright (shoulder over hip); frame 1 = trunk flexed forward
+    by flex_dx (shoulder ahead of hip in +x for a right-facing lifter)."""
+    upright = _make_landmark_frame_right_side(shoulder_xy=(0.50, 0.20), hip_xy=(0.50, 0.55))
+    flexed = _make_landmark_frame_right_side(shoulder_xy=(0.50 + flex_dx, 0.20), hip_xy=(0.50, 0.55))
+    return [upright, flexed]
+
+
+def test_session7_lumbar_proxy_no_buttwink_near_zero() -> None:
+    """Clean squat: trunk angle at bottom ~= trunk angle at baseline -> delta ~= 0."""
+    frames = _upright_then_flexed_frames(flex_dx=0.0)
+    right_idx = landmark_indices_for_side("right")
+    delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    )
+    assert delta == pytest.approx(0.0, abs=0.5)
+
+
+def test_session7_lumbar_proxy_buttwink_positive_delta() -> None:
+    """Pronounced forward flexion at bottom -> delta > 15 degrees."""
+    dy = 0.35
+    flex_dx = dy * math.tan(math.radians(20.0))  # ~20 degrees of trunk flexion
+    frames = _upright_then_flexed_frames(flex_dx=flex_dx)
+    right_idx = landmark_indices_for_side("right")
+    delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    )
+    assert delta is not None and delta > 15.0
+
+
+def test_session7_lumbar_proxy_no_baseline_returns_none() -> None:
+    frames = _upright_then_flexed_frames(flex_dx=0.1)
+    right_idx = landmark_indices_for_side("right")
+    assert extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=None,
+        side_idx=right_idx, lifter_side="right",
+    ) is None
+
+
+def test_session7_lumbar_proxy_low_visibility_returns_none() -> None:
+    frames = _upright_then_flexed_frames(flex_dx=0.1)
+    frames[0][24, 3] = 0.1  # hip low-vis at baseline frame (right hip = lm 24)
+    right_idx = landmark_indices_for_side("right")
+    assert extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    ) is None
+
+
+@pytest.mark.parametrize("flex_deg", [0.0, 10.0, 20.0])
+def test_session7_lumbar_proxy_side_agnostic(flex_deg: float) -> None:
+    """Same physical flexion filmed from either side -> equal delta."""
+    dy = 0.35
+    dx = dy * math.tan(math.radians(flex_deg))
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frames = [
+        _make_landmark_frame_right_side((0.50, 0.20), (0.50, 0.55)),
+        _make_landmark_frame_right_side((0.50 + dx, 0.20), (0.50, 0.55)),
+    ]
+    left_frames = [
+        _make_landmark_frame_left_side((1.0 - 0.50, 0.20), (1.0 - 0.50, 0.55)),
+        _make_landmark_frame_left_side((1.0 - (0.50 + dx), 0.20), (1.0 - 0.50, 0.55)),
+    ]
+    rd = extract_lumbar_flexion_proxy_delta_deg(right_frames, 1, 0, right_idx, "right")
+    ld = extract_lumbar_flexion_proxy_delta_deg(left_frames, 1, 0, left_idx, "left")
+    assert rd == pytest.approx(ld, abs=0.5)
