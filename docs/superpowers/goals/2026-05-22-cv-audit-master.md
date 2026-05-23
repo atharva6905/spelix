@@ -55,8 +55,8 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 | 3 | Infrastructure scaffold | complete | 0 | fc5e6ca | #153 |
 | 4 | Trivial metrics (auto-flow scoring) | complete | 0 | e17c1d6 | #157 |
 | 5 | Standard single-frame landmark math | complete | 0 | b9ab8fa | #161 |
-| 6 | Bar-coordinate math | active | 0 | — | — |
-| 7 | Complex multi-frame analysis | pending | 0 | — | — |
+| 6 | Bar-coordinate math | complete | 0 | cc30829 | #164 |
+| 7 | Complex multi-frame analysis | active | 0 | — | — |
 
 ---
 
@@ -367,7 +367,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ## Session 6 — Bar-coordinate math
 
-**Status:** pending
+**Status:** complete (merged 2026-05-23; merge SHA `cc30829`; PR #164; plan-expansion PR #163 merged separately as `c6d6cde`)
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-6
 - Plan (skeleton — expand before launch): `docs/superpowers/plans/2026-05-22-session-6-bar-coordinate-math.md`
@@ -408,20 +408,23 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 **Completion checklist:**
 
-- [ ] Extractors for #4 (bar-to-hip distance dict) and #14 (shoulder protraction proxy)
-- [ ] Phase-frame identification helpers (liftoff, knee_pass)
-- [ ] Unit tests with synthetic bar trajectory
-- [ ] Integration tests on bench + deadlift fixtures
-- [ ] Smoke script CSV output
-- [ ] PR-level CI green via `gh pr checks <PR>`; PR merged via `merge_method=merge`; post-merge Deploy to Production green via `gh run watch <main-run-id>`
-- [ ] E2E confirms both metrics in expert panel
-- [ ] Master manifest updated; Session 7 active
+- [x] Extractors for #4 (bar-to-hip distance dict) and #14 (shoulder protraction proxy) wired into `_deadlift_metrics` and `_bench_metrics` (commit `874141f`)
+- [x] Phase-frame identification helpers `identify_liftoff_frame` + `identify_knee_pass_frame` exported from `app.cv.metric_extraction` (commit `874141f`)
+- [x] 27 unit tests with synthetic landmark + synthetic bar trajectory + side-agnosticism mirror tests; `RepMetrics.metrics` value type widened via `RepMetricValue` alias (commit `874141f`)
+- [x] Float-invariant tests in `test_metric_extraction.py` updated to allow `bar_to_hip_distance` as dict-valued (commit `8b097bc`)
+- [x] Registry flags flipped (`computed_yet=True`); `TestRegistrySession6Flips` class + endpoint test updated for 13 computed entries (commit `959c0b2`)
+- [x] Integration tests pass on bench (13 reps) + deadlift (5 reps) fixtures; smoke script writes CSV (commit `8b68de5`)
+- [x] PR-level CI green via `gh pr checks 164` (Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel — all pass); PR #164 merged via `mcp__github__merge_pull_request` with `merge_method="merge"`; merge SHA `cc30829`
+- [x] Plan-expansion PR #163 merged separately (SHA `c6d6cde`) before implementation, mirroring Sessions 2/3/4/5
+- [ ] Post-merge Deploy to Production green on main-branch run 26325438213 — in progress at handoff write
+- [ ] E2E confirms both metrics in expert panel (post-deploy)
+- [x] Master manifest updated; Session 7 active
 
 ---
 
 ## Session 7 — Complex multi-frame analysis
 
-**Status:** pending
+**Status:** active
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-7
 - Plan (skeleton — expand before launch; mandatory /plan spike first): `docs/superpowers/plans/2026-05-22-session-7-complex-multi-frame.md`
