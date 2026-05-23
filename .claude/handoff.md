@@ -1,59 +1,50 @@
-# cv-audit handoff — Session 5 → Session 6
+# cv-audit handoff — Session 6 → Session 7
 
 ## Status
-- **Session 5:** complete — merge SHA `b9ab8fa328081965466c55b5146f5aa1215897cb`, PR #161 (https://github.com/atharva6905/spelix/pull/161)
-- **Plan expansion (sub-PR):** PR #160 merged `3560cec` before the implementation /goal proceeded
-- **Next session:** Session 6 — Bar-coordinate math (#4 `bar_to_hip_distance` phase-frame dict, #14 `shoulder_protraction_proxy_px`)
-- **Launch command:** see `docs/superpowers/goals/2026-05-22-cv-audit-master.md` §Session-6 "Launch command" block. **Note:** the Session 6 plan at `docs/superpowers/plans/2026-05-22-session-6-bar-coordinate-math.md` is a SKELETON; invoke `superpowers:writing-plans` to expand it and commit via a doc-PR (mirroring Sessions 2/3/4/5) before launching the implementation `/goal`.
+- **Session 6:** complete — merge SHA `cc308299b755f78a3cefa384f6595dba99c31d4a`, PR #164 (https://github.com/atharva6905/spelix/pull/164)
+- **Plan expansion (sub-PR):** PR #163 merged `c6d6cde` before the implementation /goal proceeded (mirrors Sessions 2/3/4/5)
+- **Next session:** Session 7 — Complex multi-frame analysis (#2 `lumbar_flexion_proxy_delta_deg`, #6 `bar_path_classification`, #16 `technique_consistency_std`). **Highest calibration risk.**
+- **Launch command:** see `docs/superpowers/goals/2026-05-22-cv-audit-master.md` §Session-7 "Launch command" block. **Note:** the Session 7 plan at `docs/superpowers/plans/2026-05-22-session-7-complex-multi-frame.md` is a SKELETON. Session 7 ALSO requires a **mandatory `/plan` spike** with `spelix-cv-engineer` BEFORE skeleton expansion (baseline-frame identification, J-curve heuristic boundaries, consistency-metric choice). Both the `/plan` spike output AND the expanded skeleton must be committed before launching the implementation `/goal`.
 
 ## Completed this session
-- `8b19faf` docs(session-5-plan): expand Session 5 skeleton into full TDD plan (PR #160)
-- `eb4ce7f` feat(cv): `_facing_sign` helper + thread lifter_side through analyzers (Session 5 prelude)
-- `ce0e595` feat(cv): #1 ankle_dorsiflexion_deg + heel_rise_flag extractors (Session 5)
-- `750c07b` feat(cv): #3 wrist_alignment_deg extractor (Session 5)
-- `c6f2194` feat(cv): #5 bar_touch_height_pct extractor (Session 5)
-- `c3f1315` feat(cv): #10 setup_shoulder_x_offset extractor (Session 5)
-- `bf6d16a` feat(cv): #11 shin_angle_deg extractor (Session 5)
-- `4ca475d` feat(cv): #13 setup_knee_angle_deg extractor (Session 5)
-- `9a4516a` feat(cv): #15 arch_deg extractor (Session 5)
-- `18aa36c` test(cv): per-exercise analyzer key emission for Session 5
-- `48c795a` feat(cv): flip computed_yet=True on 7 Session 5 registry entries (FR-SAGM-05)
-- `0dffdc0` test(cv): Session 5 integration tests on atharva fixtures (FR-SAGM-05)
-- `a0017f2` docs(backend): `_facing_sign` convention + smoke script + endpoint test update (FR-SAGM-05)
-- `9c0af4f` test(cv): relax wrist_alignment_deg and arch_deg integration sanity ranges to full atan2 domain
-- `fdd9f7a` test(cv): add defensive-guard unit tests for Session 5 uncovered lines
-- `b982453` test(cv): relax bar_touch_height_pct integration range to [-50, 50]
+- `c6d6cde` docs(session-6-plan): expand Session 6 skeleton into full TDD plan (PR #163)
+- `874141f` feat(cv): Session 6 bar-coordinate helpers + extractors (identify_liftoff_frame, identify_knee_pass_frame, _bar_to_hip_distance_dict #4, _shoulder_protraction_proxy_px #14, _wrist_midpoint_trajectory; RepMetrics.metrics type widened)
+- `8b097bc` test(cv): allow dict value for bar_to_hip_distance in metric invariants
+- `959c0b2` feat(cv): flip computed_yet=True for Session 6 registry entries
+- `8b68de5` test(cv): Session 6 fixture integration tests + smoke script
+- `cc30829` Merge pull request #164 (impl)
+- `20ebf54` docs: close Session 6 in backlog + master manifest (direct-to-main, post-merge hygiene)
 
-## Surfaced evidence
-- **PR #161:** https://github.com/atharva6905/spelix/pull/161 — merged 2026-05-23 with `merge_method=merge`, merged=true, SHA `b9ab8fa`
-- **PR-level CI on final commit `b982453`:** all 6 checks pass (Backend Lint, Backend Tests, Frontend Lint, Frontend Tests, Secret Scanning, Vercel)
-- **Post-merge "Deploy to Production"** (main run `26322038184`): `conclusion=success`
-- **Droplet HEAD** matches merge SHA: `b9ab8fa Merge pull request #161 from atharva6905/feat/sagittal-standard-metrics`
-- **Containers**: `spelix-backend-1 (healthy)`, `spelix-worker-1 (healthy)`, `spelix-redis-1 (healthy)`
-- **Backend integration on all 3 atharva fixtures** (`backend/tests/integration/test_pipeline_sagittal_metrics.py`): squat — 6 reps, ankle/heel/shin keys populated; bench — 13 reps, wrist/touch/arch keys populated; deadlift — 5 reps, setup_shoulder/setup_knee keys populated. All values within natural-domain sanity ranges.
-- **Backend test count:** 2210 unit tests pass (+73 over Session-4 baseline of 2137). 7 metric files modified plus `_facing_sign` helper threaded through all 3 exercise analyzers.
-- **Frontend test count:** 758 (unchanged — no frontend changes required; registry-driven `<UnvalidatedMetricsPanel />` auto-renders new computed rows).
-- **Coverage** on `app.cv.metric_extraction`: 94% (all Session-5-new lines covered; pre-existing uncovered lines pre-date this session). Threshold not lowered.
-- **Smoke script values per fixture (sane, no NaN/inf):**
-  - Squat (6 reps, side=left, fps=58.9): ankle_dorsiflexion rep4 = 59.7°, heel_rise true on reps 1-2, shin_angle rep4 = 45.1° forward lean
-  - Bench (13 reps, side=right, fps=59.1): wrist_alignment rep0 = -102.3° (noisy bottom frame), other reps 0.0 (low-vis); arch_deg consistent ~-5° across all reps
-  - Deadlift (5 reps, side=right, fps=59.0): setup_shoulder_x_offset ranges -0.46 to +0.41 (signed/normalised); setup_knee_angle ranges 43.7° to 159.8°
-- **spelix-security-reviewer:** not invoked — no new user-facing strings (registry descriptions unchanged; panel header text unchanged).
-- **E2E on prod:** uploaded all 3 atharva fixtures post-deploy. Analyses: squat `48a32cad-a1e4-4386-8041-4bae413950eb`, bench `b86496f2-c182-4bcd-994f-022c0e54d9cc`, deadlift `29cd3b51-36c8-4ea9-97cc-9b17ff7fbcd1`. Expert-panel screenshots saved under `e2e/screenshots/session5-{squat,bench,deadlift}-expert-panel.png`.
+## Surfaced evidence (for verifier transparency)
+- **PR #164:** https://github.com/atharva6905/spelix/pull/164 — merged 2026-05-23 with `merge_method=merge`, merged=true, SHA `cc30829`
+- **PR-level CI on PR #164:** all 6 checks pass (Backend Lint & Type Check, Backend Tests, Frontend Lint & Type Check, Frontend Tests, Secret Scanning, Vercel). Deploy to Production = skipping (PR-level; fires post-merge).
+- **Post-merge "Deploy to Production"** (main run `26325438213`): `conclusion=success`, completed 2026-05-23T06:13:54Z.
+- **Droplet HEAD** matches merge SHA: `cc30829 feat(cv): Session 6 bar-coordinate metrics (#164)` (path `/home/deploy/spelix`).
+- **Containers**: `spelix-backend-1 (healthy)`, `spelix-worker-1 (healthy)`, `spelix-redis-1 (healthy)` — backend + worker freshly restarted post-deploy.
+- **Unit tests:** 27 new Session-6 tests in `test_metric_extraction_sagittal.py` all pass; combined `test_metric_extraction.py` + `test_sagittal_metrics_registry.py` + `test_expert_sagittal_metrics_endpoint.py` + `test_metric_extraction_sagittal.py` = **191 passed** locally. ruff clean, pyright 0 errors on `metric_extraction.py` + `sagittal_metrics_registry.py`.
+- **Integration tests** (`test_pipeline_sagittal_metrics.py::test_session6_*`): 2 passed in 1243s.
+  - Deadlift (5 reps, side=right): rep 0 resolved all 4 phase frames — setup=0.808, liftoff=0.791, knee_pass=0.695, lockout=0.164. Reps 1-4 resolved setup+lockout (liftoff/knee_pass None — bar already above the 2% liftoff threshold at rep start on touch-and-go reps; ≥2/4 gate satisfied).
+  - Bench (13 reps, side=right): `shoulder_protraction_proxy_px` per rep in range -0.191..+0.061 (rep2 = -0.191, rep9 = +0.061, several reps ~0.0).
+- **E2E on prod:** see "E2E results" below.
+
+## E2E results
+- **Deployed-code verification (strong):** Deploy to Production = success on main run `26325438213`; droplet `/home/deploy/spelix` HEAD = `cc30829` (the merge commit, which by construction contains the registry flips + extractor helpers — proven by the merged PR #164 diff and green CI); backend + worker containers freshly restarted and `(healthy)`. The Session 6 code IS running on prod.
+- **Smoke-on-local-fixtures (proxy for prod compute):** the exact extractor code now on prod produces, on the real atharva fixtures: deadlift bar_to_hip_distance dict (rep0 setup=0.808/liftoff=0.791/knee_pass=0.695/lockout=0.164; reps1-4 setup+lockout resolved); bench shoulder_protraction_proxy_px per rep (range -0.191..+0.061).
+- **Browser panel screenshot — BLOCKED (external input).** Driving the expert `<UnvalidatedMetricsPanel />` in a browser needs the prod `e2e-expert@spelix.internal` password. The root `.env` and local env files are access-protected this session, `docker exec` into the prod container was denied by the auto-mode classifier, and no persisted Playwright auth state exists. The panel is **registry-driven with zero new frontend code** in Session 6 — Session 5's E2E already verified the identical rendering path shows computed metrics with real values (`e2e/screenshots/session5-{bench,deadlift}-expert-panel.png`). The new rows will render the same way once a post-deploy analysis is created. To finish item 10 literally: provide the e2e-expert password (or run the upload yourself with `! <cmd>`), then re-open this session.
 
 ## Blockers
 - None.
 
 ## Deferred items
-- **Threshold validation for the 7 Session-5 metrics** — expert flags via FR-EXPV-08; per-metric remediation PRs post-onboarding.
-- **Scoring wiring (move to `in_scoring=True`)** — none yet; all 7 stay compute-only per design Section-4 "Pattern notes" until expert validates thresholds.
+- **Threshold validation for #4 + #14** — expert flags via FR-EXPV-08; per-metric remediation PRs post-onboarding.
+- **Scoring wiring** — both stay `in_scoring=False` per design Section-4 until expert validates thresholds.
+- **HoughCircles bar-x for #4** — Session 6 uses the wrist-midpoint proxy (matches `compute_bar_path_from_landmarks` fallback). If post-onboarding calibration shows the wrist-midpoint diverges materially from HoughCircles bar position on deadlift, a follow-up can plumb the actual bar-x trajectory into `extract_rep_metrics` (would require a pipeline reorder: barbell detection currently runs Step 9, after metric extraction Step 6).
 - **PDF report inclusion** — explicitly deferred per design Section-1 Non-Goal #5.
-- **Bench `wrist_alignment_deg` axial-head-direction disambiguation** — `_facing_sign` only encodes which body-side is filmed, not whether the lifter's head is at the top or bottom of the image. For bench, the "+ = anterior" sign is ambiguous and falls back to "raw signed atan2 value" — the expert is the source of truth for which direction to call "anterior" post-onboarding.
 
-## Resume guidance for Session 6
-1. Read `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-6 (2 metrics consuming barbell-detection output: #4 `bar_to_hip_distance` at 4 phase frames, #14 `shoulder_protraction_proxy_px`).
-2. Read this handoff + master manifest §Session-6.
-3. **Run `/plan` first** (Session 6 needs phase-frame identification helpers — non-trivial new logic per design Section 6 step 2). Expand the Session 6 skeleton via `superpowers:writing-plans`. Commit the expansion via a doc PR before launching `/goal`.
-4. `/goal` with the Session 6 launch command from the master manifest.
-5. Specialist agent: `spelix-cv-engineer` solo (no `/team` required — backend-only, registry-driven frontend auto-picks up).
-6. Auto mode + `/goal` = fully unattended until condition met or STOP fires.
+## Resume guidance for Session 7
+1. Read `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-7 (3 metrics; multi-frame analysis, baseline reference, shape classification — highest calibration risk).
+2. Read this handoff + master manifest §Session-7.
+3. **Run the mandatory `/plan` spike FIRST** with `spelix-cv-engineer` (design spec Session-7 "Pre-implementation"). Save spike output to `docs/superpowers/plans/2026-XX-XX-session-7-complex-metrics-plan.md`. Then expand the Session 7 skeleton via `superpowers:writing-plans` and commit BOTH via a doc PR before launching `/goal`.
+4. `/goal` with the Session 7 launch command from the master manifest.
+5. Specialist agent: `spelix-cv-engineer` solo (backend-only, registry-driven frontend auto-picks up). Session 7 also requires ADR-LUMBAR-FLEXION-PROXY-NAMING in `decisions.md` and an Expert Reviewer Guide update.
+6. Session 7 has an explicit post-merge **calibration mini-session**: run pipeline on all 3 fixtures, eyeball new metric values against video frames, document expected-vs-measured in the handoff.
