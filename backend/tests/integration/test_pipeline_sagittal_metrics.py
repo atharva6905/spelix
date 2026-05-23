@@ -177,3 +177,64 @@ def test_session5_atharva_deadlift_populates_dl_keys(
                 f"shoulder_off={float(m['setup_shoulder_x_offset']):.2f}, "
                 f"setup_knee={float(m['setup_knee_angle_deg']):.1f}°"
             )
+
+
+@pytest.mark.integration
+def test_session6_atharva_deadlift_bar_to_hip_distance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deadlift fixture must populate bar_to_hip_distance as a 4-key dict.
+    At least 2 of the 4 phase frames must resolve to a finite float
+    (setup + lockout always resolve except in degenerate cases)."""
+    rep_metrics, _reps, side, _fps = _run_pipeline_through_metrics(
+        _DEADLIFT_FIXTURE, "deadlift", "conventional",
+    )
+    with capsys.disabled():
+        print(f"\n[session-6-integration] dl side={side} reps={len(rep_metrics)}")
+    for r in rep_metrics:
+        m = r.metrics
+        assert "bar_to_hip_distance" in m, f"missing key on rep {r.rep_index}"
+        d = m["bar_to_hip_distance"]
+        assert isinstance(d, dict), f"value should be dict, got {type(d).__name__}"
+        assert set(d.keys()) == {"setup", "liftoff", "knee_pass", "lockout"}
+        finite_count = sum(1 for v in d.values() if v is not None)
+        assert finite_count >= 2, (
+            f"rep {r.rep_index}: only {finite_count}/4 phase frames resolved: {d}"
+        )
+        for k, v in d.items():
+            if v is not None:
+                assert -5.0 <= v <= 5.0, f"rep {r.rep_index} phase {k}: {v}"
+        with capsys.disabled():
+            print(
+                f"[session-6-integration] dl rep {r.rep_index}: "
+                f"setup={d['setup']}, liftoff={d['liftoff']}, "
+                f"knee_pass={d['knee_pass']}, lockout={d['lockout']}"
+            )
+
+
+@pytest.mark.integration
+def test_session6_atharva_bench_shoulder_protraction(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bench fixture must populate shoulder_protraction_proxy_px per rep."""
+    rep_metrics, _reps, side, _fps = _run_pipeline_through_metrics(
+        _BENCH_FIXTURE, "bench", "flat",
+    )
+    with capsys.disabled():
+        print(f"\n[session-6-integration] bench side={side} reps={len(rep_metrics)}")
+    for r in rep_metrics:
+        m = r.metrics
+        assert "shoulder_protraction_proxy_px" in m, f"missing on rep {r.rep_index}"
+        val = m["shoulder_protraction_proxy_px"]
+        assert isinstance(val, float), (
+            f"shoulder_protraction value is not a float: {type(val).__name__}"
+        )
+        # Sanity bound — MediaPipe noise on a supine lifter can push the
+        # normalised ratio meaningfully. Expert validates the meaningful
+        # sub-range post-onboarding via FR-EXPV-08.
+        assert -5.0 <= val <= 5.0, f"rep {r.rep_index} value out of band: {val}"
+        with capsys.disabled():
+            print(
+                f"[session-6-integration] bench rep {r.rep_index}: "
+                f"shoulder_protraction={val:.3f}"
+            )
