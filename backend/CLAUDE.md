@@ -170,7 +170,7 @@ Phase 0 path: `config/thresholds_v0.json` with hardcoded named constants (FR-SCO
 
 ## Per-Rep Metrics Schema
 
-`RepMetrics.metrics: dict[str, float | str]` — widened in Phase 1 for `phase_of_max_deviation` which is a categorical string (ADR-022).
+`RepMetrics.metrics: dict[str, RepMetricValue]` where `RepMetricValue = float | str | dict[str, float | None] | None` — widened in Phase 1 for `phase_of_max_deviation` (categorical string, ADR-022), in Session 6 for `bar_to_hip_distance` (phase-frame dict), and in Session 7 to allow `None` for the three nullable compute-only keys (`lumbar_flexion_proxy_delta_deg`, `bar_path_classification`, `technique_consistency_std`) — `None` is a cannot-compute sentinel stored as JSON null, NOT a 0.0 sentinel.
 
 **All exercises** — `rep_duration_s`, `descent_duration_s`, `eccentric_duration_s` (alias of descent, FR-REPM-07), `ascent_duration_s`, `lockout_passed` (float 0/1), `lockout_confidence` (FR-REPM-08), `phase_of_max_deviation` (string: setup/descent/bottom/ascent/lockout, FR-REPM-09).
 
@@ -477,7 +477,7 @@ Create ONE `openai.AsyncOpenAI()` at worker start, wrapped in try/except. Pass t
 WeasyPrint, HTML template at `reports/templates/analysis_report.html`. See FR-XPRT-02 for page-by-page layout. Matplotlib is imported lazily inside `pdf.py::generate_bar_path_plot` (ADR-025) — do not hoist the import to module top.
 
 ### `RepMetrics.metrics` type
-Typed `dict[str, float | str]` — `phase_of_max_deviation` is a categorical string. When adding a new non-numeric field, update the type, the three `_*_metrics` function return annotations, and the `test_all_*_metric_values_are_floats` invariant test in the same edit (ADR-022).
+Typed `dict[str, RepMetricValue]` where `RepMetricValue = float | str | dict[str, float | None] | None` — `phase_of_max_deviation` is a categorical string; `bar_to_hip_distance` is a phase-frame dict (Session 6); Session 7 added `None` for the three nullable compute-only keys (cannot-compute = JSON null, never a 0.0 sentinel). When adding a new non-float field, update the `RepMetricValue` alias, the three `_*_metrics` function return annotations, and the `test_all_*_metric_values_are_floats` invariant test in the same edit (ADR-022).
 
 ### `MagicMock` + Pydantic `from_attributes=True`
 When extending a response schema (e.g., adding `detection_result`, `form_score_*`), you MUST explicitly set every new field to `None` in test mock factories. `MagicMock` auto-creates truthy child mocks that Pydantic then fails to validate, producing 500 errors in API tests. This bit us on every Phase 1 schema extension. Files to update: `test_analysis_api.py::_make_detail_analysis`, `test_analysis_crud.py::_make_mock_analysis`.

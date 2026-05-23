@@ -244,7 +244,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
         display_label="Lumbar Flexion Proxy (Delta)",
         unit="deg",
         description=(
-            "Delta of composite torso angle — not lumbar-isolated: "
+            "Lumbar flexion proxy (composite torso angle — not lumbar-isolated): "
             "shoulder-hip-vertical angle at rep bottom minus the same angle "
             "at the standing baseline. See ADR-LUMBAR-FLEXION-PROXY-NAMING."
         ),

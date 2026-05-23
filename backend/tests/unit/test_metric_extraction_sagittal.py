@@ -2192,3 +2192,48 @@ def test_session7_bench_emits_bar_path_only() -> None:
     assert "bar_path_classification" in out[0].metrics
     assert "lumbar_flexion_proxy_delta_deg" not in out[0].metrics
     assert "technique_consistency_std" not in out[0].metrics
+
+
+def test_session7_squat_lumbar_none_when_baseline_frame_low_vis() -> None:
+    """M-01: low visibility at the global baseline frame (rep0 start) → lumbar
+    delta None for EVERY rep (visibility is enforced downstream in
+    _lumbar_proxy_angle, per identify_standing_baseline_frame's contract)."""
+    right_idx = landmark_indices_for_side("right")
+    frames, angles, _ = _make_full_squat_session_with_landmarks(80)
+    reps = [
+        DetectedRep(rep_index=0, start_frame=2, end_frame=38, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=42, end_frame=78, confidence_score=0.9, min_angle=80.0),
+    ]
+    # Tank shoulder + hip visibility at the global baseline frame (rep0 start=2).
+    frames[2][right_idx.shoulder, 3] = 0.1
+    frames[2][right_idx.hip, 3] = 0.1
+    out = extract_rep_metrics(reps, frames, angles, "squat", "standard", 30.0, "right")
+    assert all(rm.metrics["lumbar_flexion_proxy_delta_deg"] is None for rm in out)
+
+
+def test_session7_bench_bar_path_none_on_degenerate_short_rep() -> None:
+    """M-03: a bench rep spanning fewer than 3 frames → bar_path_classification
+    None (the span<2 caller-side gate in _bench_metrics)."""
+    right_idx = landmark_indices_for_side("right")
+    frames = []
+    for _ in range(3):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.30, 0.55]
+        lm[right_idx.elbow, :2] = [0.40, 0.42]
+        lm[right_idx.wrist, :2] = [0.42, 0.30]
+        lm[right_idx.hip, :2] = [0.60, 0.50]
+        lm[15, :2] = [0.42, 0.30]
+        lm[16, :2] = [0.42, 0.30]
+        frames.append(lm)
+    ts = {
+        "elbow_angle": np.array([160.0, 90.0, 160.0]),
+        "shoulder_angle": np.array([70.0, 60.0, 70.0]),
+    }
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=1,
+        confidence_score=0.9, min_angle=90.0,
+    )
+    out = extract_rep_metrics([rep], frames, ts, "bench", "standard", 30.0, "right")
+    assert out[0].metrics["bar_path_classification"] is None
