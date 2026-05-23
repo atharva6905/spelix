@@ -1375,3 +1375,36 @@ Frontend renders the same two values on the regular user's `ResultsPage` as smal
 - **Persist `score_result.dimensions[].badges` to the DB and render directly on the ResultsPage.** Considered for the user-facing surface; rejected for scope — the new chip path reads existing JSONB without a schema change. Persisting scoring badges to the DB is a separate (worthy) refactor.
 
 **Related.** ADR-AUDIT-2026-05-22, ADR-SAGITTAL-METRICS-REGISTRY. Threshold config keys `squat.depth_classification_min`, `control.ecc_con_ratio_target_min`, `control.ecc_con_ratio_target_max`. Files `backend/app/cv/metric_extraction.py` (helpers `_classify_depth`, `_pause_duration_s`, `_lockout_torso_lean_deg`, `_default_parallel_angle`), `backend/app/cv/scoring.py` (TechniqueScore + ControlScore branches), `backend/app/cv/sagittal_metrics_registry.py` (flag flips), `backend/app/services/pipeline.py` (`_aggregate_rep_metrics` modal forwarding), `frontend/src/pages/ResultsPage.tsx` (`<AutoFlowMetricsChips />`). Backlog rows `L2-SAGITTAL-TRIVIAL-01..04`.
+
+
+## ADR-LUMBAR-FLEXION-PROXY-NAMING: Naming honesty + baseline/heuristic/consistency choices for the 3 complex metrics (Session 7)
+
+**Context.** Session 7 implements the final 3 of the 16 sagittal metrics, all compute-only: #2 `lumbar_flexion_proxy_delta_deg` (squat + DL), #6 `bar_path_classification` (bench), #16 `technique_consistency_std` (squat + DL). These are the highest-calibration-risk metrics in the cv-audit effort (design R4/R5): #2 is biomechanically misleading if presented as a true lumbar measurement; #6's J-curve heuristic is fragile; #16 aggregates across reps. A mandatory `/plan` spike (`docs/superpowers/plans/2026-05-23-session-7-complex-metrics-plan.md`) resolved the open design questions before implementation.
+
+**Decision.**
+
+1. **Naming honesty (#2).** The JSONB key carries an explicit `_proxy` suffix: `lumbar_flexion_proxy_delta_deg`. The function is `extract_lumbar_flexion_proxy_delta_deg`. The registry `description` reads "Lumbar flexion proxy (composite torso angle — not lumbar-isolated): …". The metric is `degrees(atan2((shoulder_x − hip_x)·facing_sign, hip_y − shoulder_y))` at the rep-bottom frame minus the same at a standing-baseline frame — a composite trunk-flexion proxy, NOT a lumbar-isolated measurement (true lumbar flexion needs spinal landmarks unavailable from BlazePose). Naming what it isn't is load-bearing for expert trust.
+
+2. **Standing-baseline frame identification (#2).** Squat: one global baseline = `reps[0].start_frame` (cleanest upright posture; preserves set-level drift as signal). Deadlift: previous rep's `end_frame` (lockout). **First DL rep (no previous rep): use the last frame before liftoff (`identify_liftoff_frame − 1`), falling back to `rep.start_frame` when liftoff is undetectable.** Options (b) hip-y stability scan and (c) skip-first-rep were rejected — the pre-liftoff set position is a valid standing reference and wastes no data. Cross-rep context reaches the per-rep analyzers via new optional `all_reps` / `rep_position` args (defaults preserve existing call sites, mirroring Session 5's `lifter_side`).
+
+3. **J-curve heuristic v0 (#6).** Per-rep label from the bilateral wrist-midpoint x-trajectory: `j_curve` if `abs(ascent_end_x − bottom_x) > 0.03`; elif `abs(descent_start_x − ascent_end_x) < 0.02` → `vertical`; else `drift`. The design's one-directional `<` was symmetrized to `abs()` — REQUIRED to pass the mandated side-agnosticism mirror test (a left-facing lifter's j-curve sweeps toward higher x). v0 heuristic; expect post-onboarding refinement (design R5).
+
+4. **Consistency metric (#16).** Population std (`np.std`, ddof=0) across reps of `depth_angle` (squat) / `lockout_torso_lean_deg` (DL). Single-rep → None. Computed in a post-pass inside `extract_rep_metrics`, written into every rep's dict.
+
+5. **None storage, not 0.0.** A cannot-compute result is JSON null (`RepMetricValue` widened to `float | str | dict[str, float | None] | None`). 0.0 is a valid biomechanical outcome for a delta (no flexion change) and an std (perfectly consistent), so it cannot double as a sentinel.
+
+6. **Occlusion guard (calibration remediation, PR #168).** Post-merge calibration on `atharva-squat.mov` produced `lumbar_flexion_proxy_delta_deg = −165°` — outside [−90°, 90°]. Root cause: deep-squat hip-fold occlusion (a known high-occlusion phase) mis-places a landmark so the shoulder appears below the hip (`hip_y − shoulder_y ≤ 0`); `atan2` then wraps toward ±180°. `_lumbar_proxy_angle` now returns None when `dy ≤ 0`, bounding the proxy to (−90°, 90°). The integration sanity range was NOT loosened (Standing Rule 1). Post-fix the squat fixture yields a plausible 6.31° on its one clean rep, None on occluded reps.
+
+**Consequences.**
+
+- (+) Honest naming + a documented occlusion guard make #2 safe to surface as a v0 proxy. All 16 sagittal metrics now `computed_yet=True`; 2 scored, 14 compute-only pending expert threshold validation (FR-EXPV-08).
+- (−) On deep, occluded squats #2 returns None for most reps (only clean depth frames resolve) — the panel shows "—" rather than a wrong number. Post-onboarding work may add bar-detection-assisted landmark recovery.
+- (−) #6 v0 may misclassify strong monotonic forward-drift as `j_curve` (the `abs()` symmetrization trades directional purity for side-agnosticism). Flagged for post-onboarding refinement.
+
+**Alternatives considered.**
+
+- **0.0 sentinel for cannot-compute.** Rejected — conflates "no data" with a valid zero outcome (silent correctness bug).
+- **Loosen the [−90,90] integration range to admit −165°.** Rejected — violates Standing Rule 1; the value is a genuine artifact.
+- **Defer #2 to post-onboarding (ship #6/#16 only).** Considered per the design's Session-7 stop guidance; unnecessary once the occlusion guard brought the metric in range within the remediation cap.
+
+**Related.** ADR-AUDIT-2026-05-22, ADR-SAGITTAL-METRICS-REGISTRY, ADR-AUTO-FLOW-REFINEMENTS, ADR-LIFTER-SIDE-DETECTION (`_facing_sign`). Files `backend/app/cv/metric_extraction.py` (`identify_standing_baseline_frame`, `_lumbar_proxy_angle`, `extract_lumbar_flexion_proxy_delta_deg`, `_classify_bar_path`, `_inject_technique_consistency_std`, `session_modal_bar_path_classification`), `backend/app/cv/sagittal_metrics_registry.py` (3 flag flips). PRs #167 (impl) `f93d1ee`, #168 (occlusion guard) `75f6d0d`. Backlog rows `L2-SAGITTAL-COMPLEX-01..03`.
