@@ -34,9 +34,10 @@ _COL_Y = 1
 # ---------------------------------------------------------------------------
 
 
-# Categorical strings (Phase 1 + Session 4) and dict-valued phase-frame maps
-# (Session 6 #4 bar_to_hip_distance) coexist with float-valued metrics.
-RepMetricValue = float | str | dict[str, float | None]
+# Categorical strings, dict-valued phase-frame maps, and None (Session 7
+# #2/#16 cannot-compute sentinel — stored as JSON null, NOT a 0.0 sentinel,
+# because 0.0 is a valid biomechanical outcome for a delta / std).
+RepMetricValue = float | str | dict[str, float | None] | None
 
 
 @dataclass
@@ -932,6 +933,44 @@ def identify_knee_pass_frame(
     for k in range(liftoff_frame, end_frame + 1):
         if float(bar_y_series[k]) <= float(knee_y_series[k]):
             return k
+    return None
+
+
+def identify_standing_baseline_frame(
+    exercise_type: str,
+    rep: DetectedRep,
+    rep_position: int,
+    all_reps: list[DetectedRep] | None,
+    bar_y_series: np.ndarray | None,
+) -> int | None:
+    """Session 7 #2 — index of the standing-baseline frame for the lumbar
+    flexion proxy delta.
+
+    Squat: one global baseline = ``all_reps[0].start_frame`` (the cleanest
+    upright posture in the clip — see ADR-LUMBAR-FLEXION-PROXY-NAMING).
+    Deadlift: previous rep's ``end_frame`` (lockout). First rep has no
+    previous rep, so use the last frame before liftoff
+    (``identify_liftoff_frame - 1``), falling back to ``rep.start_frame``
+    when liftoff is undetectable.
+
+    Returns ``None`` when no reps are available.
+    """
+    ex = exercise_type.lower()
+    if ex == "squat":
+        if not all_reps:
+            return None
+        return all_reps[0].start_frame
+    if ex == "deadlift":
+        if all_reps and rep_position > 0:
+            return all_reps[rep_position - 1].end_frame
+        # First rep: pre-liftoff frame, fallback to start.
+        if bar_y_series is not None:
+            liftoff = identify_liftoff_frame(
+                bar_y_series, rep.start_frame, rep.end_frame,
+            )
+            if liftoff is not None:
+                return max(rep.start_frame, liftoff - 1)
+        return rep.start_frame
     return None
 
 

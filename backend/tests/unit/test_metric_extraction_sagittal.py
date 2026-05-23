@@ -1915,3 +1915,62 @@ def test_session6_squat_analyzer_does_not_emit_bar_or_shoulder_protraction() -> 
     metrics = out[0].metrics
     assert "bar_to_hip_distance" not in metrics
     assert "shoulder_protraction_proxy_px" not in metrics
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #2 — standing baseline frame identification
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import identify_standing_baseline_frame  # noqa: E402
+
+
+def test_session7_baseline_squat_uses_first_rep_start() -> None:
+    """Squat baseline is the global first-rep start frame, for every rep."""
+    reps = [
+        DetectedRep(rep_index=0, start_frame=5, end_frame=40, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=45, end_frame=80, confidence_score=0.9, min_angle=80.0),
+    ]
+    # rep_position is ignored for squat — always returns reps[0].start_frame
+    assert identify_standing_baseline_frame(
+        "squat", reps[1], rep_position=1, all_reps=reps, bar_y_series=None
+    ) == 5
+
+
+def test_session7_baseline_squat_no_reps_returns_none() -> None:
+    assert identify_standing_baseline_frame(
+        "squat",
+        DetectedRep(rep_index=0, start_frame=0, end_frame=10, confidence_score=0.9, min_angle=80.0),
+        rep_position=0, all_reps=None, bar_y_series=None,
+    ) is None
+
+
+def test_session7_baseline_deadlift_uses_prev_rep_lockout() -> None:
+    """DL non-first rep baseline = previous rep's end_frame (lockout)."""
+    reps = [
+        DetectedRep(rep_index=0, start_frame=0, end_frame=30, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=35, end_frame=70, confidence_score=0.9, min_angle=80.0),
+    ]
+    bar_y = np.full(80, 0.5)
+    assert identify_standing_baseline_frame(
+        "deadlift", reps[1], rep_position=1, all_reps=reps, bar_y_series=bar_y
+    ) == 30
+
+
+def test_session7_baseline_deadlift_first_rep_uses_preliftoff() -> None:
+    """DL first rep: liftoff detected at frame 10 -> baseline = 9."""
+    rep = DetectedRep(rep_index=0, start_frame=2, end_frame=40, confidence_score=0.9, min_angle=80.0)
+    bar_y = np.full(50, 0.80)          # set position, bar low (high y)
+    bar_y[10:] = 0.50                  # bar rises (y drops) at frame 10 -> liftoff
+    out = identify_standing_baseline_frame(
+        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+    )
+    assert out == 9
+
+
+def test_session7_baseline_deadlift_first_rep_no_liftoff_falls_back_to_start() -> None:
+    """DL first rep, bar never lifts -> fall back to rep.start_frame."""
+    rep = DetectedRep(rep_index=0, start_frame=3, end_frame=40, confidence_score=0.9, min_angle=80.0)
+    bar_y = np.full(50, 0.80)  # never rises
+    out = identify_standing_baseline_frame(
+        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+    )
+    assert out == 3
