@@ -368,6 +368,911 @@ def test_session4_ecc_con_ratio_value_correct() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Session 5 — facing-sign helper
+# ---------------------------------------------------------------------------
+
+
+def test_session5_facing_sign_right_is_positive_one() -> None:
+    from app.cv.metric_extraction import _facing_sign
+    assert _facing_sign("right") == 1.0
+
+
+def test_session5_facing_sign_left_is_negative_one() -> None:
+    from app.cv.metric_extraction import _facing_sign
+    assert _facing_sign("left") == -1.0
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #1 — ankle_dorsiflexion_deg + heel_rise_flag (squat)
+# ---------------------------------------------------------------------------
+
+
+def _make_squat_bottom_frame(
+    *,
+    knee_xy: tuple[float, float],
+    ankle_xy: tuple[float, float],
+    foot_index_xy: tuple[float, float],
+    heel_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    """Build a single (33, 5) frame with the four squat-bottom landmarks set."""
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9    # visibility
+    lm[:, 4] = 5.0    # presence pre-sigmoid → ~1.0 (col-4 gotcha)
+    idx = landmark_indices_for_side(side)
+    lm[idx.knee, :2] = knee_xy
+    lm[idx.ankle, :2] = ankle_xy
+    lm[idx.foot_index, :2] = foot_index_xy
+    lm[idx.heel, :2] = heel_xy
+    return lm
+
+
+def test_session5_ankle_dorsiflexion_textbook_squat() -> None:
+    """Vertical shin + horizontal foot → ankle joint angle ≈ 90°."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_squat_bottom_frame(
+        knee_xy=(0.5, 0.55),         # knee directly above ankle
+        ankle_xy=(0.5, 0.90),
+        foot_index_xy=(0.65, 0.90),  # foot forward at same y
+        heel_xy=(0.42, 0.90),
+    )
+    angle = _ankle_dorsiflexion_deg(frame, right_idx)
+    assert angle == pytest.approx(90.0, abs=2.0)
+
+
+def test_session5_ankle_dorsiflexion_forward_knee_travel() -> None:
+    """Knee forward of ankle (deep squat dorsiflexion) → ankle angle < 90°."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_squat_bottom_frame(
+        knee_xy=(0.65, 0.55),        # knee 0.15 forward of ankle
+        ankle_xy=(0.5, 0.90),
+        foot_index_xy=(0.65, 0.90),
+        heel_xy=(0.42, 0.90),
+    )
+    angle = _ankle_dorsiflexion_deg(frame, right_idx)
+    # Knee vector (0.15, -0.35) and foot vector (0.15, 0). Dot product positive,
+    # smaller angle than the vertical-shin case.
+    assert angle < 90.0
+    assert angle > 0.0
+
+
+def test_session5_ankle_dorsiflexion_low_visibility_returns_none() -> None:
+    """Any required landmark below visibility 0.30 → None."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_squat_bottom_frame(
+        knee_xy=(0.5, 0.55), ankle_xy=(0.5, 0.90),
+        foot_index_xy=(0.65, 0.90), heel_xy=(0.42, 0.90),
+    )
+    frame[right_idx.ankle, 3] = 0.10  # ankle visibility crashed
+    assert _ankle_dorsiflexion_deg(frame, right_idx) is None
+
+
+def test_session5_ankle_dorsiflexion_degenerate_zero_vector_returns_none() -> None:
+    """Zero-length knee vector (knee == ankle) → None, no exception."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_squat_bottom_frame(
+        knee_xy=(0.5, 0.90),         # coincident with ankle
+        ankle_xy=(0.5, 0.90),
+        foot_index_xy=(0.65, 0.90),
+        heel_xy=(0.42, 0.90),
+    )
+    assert _ankle_dorsiflexion_deg(frame, right_idx) is None
+
+
+@pytest.mark.parametrize("knee_dx", [0.0, 0.10, 0.15, 0.20])
+def test_session5_ankle_dorsiflexion_side_agnostic(knee_dx: float) -> None:
+    """Same pose populated on either side (x mirrored on left) → same angle."""
+    from app.cv.metric_extraction import _ankle_dorsiflexion_deg
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frame = _make_squat_bottom_frame(
+        knee_xy=(0.5 + knee_dx, 0.55),
+        ankle_xy=(0.5, 0.90),
+        foot_index_xy=(0.65, 0.90),
+        heel_xy=(0.42, 0.90),
+        side="right",
+    )
+    left_frame = _make_squat_bottom_frame(
+        knee_xy=(1.0 - (0.5 + knee_dx), 0.55),
+        ankle_xy=(1.0 - 0.5, 0.90),
+        foot_index_xy=(1.0 - 0.65, 0.90),
+        heel_xy=(1.0 - 0.42, 0.90),
+        side="left",
+    )
+    right_angle = _ankle_dorsiflexion_deg(right_frame, right_idx)
+    left_angle = _ankle_dorsiflexion_deg(left_frame, left_idx)
+    assert right_angle is not None and left_angle is not None
+    assert right_angle == pytest.approx(left_angle, abs=0.5)
+
+
+# heel_rise_flag tests ------------------------------------------------------
+
+
+def _make_heel_y_series(
+    n_frames: int,
+    *,
+    baseline_y: float = 0.90,
+    rise_start: int | None = None,
+    rise_amount: float = 0.05,
+    rise_frames: int = 5,
+) -> list[np.ndarray]:
+    """Build n_frames worth of (33,5) arrays with right-heel y populated."""
+    right_idx = landmark_indices_for_side("right")
+    frames: list[np.ndarray] = []
+    for i in range(n_frames):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        y = baseline_y
+        if rise_start is not None and rise_start <= i < rise_start + rise_frames:
+            y = baseline_y - rise_amount  # heel moved up in image
+        lm[right_idx.heel, :2] = (0.42, y)
+        frames.append(lm)
+    return frames
+
+
+def test_session5_heel_rise_textbook_squat_no_rise() -> None:
+    """Heel stays at baseline → flag False."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    frames = _make_heel_y_series(20)
+    assert _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx) is False
+
+
+def test_session5_heel_rise_sustained_rise_above_threshold() -> None:
+    """Heel rises by 0.05 (> 0.02 threshold) for 5 consecutive frames → True."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    frames = _make_heel_y_series(
+        20, rise_start=8, rise_amount=0.05, rise_frames=5,
+    )
+    assert _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx) is True
+
+
+def test_session5_heel_rise_noise_spike_under_three_frames() -> None:
+    """Heel rises by 0.05 but for only 2 consecutive frames → False (noise)."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    frames = _make_heel_y_series(
+        20, rise_start=8, rise_amount=0.05, rise_frames=2,
+    )
+    assert _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx) is False
+
+
+def test_session5_heel_rise_below_threshold_returns_false() -> None:
+    """Heel rises by 0.01 (< 0.02 threshold) for many frames → False."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    frames = _make_heel_y_series(
+        20, rise_start=8, rise_amount=0.01, rise_frames=6,
+    )
+    assert _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx) is False
+
+
+def test_session5_heel_rise_degenerate_short_rep() -> None:
+    """start == depth_frame (rep too short for baseline) → False, no exception."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    frames = _make_heel_y_series(10)
+    assert _heel_rise_flag(frames, start=5, depth_frame=5, side_idx=right_idx) is False
+
+
+def test_session5_heel_rise_side_agnostic() -> None:
+    """Same rise pattern on right-heel vs mirrored left-heel → same flag."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frames = _make_heel_y_series(
+        20, rise_start=8, rise_amount=0.05, rise_frames=5,
+    )
+    # Build a mirrored left-side variant: same y dynamic, mirrored x, populated
+    # at the left-heel index.
+    left_frames: list[np.ndarray] = []
+    for i, rf in enumerate(right_frames):
+        lf = np.zeros((33, 5), dtype=float)
+        lf[:, 3] = 0.9
+        lf[:, 4] = 5.0
+        rx, ry = rf[right_idx.heel, 0], rf[right_idx.heel, 1]
+        lf[left_idx.heel, :2] = (1.0 - rx, ry)
+        left_frames.append(lf)
+    right_flag = _heel_rise_flag(right_frames, start=0, depth_frame=15, side_idx=right_idx)
+    left_flag = _heel_rise_flag(left_frames, start=0, depth_frame=15, side_idx=left_idx)
+    assert right_flag == left_flag is True
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #3 — wrist_alignment_deg (bench)
+# ---------------------------------------------------------------------------
+
+
+def _make_bench_bottom_frame(
+    *,
+    wrist_xy: tuple[float, float],
+    elbow_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.wrist, :2] = wrist_xy
+    lm[idx.elbow, :2] = elbow_xy
+    return lm
+
+
+def test_session5_wrist_alignment_stacked() -> None:
+    """Wrist directly above elbow → 0°."""
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_bottom_frame(wrist_xy=(0.50, 0.40), elbow_xy=(0.50, 0.55))
+    assert _wrist_alignment_deg(frame, right_idx, "right") == pytest.approx(0.0, abs=0.5)
+
+
+def test_session5_wrist_alignment_anterior() -> None:
+    """Wrist forward of elbow (right-facing) → positive angle."""
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    dy = 0.15
+    dx = dy * math.tan(math.radians(20.0))
+    frame = _make_bench_bottom_frame(
+        wrist_xy=(0.50 + dx, 0.40), elbow_xy=(0.50, 0.55),
+    )
+    assert _wrist_alignment_deg(frame, right_idx, "right") == pytest.approx(20.0, abs=0.5)
+
+
+def test_session5_wrist_alignment_posterior_negative() -> None:
+    """Wrist behind elbow (right-facing) → negative angle."""
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    dy = 0.15
+    dx = dy * math.tan(math.radians(10.0))
+    frame = _make_bench_bottom_frame(
+        wrist_xy=(0.50 - dx, 0.40), elbow_xy=(0.50, 0.55),
+    )
+    assert _wrist_alignment_deg(frame, right_idx, "right") == pytest.approx(-10.0, abs=0.5)
+
+
+def test_session5_wrist_alignment_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_bottom_frame(wrist_xy=(0.50, 0.40), elbow_xy=(0.50, 0.55))
+    frame[right_idx.wrist, 3] = 0.05
+    assert _wrist_alignment_deg(frame, right_idx, "right") is None
+
+
+def test_session5_wrist_alignment_degenerate_coincident_returns_none() -> None:
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_bottom_frame(wrist_xy=(0.50, 0.55), elbow_xy=(0.50, 0.55))
+    assert _wrist_alignment_deg(frame, right_idx, "right") is None
+
+
+@pytest.mark.parametrize("anterior_deg", [-20.0, -5.0, 0.0, 5.0, 20.0])
+def test_session5_wrist_alignment_side_agnostic(anterior_deg: float) -> None:
+    """Same pose right-vs-mirrored-left → same signed angle (facing-sign applied)."""
+    from app.cv.metric_extraction import _wrist_alignment_deg
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    dy = 0.15
+    dx = dy * math.tan(math.radians(anterior_deg))
+    right_frame = _make_bench_bottom_frame(
+        wrist_xy=(0.50 + dx, 0.40), elbow_xy=(0.50, 0.55), side="right",
+    )
+    left_frame = _make_bench_bottom_frame(
+        wrist_xy=(1.0 - (0.50 + dx), 0.40),
+        elbow_xy=(1.0 - 0.50, 0.55),
+        side="left",
+    )
+    r = _wrist_alignment_deg(right_frame, right_idx, "right")
+    L = _wrist_alignment_deg(left_frame, left_idx, "left")
+    assert r is not None and L is not None
+    assert r == pytest.approx(L, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #5 — bar_touch_height_pct (bench)
+# ---------------------------------------------------------------------------
+
+
+def _make_bench_touch_frame(
+    *,
+    wrist_y: float,
+    shoulder_y: float,
+    hip_y: float,
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.wrist, :2] = (0.30, wrist_y)
+    lm[idx.shoulder, :2] = (0.50, shoulder_y)
+    lm[idx.hip, :2] = (0.55, hip_y)
+    return lm
+
+
+def test_session5_bar_touch_height_at_shoulder() -> None:
+    """wrist_y == shoulder_y → 0.0."""
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_touch_frame(wrist_y=0.40, shoulder_y=0.40, hip_y=0.60)
+    assert _bar_touch_height_pct(frame, right_idx) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_session5_bar_touch_height_midway() -> None:
+    """wrist halfway between shoulder and hip → 0.5."""
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_touch_frame(wrist_y=0.50, shoulder_y=0.40, hip_y=0.60)
+    assert _bar_touch_height_pct(frame, right_idx) == pytest.approx(0.5, abs=1e-6)
+
+
+def test_session5_bar_touch_height_at_hip() -> None:
+    """wrist at hip level → 1.0."""
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_touch_frame(wrist_y=0.60, shoulder_y=0.40, hip_y=0.60)
+    assert _bar_touch_height_pct(frame, right_idx) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_session5_bar_touch_height_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_touch_frame(wrist_y=0.50, shoulder_y=0.40, hip_y=0.60)
+    frame[right_idx.hip, 3] = 0.10
+    assert _bar_touch_height_pct(frame, right_idx) is None
+
+
+def test_session5_bar_touch_height_degenerate_shoulder_eq_hip_returns_none() -> None:
+    """shoulder_y == hip_y (zero span) → None, no division by zero."""
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_bench_touch_frame(wrist_y=0.50, shoulder_y=0.50, hip_y=0.50)
+    assert _bar_touch_height_pct(frame, right_idx) is None
+
+
+def test_session5_bar_touch_height_side_agnostic() -> None:
+    """Same y-coordinates on either side → same ratio (y-only math)."""
+    from app.cv.metric_extraction import _bar_touch_height_pct
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frame = _make_bench_touch_frame(
+        wrist_y=0.50, shoulder_y=0.40, hip_y=0.60, side="right",
+    )
+    left_frame = _make_bench_touch_frame(
+        wrist_y=0.50, shoulder_y=0.40, hip_y=0.60, side="left",
+    )
+    r = _bar_touch_height_pct(right_frame, right_idx)
+    L = _bar_touch_height_pct(left_frame, left_idx)
+    assert r == pytest.approx(L, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #10 — setup_shoulder_x_offset (deadlift)
+# ---------------------------------------------------------------------------
+
+
+def _make_dl_setup_frame(
+    *,
+    shoulder_xy: tuple[float, float],
+    wrist_xy: tuple[float, float],
+    elbow_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.shoulder, :2] = shoulder_xy
+    lm[idx.wrist, :2] = wrist_xy
+    lm[idx.elbow, :2] = elbow_xy
+    return lm
+
+
+def test_session5_setup_shoulder_offset_over_bar() -> None:
+    """Shoulders directly above wrist → offset ≈ 0."""
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_setup_frame(
+        shoulder_xy=(0.50, 0.30),
+        wrist_xy=(0.50, 0.85),
+        elbow_xy=(0.50, 0.60),  # forearm length ~0.25, vertical
+    )
+    val = _setup_shoulder_x_offset(frame, right_idx, "right")
+    assert val == pytest.approx(0.0, abs=0.02)
+
+
+def test_session5_setup_shoulder_offset_shoulders_ahead() -> None:
+    """Shoulders 0.05 forward of wrist, forearm ≈ 0.25 → +0.20 normalised."""
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_setup_frame(
+        shoulder_xy=(0.55, 0.30),     # 0.05 forward of wrist
+        wrist_xy=(0.50, 0.85),
+        elbow_xy=(0.50, 0.60),         # forearm length 0.25
+    )
+    val = _setup_shoulder_x_offset(frame, right_idx, "right")
+    assert val == pytest.approx(0.05 / 0.25, abs=0.02)
+
+
+def test_session5_setup_shoulder_offset_shoulders_behind_negative() -> None:
+    """Shoulders behind wrist (right-facing) → negative offset."""
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_setup_frame(
+        shoulder_xy=(0.45, 0.30),
+        wrist_xy=(0.50, 0.85),
+        elbow_xy=(0.50, 0.60),
+    )
+    val = _setup_shoulder_x_offset(frame, right_idx, "right")
+    assert val < 0.0
+    assert val == pytest.approx(-0.05 / 0.25, abs=0.02)
+
+
+def test_session5_setup_shoulder_offset_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_setup_frame(
+        shoulder_xy=(0.55, 0.30), wrist_xy=(0.50, 0.85), elbow_xy=(0.50, 0.60),
+    )
+    frame[right_idx.elbow, 3] = 0.10
+    assert _setup_shoulder_x_offset(frame, right_idx, "right") is None
+
+
+def test_session5_setup_shoulder_offset_zero_forearm_returns_none() -> None:
+    """elbow == wrist → forearm length 0 → None."""
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_setup_frame(
+        shoulder_xy=(0.55, 0.30),
+        wrist_xy=(0.50, 0.85),
+        elbow_xy=(0.50, 0.85),  # coincident with wrist
+    )
+    assert _setup_shoulder_x_offset(frame, right_idx, "right") is None
+
+
+@pytest.mark.parametrize("shoulder_dx", [-0.05, -0.02, 0.0, 0.02, 0.05])
+def test_session5_setup_shoulder_offset_side_agnostic(shoulder_dx: float) -> None:
+    from app.cv.metric_extraction import _setup_shoulder_x_offset
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frame = _make_dl_setup_frame(
+        shoulder_xy=(0.50 + shoulder_dx, 0.30),
+        wrist_xy=(0.50, 0.85),
+        elbow_xy=(0.50, 0.60),
+        side="right",
+    )
+    left_frame = _make_dl_setup_frame(
+        shoulder_xy=(1.0 - (0.50 + shoulder_dx), 0.30),
+        wrist_xy=(1.0 - 0.50, 0.85),
+        elbow_xy=(1.0 - 0.50, 0.60),
+        side="left",
+    )
+    r = _setup_shoulder_x_offset(right_frame, right_idx, "right")
+    L = _setup_shoulder_x_offset(left_frame, left_idx, "left")
+    assert r is not None and L is not None
+    assert r == pytest.approx(L, abs=0.02)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #11 — shin_angle_deg (squat)
+# ---------------------------------------------------------------------------
+
+
+def _make_shin_frame(
+    *,
+    knee_xy: tuple[float, float],
+    ankle_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.knee, :2] = knee_xy
+    lm[idx.ankle, :2] = ankle_xy
+    return lm
+
+
+def test_session5_shin_angle_vertical() -> None:
+    """Knee directly above ankle → 0°."""
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_shin_frame(knee_xy=(0.50, 0.55), ankle_xy=(0.50, 0.90))
+    assert _shin_angle_deg(frame, right_idx, "right") == pytest.approx(0.0, abs=0.5)
+
+
+def test_session5_shin_angle_forward_lean_20deg() -> None:
+    """Knee 0.35 * tan(20°) forward of ankle → +20° forward."""
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    dy = 0.35
+    dx = dy * math.tan(math.radians(20.0))
+    frame = _make_shin_frame(knee_xy=(0.50 + dx, 0.55), ankle_xy=(0.50, 0.90))
+    assert _shin_angle_deg(frame, right_idx, "right") == pytest.approx(20.0, abs=0.5)
+
+
+def test_session5_shin_angle_backward_lean_negative() -> None:
+    """Knee behind ankle (rare/wrong technique) → negative angle."""
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    dy = 0.35
+    dx = dy * math.tan(math.radians(5.0))
+    frame = _make_shin_frame(knee_xy=(0.50 - dx, 0.55), ankle_xy=(0.50, 0.90))
+    assert _shin_angle_deg(frame, right_idx, "right") == pytest.approx(-5.0, abs=0.5)
+
+
+def test_session5_shin_angle_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_shin_frame(knee_xy=(0.50, 0.55), ankle_xy=(0.50, 0.90))
+    frame[right_idx.knee, 3] = 0.05
+    assert _shin_angle_deg(frame, right_idx, "right") is None
+
+
+def test_session5_shin_angle_degenerate_coincident_returns_none() -> None:
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_shin_frame(knee_xy=(0.50, 0.90), ankle_xy=(0.50, 0.90))
+    assert _shin_angle_deg(frame, right_idx, "right") is None
+
+
+@pytest.mark.parametrize("lean_deg", [-10.0, -2.0, 0.0, 2.0, 10.0, 25.0])
+def test_session5_shin_angle_side_agnostic(lean_deg: float) -> None:
+    from app.cv.metric_extraction import _shin_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    dy = 0.35
+    dx = dy * math.tan(math.radians(lean_deg))
+    right_frame = _make_shin_frame(
+        knee_xy=(0.50 + dx, 0.55), ankle_xy=(0.50, 0.90), side="right",
+    )
+    left_frame = _make_shin_frame(
+        knee_xy=(1.0 - (0.50 + dx), 0.55), ankle_xy=(1.0 - 0.50, 0.90), side="left",
+    )
+    r = _shin_angle_deg(right_frame, right_idx, "right")
+    L = _shin_angle_deg(left_frame, left_idx, "left")
+    assert r is not None and L is not None
+    assert r == pytest.approx(L, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #13 — setup_knee_angle_deg (deadlift)
+# ---------------------------------------------------------------------------
+
+
+def _make_dl_knee_frame(
+    *,
+    hip_xy: tuple[float, float],
+    knee_xy: tuple[float, float],
+    ankle_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.hip, :2] = hip_xy
+    lm[idx.knee, :2] = knee_xy
+    lm[idx.ankle, :2] = ankle_xy
+    return lm
+
+
+def test_session5_setup_knee_angle_straight_leg() -> None:
+    """Hip, knee, ankle collinear → 180°."""
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_knee_frame(
+        hip_xy=(0.50, 0.30), knee_xy=(0.50, 0.60), ankle_xy=(0.50, 0.90),
+    )
+    assert _setup_knee_angle_deg(frame, right_idx) == pytest.approx(180.0, abs=1.0)
+
+
+def test_session5_setup_knee_angle_right_angle_squat_pull() -> None:
+    """Hip directly above knee, knee directly above ankle, both at right
+    angle → 90°."""
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_knee_frame(
+        hip_xy=(0.30, 0.60),    # hip 0.20 behind knee, same y
+        knee_xy=(0.50, 0.60),
+        ankle_xy=(0.50, 0.80),  # ankle 0.20 below knee, same x
+    )
+    assert _setup_knee_angle_deg(frame, right_idx) == pytest.approx(90.0, abs=1.0)
+
+
+def test_session5_setup_knee_angle_hip_hinge_140() -> None:
+    """Typical deadlift hip-hinge setup → 130-150° range."""
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_knee_frame(
+        hip_xy=(0.35, 0.45),
+        knee_xy=(0.50, 0.65),
+        ankle_xy=(0.50, 0.95),
+    )
+    val = _setup_knee_angle_deg(frame, right_idx)
+    assert val is not None
+    assert 120.0 <= val <= 160.0
+
+
+def test_session5_setup_knee_angle_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_knee_frame(
+        hip_xy=(0.50, 0.30), knee_xy=(0.50, 0.60), ankle_xy=(0.50, 0.90),
+    )
+    frame[right_idx.knee, 3] = 0.05
+    assert _setup_knee_angle_deg(frame, right_idx) is None
+
+
+def test_session5_setup_knee_angle_degenerate_coincident_returns_none() -> None:
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    frame = _make_dl_knee_frame(
+        hip_xy=(0.50, 0.60), knee_xy=(0.50, 0.60), ankle_xy=(0.50, 0.90),
+    )
+    assert _setup_knee_angle_deg(frame, right_idx) is None
+
+
+def test_session5_setup_knee_angle_side_agnostic() -> None:
+    from app.cv.metric_extraction import _setup_knee_angle_deg
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frame = _make_dl_knee_frame(
+        hip_xy=(0.35, 0.45), knee_xy=(0.50, 0.65), ankle_xy=(0.50, 0.95),
+        side="right",
+    )
+    left_frame = _make_dl_knee_frame(
+        hip_xy=(1.0 - 0.35, 0.45), knee_xy=(1.0 - 0.50, 0.65),
+        ankle_xy=(1.0 - 0.50, 0.95), side="left",
+    )
+    r = _setup_knee_angle_deg(right_frame, right_idx)
+    L = _setup_knee_angle_deg(left_frame, left_idx)
+    assert r is not None and L is not None
+    assert r == pytest.approx(L, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 #15 — arch_deg (bench)
+# ---------------------------------------------------------------------------
+
+
+def _make_bench_arch_frame(
+    *,
+    shoulder_xy: tuple[float, float],
+    hip_xy: tuple[float, float],
+    side: str = "right",
+) -> np.ndarray:
+    lm = np.zeros((33, 5), dtype=float)
+    lm[:, 3] = 0.9
+    lm[:, 4] = 5.0
+    idx = landmark_indices_for_side(side)
+    lm[idx.shoulder, :2] = shoulder_xy
+    lm[idx.hip, :2] = hip_xy
+    return lm
+
+
+def test_session5_arch_deg_flat_back() -> None:
+    """Shoulder and hip at the same y, hip 0.30 anterior → 0° arch
+    (flat horizontal supine body)."""
+    from app.cv.metric_extraction import _arch_deg
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.50), hip_xy=(0.60, 0.50))
+        for _ in range(20)
+    ]
+    right_idx = landmark_indices_for_side("right")
+    val = _arch_deg(frames, non_rep_frame_mask=[True] * 20,
+                    side_idx=right_idx, side="right")
+    assert val == pytest.approx(0.0, abs=0.5)
+
+
+def test_session5_arch_deg_pronounced_arch() -> None:
+    """Hips 0.05 above shoulders (smaller y = higher in image) with 0.30
+    horizontal separation → positive arch around 9-10°."""
+    from app.cv.metric_extraction import _arch_deg
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50))
+        for _ in range(20)
+    ]
+    right_idx = landmark_indices_for_side("right")
+    val = _arch_deg(frames, non_rep_frame_mask=[True] * 20,
+                    side_idx=right_idx, side="right")
+    assert val is not None
+    # atan2(0.05, 0.30) ≈ 9.46°
+    assert val == pytest.approx(9.46, abs=0.5)
+
+
+def test_session5_arch_deg_low_arch() -> None:
+    """Hips marginally above shoulders → small positive angle."""
+    from app.cv.metric_extraction import _arch_deg
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.51), hip_xy=(0.60, 0.50))
+        for _ in range(20)
+    ]
+    right_idx = landmark_indices_for_side("right")
+    val = _arch_deg(frames, non_rep_frame_mask=[True] * 20,
+                    side_idx=right_idx, side="right")
+    assert val is not None
+    assert 0.5 <= val <= 5.0
+
+
+def test_session5_arch_deg_no_non_rep_frames_returns_none() -> None:
+    """Empty non-rep window → None."""
+    from app.cv.metric_extraction import _arch_deg
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50))
+        for _ in range(10)
+    ]
+    right_idx = landmark_indices_for_side("right")
+    val = _arch_deg(frames, non_rep_frame_mask=[False] * 10,
+                    side_idx=right_idx, side="right")
+    assert val is None
+
+
+def test_session5_arch_deg_all_low_visibility_returns_none() -> None:
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    frames = []
+    for _ in range(10):
+        f = _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50))
+        f[right_idx.shoulder, 3] = 0.05
+        f[right_idx.hip, 3] = 0.05
+        frames.append(f)
+    val = _arch_deg(frames, non_rep_frame_mask=[True] * 10,
+                    side_idx=right_idx, side="right")
+    assert val is None
+
+
+def test_session5_arch_deg_side_agnostic() -> None:
+    """Same arch on right-vs-mirrored-left → same signed value."""
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50),
+                               side="right")
+        for _ in range(20)
+    ]
+    left_frames = [
+        _make_bench_arch_frame(shoulder_xy=(1.0 - 0.30, 0.55),
+                               hip_xy=(1.0 - 0.60, 0.50), side="left")
+        for _ in range(20)
+    ]
+    r = _arch_deg(right_frames, non_rep_frame_mask=[True] * 20,
+                  side_idx=right_idx, side="right")
+    L = _arch_deg(left_frames, non_rep_frame_mask=[True] * 20,
+                  side_idx=left_idx, side="left")
+    assert r is not None and L is not None
+    assert r == pytest.approx(L, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 5 — per-exercise analyzer key emission
+# ---------------------------------------------------------------------------
+
+
+def _make_full_squat_session_with_landmarks(n_frames: int = 60):
+    """Squat session helper populated for Session 5 squat extractors."""
+    frames = []
+    right_idx = landmark_indices_for_side("right")
+    for _ in range(n_frames):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.50, 0.10]
+        lm[right_idx.hip, :2] = [0.50, 0.50]
+        lm[right_idx.knee, :2] = [0.55, 0.70]   # slight forward knee travel
+        lm[right_idx.ankle, :2] = [0.50, 0.92]
+        lm[right_idx.foot_index, :2] = [0.65, 0.92]
+        lm[right_idx.heel, :2] = [0.42, 0.92]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    hip = 125.0 + 45.0 * np.cos(t)
+    knee = 110.0 + 40.0 * np.cos(t)
+    ts = {"hip_angle": hip, "knee_angle": knee}
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=n_frames - 1,
+        confidence_score=0.9, min_angle=80.0,
+    )
+    return frames, ts, rep
+
+
+def test_session5_squat_analyzer_emits_session5_keys() -> None:
+    frames, ts, rep = _make_full_squat_session_with_landmarks(60)
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="squat", exercise_variant="standard",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "ankle_dorsiflexion_deg" in metrics
+    assert "heel_rise_flag" in metrics
+    assert "shin_angle_deg" in metrics
+    # Bench-only / DL-only keys must NOT appear on squat output.
+    assert "wrist_alignment_deg" not in metrics
+    assert "bar_touch_height_pct" not in metrics
+    assert "arch_deg" not in metrics
+    assert "setup_shoulder_x_offset" not in metrics
+    assert "setup_knee_angle_deg" not in metrics
+
+
+def test_session5_bench_analyzer_emits_session5_keys() -> None:
+    frames = []
+    right_idx = landmark_indices_for_side("right")
+    for _ in range(60):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.30, 0.55]   # arch pose
+        lm[right_idx.elbow, :2] = [0.40, 0.42]
+        lm[right_idx.wrist, :2] = [0.42, 0.30]
+        lm[right_idx.hip, :2] = [0.60, 0.50]        # hips higher → arch +
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, 60)
+    ts = {"elbow_angle": 115.0 + 50.0 * np.cos(t),
+          "shoulder_angle": 70.0 + 20.0 * np.cos(t)}
+    rep = DetectedRep(
+        rep_index=0, start_frame=10, end_frame=49,
+        confidence_score=0.9, min_angle=65.0,
+    )
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="bench", exercise_variant="flat",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "wrist_alignment_deg" in metrics
+    assert "bar_touch_height_pct" in metrics
+    assert "arch_deg" in metrics
+    assert "ankle_dorsiflexion_deg" not in metrics
+    assert "heel_rise_flag" not in metrics
+    assert "shin_angle_deg" not in metrics
+    assert "setup_shoulder_x_offset" not in metrics
+    assert "setup_knee_angle_deg" not in metrics
+
+
+def test_session5_deadlift_analyzer_emits_session5_keys() -> None:
+    frames = []
+    right_idx = landmark_indices_for_side("right")
+    for _ in range(60):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.55, 0.45]   # shoulders over bar
+        lm[right_idx.elbow, :2] = [0.50, 0.70]
+        lm[right_idx.wrist, :2] = [0.50, 0.85]
+        lm[right_idx.hip, :2] = [0.40, 0.55]
+        lm[right_idx.knee, :2] = [0.50, 0.70]
+        lm[right_idx.ankle, :2] = [0.50, 0.92]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, 60)
+    ts = {"hip_angle": 100.0 + 60.0 * np.cos(t),
+          "knee_angle": 120.0 + 40.0 * np.cos(t)}
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=59,
+        confidence_score=0.9, min_angle=40.0,
+    )
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="deadlift", exercise_variant="conventional",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "setup_shoulder_x_offset" in metrics
+    assert "setup_knee_angle_deg" in metrics
+    assert "ankle_dorsiflexion_deg" not in metrics
+    assert "heel_rise_flag" not in metrics
+    assert "shin_angle_deg" not in metrics
+    assert "wrist_alignment_deg" not in metrics
+    assert "bar_touch_height_pct" not in metrics
+    assert "arch_deg" not in metrics
+
+
 def test_session4_pipeline_aggregate_passes_through_session4_keys() -> None:
     """The aggregator that feeds OverallFormScore must propagate
     depth_classification (modal string) and ecc_con_ratio (mean float)."""
@@ -412,3 +1317,131 @@ def test_session4_pipeline_aggregate_passes_through_session4_keys() -> None:
     assert agg["ecc_con_ratio"] == pytest.approx(0.8, abs=0.01)
     # depth_classification is the modal label (2× above_parallel → above_parallel).
     assert agg["depth_classification"] == "above_parallel"
+
+
+# ---------------------------------------------------------------------------
+# Session 5 — defensive guard coverage (Task 14 Step 4)
+# These tests target specific lines reported as uncovered by coverage tooling.
+# ---------------------------------------------------------------------------
+
+
+# --- _heel_rise_flag defensive guards (lines 653, 656, 662-663) ---
+
+
+def test_session5_heel_rise_low_visibility_during_baseline_returns_false() -> None:
+    """All baseline frames have heel visibility below _S5_MIN_VIS → no
+    baseline_ys collected → return False (covers line 656)."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    # Build 20 frames; set heel visibility to 0.10 for the first 5 (baseline window).
+    frames: list[np.ndarray] = []
+    for i in range(20):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.heel, :2] = (0.42, 0.90)
+        # Baseline frames (0-4): crash heel visibility so they are skipped (line 653).
+        if i < 5:
+            lm[right_idx.heel, 3] = 0.10
+        frames.append(lm)
+    result = _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx)
+    assert result is False
+
+
+def test_session5_heel_rise_low_visibility_during_detection_resets_triggered() -> None:
+    """A low-visibility heel frame mid-detection resets the consecutive-frame
+    counter (covers lines 662-663).  Pattern: 2 rising frames → invisible frame
+    → 2 more rising frames → total consecutive never reaches 3 → False."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    baseline_y = 0.90
+    rise_y = baseline_y - 0.05  # above threshold (0.02)
+    n = 20
+    frames: list[np.ndarray] = []
+    for i in range(n):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        # Baseline frames 0-4: heel at baseline_y, visible.
+        y = baseline_y
+        vis = 0.9
+        if i == 7 or i == 8:
+            # Two rising frames.
+            y = rise_y
+        elif i == 9:
+            # Invisible frame mid-streak — resets triggered counter (lines 662-663).
+            vis = 0.10
+        elif i == 10 or i == 11:
+            # Two more rising frames (counter restarts from 0, never reaches 3).
+            y = rise_y
+        lm[right_idx.heel, :2] = (0.42, y)
+        lm[right_idx.heel, 3] = vis
+        frames.append(lm)
+    result = _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx)
+    assert result is False
+
+
+# --- _arch_deg defensive guards (lines 804, 826) ---
+
+
+def test_session5_arch_deg_mismatched_length_returns_none() -> None:
+    """len(landmarks_per_frame) != len(non_rep_frame_mask) → return None (line 804)."""
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50))
+        for _ in range(10)
+    ]
+    # Mask length differs from frames length — triggers the guard.
+    result = _arch_deg(frames, non_rep_frame_mask=[True] * 7,
+                       side_idx=right_idx, side="right")
+    assert result is None
+
+
+def test_session5_arch_deg_degenerate_zero_mean_vector_returns_none() -> None:
+    """After averaging, dx_mean and dy_mean are both < _S5_DEGENERATE_MAGNITUDE
+    (shoulder and hip at identical position) → return None (line 826)."""
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    # shoulder_xy == hip_xy → dx=0, dy=0 → zero mean vector.
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.50, 0.50), hip_xy=(0.50, 0.50))
+        for _ in range(10)
+    ]
+    result = _arch_deg(frames, non_rep_frame_mask=[True] * 10,
+                       side_idx=right_idx, side="right")
+    assert result is None
+
+
+# --- extract_rep_metrics public API defensive guards (lines 894, 899) ---
+
+
+def test_session5_extract_rep_metrics_empty_reps_returns_empty_list() -> None:
+    """reps=[] → return [] without entering the exercise dispatch (line 894)."""
+    out = extract_rep_metrics(
+        reps=[],
+        landmarks_per_frame=[np.zeros((33, 5))],
+        angle_timeseries={"hip_angle": np.zeros(1)},
+        exercise_type="squat",
+        exercise_variant="standard",
+        fps=30.0,
+    )
+    assert out == []
+
+
+def test_session5_extract_rep_metrics_unknown_exercise_raises_value_error() -> None:
+    """exercise_type not in ('squat','bench','deadlift') → ValueError (line 899)."""
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=9,
+        confidence_score=0.9, min_angle=90.0,
+    )
+    frames = [np.zeros((33, 5)) for _ in range(10)]
+    with pytest.raises(ValueError, match="overhead_press"):
+        extract_rep_metrics(
+            reps=[rep],
+            landmarks_per_frame=frames,
+            angle_timeseries={"elbow_angle": np.zeros(10)},
+            exercise_type="overhead_press",
+            exercise_variant="barbell",
+            fps=30.0,
+        )

@@ -54,6 +54,20 @@ def _xy(landmarks: np.ndarray, idx: int) -> np.ndarray:
     return landmarks[idx, :2]
 
 
+def _facing_sign(side: Literal["left", "right"]) -> float:
+    """Return +1.0 if the lifter faces right in the image, -1.0 if left.
+
+    Multiplies x-direction signed metrics (wrist_alignment_deg, shin_angle_deg,
+    setup_shoulder_x_offset, arch_deg) so the same pose filmed from either side
+    produces the same signed output. Without this, swapping side indices alone
+    flips the sign of every x-derived value because anterior-posterior direction
+    in image coordinates depends on which way the subject faces.
+
+    See ADR-LIFTER-SIDE-DETECTION (Session 2) and design Section 5 mirror tests.
+    """
+    return 1.0 if side == "right" else -1.0
+
+
 def _torso_lean_deg(landmarks: np.ndarray, side_idx: SideIndices) -> float:
     """
     Compute torso lean — the angle between the shoulder–hip line and vertical.
@@ -308,6 +322,7 @@ def _squat_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract squat metrics for one rep.
@@ -360,6 +375,11 @@ def _squat_metrics(
         landmarks_per_frame, end, side_idx,
     )
 
+    # Session 5 squat extractors
+    ankle_dorsiflexion = _ankle_dorsiflexion_deg(landmarks_per_frame[depth_frame], side_idx)
+    heel_rise = _heel_rise_flag(landmarks_per_frame, start, depth_frame, side_idx)
+    shin_angle = _shin_angle_deg(landmarks_per_frame[depth_frame], side_idx, lifter_side)
+
     return {
         "depth_angle": depth_angle,
         "knee_angle_at_depth": knee_angle_at_depth,
@@ -375,6 +395,11 @@ def _squat_metrics(
         "ecc_con_ratio": ecc_con_ratio,
         "pause_duration_s": pause_duration,
         "lockout_torso_lean_deg": lockout_torso_lean,
+        "ankle_dorsiflexion_deg": (
+            float(ankle_dorsiflexion) if ankle_dorsiflexion is not None else 0.0
+        ),
+        "heel_rise_flag": float(heel_rise),
+        "shin_angle_deg": float(shin_angle) if shin_angle is not None else 0.0,
     }
 
 
@@ -384,6 +409,7 @@ def _bench_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract bench press metrics for one rep.
@@ -429,6 +455,20 @@ def _bench_metrics(
         elbow_series, start, end, bottom_frame, fps,
     )
 
+    # Session 5 bench extractors
+    wrist_alignment = _wrist_alignment_deg(
+        landmarks_per_frame[bottom_frame], side_idx, lifter_side,
+    )
+    bar_touch_height = _bar_touch_height_pct(landmarks_per_frame[bottom_frame], side_idx)
+    # Build the non-rep mask. For bench, every frame outside the current rep is
+    # "non-rep" for arch purposes. Multi-rep analyses where we'd want to also
+    # exclude OTHER reps' frames are out-of-scope for Session 5: the analyzer
+    # is invoked per rep and doesn't have cross-rep state. For a per-rep call,
+    # treat frames OUTSIDE this rep as non-rep.
+    n_total = len(landmarks_per_frame)
+    non_rep_mask = [not (start <= i <= end) for i in range(n_total)]
+    arch_value = _arch_deg(landmarks_per_frame, non_rep_mask, side_idx, lifter_side)
+
     return {
         "elbow_angle_at_bottom": elbow_angle_at_bottom,
         "shoulder_angle_at_bottom": shoulder_angle_at_bottom,
@@ -441,6 +481,13 @@ def _bench_metrics(
         "phase_of_max_deviation": max_dev_phase,
         "ecc_con_ratio": ecc_con_ratio,
         "pause_duration_s": pause_duration,
+        "wrist_alignment_deg": (
+            float(wrist_alignment) if wrist_alignment is not None else 0.0
+        ),
+        "bar_touch_height_pct": (
+            float(bar_touch_height) if bar_touch_height is not None else 0.0
+        ),
+        "arch_deg": float(arch_value) if arch_value is not None else 0.0,
     }
 
 
@@ -450,6 +497,7 @@ def _deadlift_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract deadlift metrics for one rep.
@@ -504,6 +552,12 @@ def _deadlift_metrics(
         landmarks_per_frame, end, side_idx,
     )
 
+    # Session 5 deadlift extractors
+    setup_shoulder_offset = _setup_shoulder_x_offset(
+        landmarks_per_frame[start], side_idx, lifter_side,
+    )
+    setup_knee_angle = _setup_knee_angle_deg(landmarks_per_frame[start], side_idx)
+
     return {
         "hip_angle_at_bottom": hip_angle_at_bottom,
         "knee_angle_at_lockout": knee_angle_at_lockout,
@@ -518,7 +572,259 @@ def _deadlift_metrics(
         "ecc_con_ratio": ecc_con_ratio,
         "pause_duration_s": pause_duration,
         "lockout_torso_lean_deg": lockout_torso_lean,
+        "setup_shoulder_x_offset": (
+            float(setup_shoulder_offset) if setup_shoulder_offset is not None else 0.0
+        ),
+        "setup_knee_angle_deg": (
+            float(setup_knee_angle) if setup_knee_angle is not None else 0.0
+        ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Session 5 helpers — sagittal-view single-frame landmark math
+# ---------------------------------------------------------------------------
+
+# Visibility threshold for required landmarks (matches the registry's
+# "return None on missing landmark" convention).
+_S5_MIN_VIS = 0.30
+_S5_DEGENERATE_MAGNITUDE = 1e-6
+
+
+def _vis_ok(landmarks: np.ndarray, *indices: int) -> bool:
+    """Return True iff every named landmark has visibility >= _S5_MIN_VIS."""
+    return all(float(landmarks[i, 3]) >= _S5_MIN_VIS for i in indices)
+
+
+def _ankle_dorsiflexion_deg(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+) -> float | None:
+    """Session 5 #1 — joint angle at S_ankle between S_knee and S_foot_index.
+
+    Stored as the raw joint angle (registry description: "90 minus this is
+    dorsiflexion magnitude"). Returns None on missing landmark or degenerate
+    zero-length vector. Side-agnostic (joint-angle math).
+    """
+    if not _vis_ok(landmarks, side_idx.knee, side_idx.ankle, side_idx.foot_index):
+        return None
+    knee = _xy(landmarks, side_idx.knee)
+    ankle = _xy(landmarks, side_idx.ankle)
+    foot = _xy(landmarks, side_idx.foot_index)
+    v_kn = knee - ankle
+    v_ft = foot - ankle
+    mag_kn = float(np.linalg.norm(v_kn))
+    mag_ft = float(np.linalg.norm(v_ft))
+    if mag_kn < _S5_DEGENERATE_MAGNITUDE or mag_ft < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    cos_t = float(np.clip(np.dot(v_kn, v_ft) / (mag_kn * mag_ft), -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_t)))
+
+
+def _heel_rise_flag(
+    landmarks_per_frame: list[np.ndarray],
+    start: int,
+    depth_frame: int,
+    side_idx: SideIndices,
+    baseline_frames: int = 5,
+    rise_threshold: float = 0.02,
+    consecutive_frames: int = 3,
+) -> bool:
+    """Session 5 #1 companion — True if S_heel-y stays below baseline by more
+    than ``rise_threshold`` for ``consecutive_frames`` or more during descent.
+
+    Baseline is the mean S_heel-y over the first ``baseline_frames`` of the rep
+    (frames ``start`` .. ``start + baseline_frames - 1``). Descent is
+    ``start + baseline_frames`` .. ``depth_frame`` inclusive. Frame height is
+    1.0 in MediaPipe normalised space, so the threshold is literally
+    ``baseline - rise_threshold`` (a heel rising in image = heel_y decreasing).
+
+    Degenerate input (rep too short to span baseline + a descent window,
+    out-of-bounds frames) returns False with no exception.
+    """
+    n = len(landmarks_per_frame)
+    if start < 0 or depth_frame >= n or depth_frame <= start + baseline_frames:
+        return False
+    heel_idx = side_idx.heel
+    baseline_ys: list[float] = []
+    for k in range(start, start + baseline_frames):
+        f = landmarks_per_frame[k]
+        if float(f[heel_idx, 3]) < _S5_MIN_VIS:
+            continue
+        baseline_ys.append(float(f[heel_idx, 1]))
+    if len(baseline_ys) == 0:
+        return False
+    baseline_y = float(np.mean(baseline_ys))
+    triggered = 0
+    for k in range(start + baseline_frames, depth_frame + 1):
+        f = landmarks_per_frame[k]
+        if float(f[heel_idx, 3]) < _S5_MIN_VIS:
+            triggered = 0
+            continue
+        if float(f[heel_idx, 1]) < baseline_y - rise_threshold:
+            triggered += 1
+            if triggered >= consecutive_frames:
+                return True
+        else:
+            triggered = 0
+    return False
+
+
+def _wrist_alignment_deg(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+    side: Literal["left", "right"],
+) -> float | None:
+    """Session 5 #3 — sagittal-plane wrist-elbow stacking angle at bench bottom.
+
+    ``atan2((wrist_x - elbow_x) * facing_sign, elbow_y - wrist_y)`` in degrees.
+    0° = wrist stacked vertically over elbow. Positive = wrist anterior to
+    elbow (regardless of which side filmed the lifter). Returns None on missing
+    landmark or degenerate (coincident wrist/elbow) input.
+    """
+    if not _vis_ok(landmarks, side_idx.wrist, side_idx.elbow):
+        return None
+    wrist = _xy(landmarks, side_idx.wrist)
+    elbow = _xy(landmarks, side_idx.elbow)
+    dx = (float(wrist[0]) - float(elbow[0])) * _facing_sign(side)
+    dy = float(elbow[1]) - float(wrist[1])
+    if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float(np.degrees(np.arctan2(dx, dy)))
+
+
+def _bar_touch_height_pct(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+) -> float | None:
+    """Session 5 #5 — bench bar-touch y relative to shoulder-hip span.
+
+    ``(wrist_y - shoulder_y) / (hip_y - shoulder_y)``. 0.0 = touching at
+    shoulder, 1.0 = at hip. Returns None on missing landmark or zero-span
+    (``shoulder_y == hip_y``). Y-only math → side-agnostic.
+    """
+    if not _vis_ok(landmarks, side_idx.wrist, side_idx.shoulder, side_idx.hip):
+        return None
+    wrist_y = float(landmarks[side_idx.wrist, 1])
+    shoulder_y = float(landmarks[side_idx.shoulder, 1])
+    hip_y = float(landmarks[side_idx.hip, 1])
+    span = hip_y - shoulder_y
+    if abs(span) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float((wrist_y - shoulder_y) / span)
+
+
+def _setup_shoulder_x_offset(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+    side: Literal["left", "right"],
+) -> float | None:
+    """Session 5 #10 — deadlift shoulder-x offset from wrist-x at the first
+    lift frame, normalised by forearm length.
+
+    ``((shoulder_x - wrist_x) * facing_sign) / forearm_length`` where forearm
+    length is ``hypot(wrist_x - elbow_x, wrist_y - elbow_y)``. Positive =
+    shoulders over the bar (anterior of the wrist) regardless of filmed side.
+    Returns None on missing landmark or zero-length forearm.
+    """
+    if not _vis_ok(landmarks, side_idx.shoulder, side_idx.wrist, side_idx.elbow):
+        return None
+    shoulder = _xy(landmarks, side_idx.shoulder)
+    wrist = _xy(landmarks, side_idx.wrist)
+    elbow = _xy(landmarks, side_idx.elbow)
+    forearm_len = float(np.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]))
+    if forearm_len < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    raw_offset = float(shoulder[0]) - float(wrist[0])
+    return (raw_offset * _facing_sign(side)) / forearm_len
+
+
+def _shin_angle_deg(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+    side: Literal["left", "right"],
+) -> float | None:
+    """Session 5 #11 — sagittal-plane shin-vertical angle at squat rep bottom.
+
+    ``atan2((knee_x - ankle_x) * facing_sign, ankle_y - knee_y)``. 0° = vertical
+    shin. Positive = knee forward of ankle (forward shin lean) regardless of
+    filmed side. Returns None on missing landmark or zero-magnitude vector.
+    """
+    if not _vis_ok(landmarks, side_idx.knee, side_idx.ankle):
+        return None
+    knee = _xy(landmarks, side_idx.knee)
+    ankle = _xy(landmarks, side_idx.ankle)
+    dx = (float(knee[0]) - float(ankle[0])) * _facing_sign(side)
+    dy = float(ankle[1]) - float(knee[1])
+    if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float(np.degrees(np.arctan2(dx, dy)))
+
+
+def _setup_knee_angle_deg(
+    landmarks: np.ndarray,
+    side_idx: SideIndices,
+) -> float | None:
+    """Session 5 #13 — deadlift joint angle at S_knee (hip-knee-ankle) at the
+    first lift frame. Unsigned → side-agnostic. Returns None on missing
+    landmark or degenerate (zero-length) vector.
+    """
+    if not _vis_ok(landmarks, side_idx.hip, side_idx.knee, side_idx.ankle):
+        return None
+    hip = _xy(landmarks, side_idx.hip)
+    knee = _xy(landmarks, side_idx.knee)
+    ankle = _xy(landmarks, side_idx.ankle)
+    v_hk = hip - knee
+    v_ak = ankle - knee
+    m_hk = float(np.linalg.norm(v_hk))
+    m_ak = float(np.linalg.norm(v_ak))
+    if m_hk < _S5_DEGENERATE_MAGNITUDE or m_ak < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    cos_t = float(np.clip(np.dot(v_hk, v_ak) / (m_hk * m_ak), -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_t)))
+
+
+def _arch_deg(
+    landmarks_per_frame: list[np.ndarray],
+    non_rep_frame_mask: list[bool],
+    side_idx: SideIndices,
+    side: Literal["left", "right"],
+) -> float | None:
+    """Session 5 #15 — bench arch angle averaged across non-rep frames.
+
+    For each frame where ``non_rep_frame_mask[i]`` is True AND both S_shoulder
+    and S_hip are visible, compute the shoulder→hip vector with facing-sign
+    applied to dx, then take the mean (dx_mean, dy_mean) and reduce via
+    ``atan2(dy_mean, dx_mean)``. Positive = hips higher than shoulders. Single
+    value per session.
+
+    Returns None when no qualifying frame exists.
+    """
+    if len(landmarks_per_frame) != len(non_rep_frame_mask):
+        return None
+    sign = _facing_sign(side)
+    dxs: list[float] = []
+    dys: list[float] = []
+    for include, frame in zip(non_rep_frame_mask, landmarks_per_frame):
+        if not include:
+            continue
+        if not _vis_ok(frame, side_idx.shoulder, side_idx.hip):
+            continue
+        shoulder_x = float(frame[side_idx.shoulder, 0])
+        shoulder_y = float(frame[side_idx.shoulder, 1])
+        hip_x = float(frame[side_idx.hip, 0])
+        hip_y = float(frame[side_idx.hip, 1])
+        dxs.append((hip_x - shoulder_x) * sign)
+        # In image coords y increases downward → "hips higher than shoulders"
+        # = hip_y < shoulder_y → (shoulder_y - hip_y) > 0 = positive dy.
+        dys.append(shoulder_y - hip_y)
+    if not dxs:
+        return None
+    dx_mean = float(np.mean(dxs))
+    dy_mean = float(np.mean(dys))
+    if abs(dx_mean) < _S5_DEGENERATE_MAGNITUDE and abs(dy_mean) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float(np.degrees(np.arctan2(dy_mean, dx_mean)))
 
 
 # ---------------------------------------------------------------------------
@@ -599,7 +905,9 @@ def extract_rep_metrics(
 
     result: list[RepMetrics] = []
     for rep in reps:
-        metrics = analyzer(rep, landmarks_per_frame, angle_timeseries, fps, side_idx)
+        metrics = analyzer(
+            rep, landmarks_per_frame, angle_timeseries, fps, side_idx, lifter_side,
+        )
         result.append(
             RepMetrics(
                 rep_index=rep.rep_index,

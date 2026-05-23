@@ -130,7 +130,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "boolean heel_rise_flag written alongside this key in rep_metrics."
         ),
         exercise_applicability=_SQ,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -142,7 +142,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Positive values mean the wrist is anterior to the elbow."
         ),
         exercise_applicability=_BN,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -154,7 +154,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "0.0 means touching at shoulder level, 1.0 at hip level."
         ),
         exercise_applicability=_BN,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -166,7 +166,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "normalized by forearm length. Positive = shoulders over the bar."
         ),
         exercise_applicability=_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -178,7 +178,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Zero is vertical shin; positive is forward lean."
         ),
         exercise_applicability=_SQ,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -189,7 +189,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "Deadlift knee angle (hip-knee-ankle) at the first lift frame."
         ),
         exercise_applicability=_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -202,7 +202,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "shoulders (bench arch)."
         ),
         exercise_applicability=_BN,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
 
