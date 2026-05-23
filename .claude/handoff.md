@@ -1,6 +1,20 @@
-# cv-audit handoff — EFFORT COMPLETE (Session 7 closed 2026-05-23)
+# cv-audit handoff — EFFORT COMPLETE + R1 occlusion follow-up shipped (2026-05-23)
 
-## Status: ALL 7 SESSIONS COMPLETE ✅
+## R1 — dropout-aware depth-frame fix (shipped 2026-05-23, PR #170 `050dc9e`)
+
+A post-Session-7 deep-dive root-caused the squat lumbar-proxy None values (full evidence: `docs/superpowers/investigations/2026-05-23-cv-occlusion-rootcause.md`, local-only). Finding: the `dy≤0` hip-fold guard (ADR-LUMBAR-FLEXION-PROXY-NAMING §6) covered only 1/6 squat reps; the dominant cause was MediaPipe VIDEO-mode total pose dropout near the deep-squat bottom, and `_find_depth_frame` (plain argmin) was selecting dropout frames as the rep bottom — corrupting every bottom-anchored squat metric.
+
+**Shipped (R1):** dropout-aware `_find_depth_frame` validity mask for squat + DL; bench excluded (deferred to R3); `_ankle_dorsiflexion_deg`/`_shin_angle_deg` return None on mis-tracked frames (geometric + anatomical-envelope guards). Verified: 2285 unit pass, ruff/pyright clean, sagittal integration 8/8, squat recovers depth_angle + lumbar for all 6 reps. CI green, deployed (droplet HEAD `050dc9e`, containers healthy), prod results page renders read-only-verified. ADR-DEPTHFRAME-DROPOUT-GATE added. Backlog: `L2-CV-DEPTHFRAME-DROPOUT` + `-AUX` done.
+
+**Open follow-ups from the investigation (NOT started):**
+- **R3** (`L2-CV-DEPTHFRAME-R3`, open) — bench bottom-frame + bar-path robustness; wrist proxy unreliable (vis ~0.04–0.5), needs barbell detection.
+- **R2** — angle-series validity gate + clamp upstream of rep detection (larger; de-noises rep detection too).
+- **R4** — re-evaluate MediaPipe VIDEO vs IMAGE running mode (attacks the dropout source; needs droplet perf benchmark).
+- **R5** — surface landmark-confidence in the expert portal so None shows *why*.
+- **R6** — deadlift first-rep standing-baseline robustness (rep-0 baseline can land on a non-standing frame).
+- Fresh-upload prod demonstration of R1 deferred (account-identity + Supabase free-tier Storage 507 constraints; code path covered by integration tests on the identical fixtures).
+
+## Status: ALL 7 SESSIONS COMPLETE ✅ + R1 follow-up shipped
 
 The cv-dimension-audit cleanup effort is finished. All 16 sagittal-view metrics are implemented and `computed_yet=True` in the registry. 2 feed the form score (Session 4 auto-flow: `depth_classification`, `ecc_con_ratio`); 14 are compute-only pending expert threshold validation via FR-EXPV-08. **There is no "next session" — the effort is done.**
 
