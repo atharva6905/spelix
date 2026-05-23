@@ -324,6 +324,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ```
 Complete Session 5 of cv-audit. Reference documents:
+- Handoff from prev session: .claude/handoff.md
 - Design spec: docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md §Session-5 (architecture, decisions, scope)
 - Implementation plan: docs/superpowers/plans/2026-05-22-session-5-standard-landmark-math.md — THIS IS A SKELETON PLAN. Before proceeding with task execution, STOP and expand the skeleton into full TDD code blocks via superpowers:writing-plans. The expanded plan must be committed to repo before this /goal continues. Skeleton expansion preserves task ordering, file lists, gates, and acceptance criteria; only adds concrete pytest test bodies and exact git commit messages.
 - Master manifest: docs/superpowers/goals/2026-05-22-cv-audit-master.md (Standing Rules and Remediation Policy apply throughout)
