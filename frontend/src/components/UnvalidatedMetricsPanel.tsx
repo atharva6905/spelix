@@ -39,7 +39,17 @@ function _extractValue(
   rep: Record<string, unknown>,
   key: string,
 ): number | string | null {
-  const raw = rep[key];
+  // Expert API nests rep_metrics values under `metrics_json` (matches the
+  // JSONB column shape). Session-3 read the value off the top-level rep
+  // object, which worked only while all 16 entries were stuck at
+  // computed_yet=false. Session 4 flipped four flags and exposed the
+  // shape mismatch — fall back to top-level for backwards-compatibility
+  // with any test fixture that still uses the flat shape.
+  const nested =
+    rep.metrics_json && typeof rep.metrics_json === "object"
+      ? (rep.metrics_json as Record<string, unknown>)[key]
+      : undefined;
+  const raw = nested !== undefined ? nested : rep[key];
   if (raw === undefined || raw === null) return null;
   if (typeof raw === "number" || typeof raw === "string") return raw;
   // Object / array values (e.g. bar_to_hip_distance dict) -- JSON-encode

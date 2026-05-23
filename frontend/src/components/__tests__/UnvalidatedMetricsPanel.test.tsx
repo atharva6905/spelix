@@ -218,6 +218,35 @@ describe("UnvalidatedMetricsPanel", () => {
     expect(await screen.findByText(/Flag threshold/i)).toBeInTheDocument();
   });
 
+  it("renders values nested under rep.metrics_json (real API shape, regression for Session 4)", async () => {
+    // Real ExpertAnalysisDetail.rep_metrics rows nest the JSONB column under
+    // a `metrics_json` field; Session-3 fixtures put keys at the top level,
+    // which silently passed because all entries had computed_yet=false.
+    // Session 4 flipped flags and exposed the shape mismatch on prod.
+    vi.mocked(expertApi.getSagittalMetricsRegistry).mockResolvedValue({
+      entries: [
+        {
+          key_name: "ecc_con_ratio",
+          display_label: "Eccentric / Concentric Ratio",
+          unit: "ratio",
+          description: "Per-rep descent / ascent duration.",
+          exercise_applicability: ["squat"],
+          computed_yet: true,
+          in_scoring: true,
+        },
+      ],
+    });
+    const analysis = _makeAnalysis({
+      rep_metrics: [
+        { rep_index: 1, metrics_json: { ecc_con_ratio: 1.55 } },
+        { rep_index: 2, metrics_json: { ecc_con_ratio: 2.16 } },
+      ],
+    });
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    expect(await screen.findByText("1.6 ratio")).toBeInTheDocument();
+    expect(screen.getByText("2.2 ratio")).toBeInTheDocument();
+  });
+
   it("renders a graceful error state when the registry fetch fails", async () => {
     vi.mocked(expertApi.getSagittalMetricsRegistry).mockRejectedValue(
       new Error("network error"),

@@ -53,8 +53,8 @@ When a session's `/goal` hits a STOP clause, the protocol is:
 | 1 | Part 1 cleanup | complete | 0 | c47740e | #147 |
 | 2 | Lifter-side detection + refactor | complete | 0 | af1548b | #150 |
 | 3 | Infrastructure scaffold | complete | 0 | fc5e6ca | #153 |
-| 4 | Trivial metrics (auto-flow scoring) | active | 0 | — | — |
-| 5 | Standard single-frame landmark math | pending | 0 | — | — |
+| 4 | Trivial metrics (auto-flow scoring) | complete | 0 | e17c1d6 | #157 |
+| 5 | Standard single-frame landmark math | active | 0 | — | — |
 | 6 | Bar-coordinate math | pending | 0 | — | — |
 | 7 | Complex multi-frame analysis | pending | 0 | — | — |
 
@@ -249,7 +249,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ## Session 4 — Trivial metrics (auto-flow scoring)
 
-**Status:** in_progress (PR open; updates to `complete` on merge)
+**Status:** complete — merge SHA `e17c1d6cba49578625fde32943b491529f98ab65`, PR #157 (2026-05-22). Backend +41 tests (24 sagittal extractors + 11 scoring + 4 registry + 2 integration), frontend +3 vitest, 6 PR-level CI checks pass, post-merge Deploy to Production conclusion=success, droplet HEAD matches, ADR-AUTO-FLOW-REFINEMENTS appended to decisions.md, L2-SAGITTAL-TRIVIAL-01..04 closed in backlog.md. spelix-security-reviewer PASS_WITH_FINDINGS (one LOW advisory on a pre-existing test docstring, fixed in `3467689`).
 **References:**
 - Design spec: `docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md` §Session-4
 - Plan (skeleton — expand before launch): `docs/superpowers/plans/2026-05-22-session-4-trivial-metrics.md`
