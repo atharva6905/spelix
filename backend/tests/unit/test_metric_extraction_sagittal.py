@@ -1445,3 +1445,473 @@ def test_session5_extract_rep_metrics_unknown_exercise_raises_value_error() -> N
             exercise_variant="barbell",
             fps=30.0,
         )
+
+
+# ---------------------------------------------------------------------------
+# Session 6 — Bar-coordinate math
+# ---------------------------------------------------------------------------
+
+
+def test_session6_identify_liftoff_frame_happy_path() -> None:
+    """Bar held still for 10 frames, then rises 5% over the next 10 → liftoff
+    at the first frame strictly past the 2% threshold."""
+    from app.cv.metric_extraction import identify_liftoff_frame
+    n = 30
+    bar_y = np.full(n, 0.80)
+    bar_y[11:21] = np.linspace(0.80, 0.75, 10)  # rises (y decreases) starting frame 11
+    bar_y[21:] = 0.75
+    out = identify_liftoff_frame(bar_y, setup_frame=0, end_frame=n - 1, threshold_pct=0.02)
+    assert out is not None
+    assert 11 <= out <= 21
+    assert bar_y[out] < 0.80 - 0.02 + 1e-9
+
+
+def test_session6_identify_liftoff_frame_never_lifts_returns_none() -> None:
+    """Bar drifts up <2% of frame height → no liftoff detected → None."""
+    from app.cv.metric_extraction import identify_liftoff_frame
+    n = 30
+    bar_y = np.full(n, 0.80)
+    bar_y[10:] = 0.795  # rises only 0.5% — below 2% threshold
+    out = identify_liftoff_frame(bar_y, setup_frame=0, end_frame=n - 1, threshold_pct=0.02)
+    assert out is None
+
+
+def test_session6_identify_liftoff_frame_immediate_liftoff() -> None:
+    """Bar already moving up at frame 1 → liftoff returned at the first qualifying frame."""
+    from app.cv.metric_extraction import identify_liftoff_frame
+    n = 10
+    bar_y = np.array([0.80, 0.77, 0.74, 0.70, 0.66, 0.62, 0.58, 0.55, 0.55, 0.55])
+    out = identify_liftoff_frame(bar_y, setup_frame=0, end_frame=n - 1, threshold_pct=0.02)
+    assert out == 1
+
+
+def test_session6_identify_liftoff_frame_out_of_bounds_returns_none() -> None:
+    """end_frame past array length or setup_frame negative → None, no exception."""
+    from app.cv.metric_extraction import identify_liftoff_frame
+    bar_y = np.full(10, 0.80)
+    assert identify_liftoff_frame(bar_y, setup_frame=-1, end_frame=5) is None
+    assert identify_liftoff_frame(bar_y, setup_frame=0, end_frame=99) is None
+    assert identify_liftoff_frame(bar_y, setup_frame=5, end_frame=3) is None
+
+
+def test_session6_identify_liftoff_frame_empty_series_returns_none() -> None:
+    from app.cv.metric_extraction import identify_liftoff_frame
+    assert identify_liftoff_frame(np.array([]), setup_frame=0, end_frame=0) is None
+
+
+def test_session6_identify_knee_pass_frame_happy_path() -> None:
+    """Bar starts below knees (y > knee_y), rises past knees at frame 15."""
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    n = 30
+    knee_y = np.full(n, 0.70)
+    bar_y = np.full(n, 0.80)
+    bar_y[15:] = 0.65  # at frame 15, bar y (0.65) is above knee (0.70) in image
+    out = identify_knee_pass_frame(
+        bar_y, knee_y, liftoff_frame=5, end_frame=n - 1
+    )
+    assert out == 15
+
+
+def test_session6_identify_knee_pass_frame_bar_starts_above_knee() -> None:
+    """Bar already above knee at liftoff_frame → return liftoff_frame itself."""
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    n = 20
+    knee_y = np.full(n, 0.70)
+    bar_y = np.full(n, 0.50)  # always above knee
+    out = identify_knee_pass_frame(
+        bar_y, knee_y, liftoff_frame=3, end_frame=n - 1
+    )
+    assert out == 3
+
+
+def test_session6_identify_knee_pass_frame_never_reaches_knee() -> None:
+    """Degenerate lift where bar stays below knee throughout → None."""
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    n = 20
+    knee_y = np.full(n, 0.70)
+    bar_y = np.full(n, 0.85)  # always below knee
+    out = identify_knee_pass_frame(
+        bar_y, knee_y, liftoff_frame=2, end_frame=n - 1
+    )
+    assert out is None
+
+
+def test_session6_identify_knee_pass_frame_out_of_bounds_returns_none() -> None:
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    knee_y = np.full(10, 0.70)
+    bar_y = np.full(10, 0.65)
+    assert identify_knee_pass_frame(bar_y, knee_y, liftoff_frame=-1, end_frame=5) is None
+    assert identify_knee_pass_frame(bar_y, knee_y, liftoff_frame=0, end_frame=99) is None
+    assert identify_knee_pass_frame(bar_y, knee_y, liftoff_frame=5, end_frame=3) is None
+
+
+def test_session6_identify_knee_pass_frame_empty_series_returns_none() -> None:
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    empty = np.array([])
+    assert identify_knee_pass_frame(empty, empty, liftoff_frame=0, end_frame=0) is None
+
+
+def test_session6_identify_knee_pass_frame_mismatched_length_returns_none_safely() -> None:
+    """Mismatched series lengths must not raise."""
+    from app.cv.metric_extraction import identify_knee_pass_frame
+    out = identify_knee_pass_frame(
+        bar_y_series=np.full(10, 0.65),
+        knee_y_series=np.full(20, 0.70),
+        liftoff_frame=0,
+        end_frame=9,
+    )
+    assert out is None or 0 <= out <= 9
+
+
+def test_session6_bar_to_hip_distance_textbook_deadlift() -> None:
+    """Synthetic deadlift with all 4 phase frames identifiable. Bar moves
+    from in-front-of-hip at setup, to closer at lockout."""
+    from app.cv.metric_extraction import _bar_to_hip_distance_dict
+    bar_x = np.array([0.50, 0.48, 0.46, 0.455])
+    bar_y = np.array([0.80, 0.65, 0.55, 0.40])
+    hip_x = np.array([0.45, 0.45, 0.45, 0.45])
+    knee_y = np.array([0.70, 0.70, 0.70, 0.70])
+    shoulder_y_setup = 0.20
+    hip_y_setup = 0.45
+    shoulder_x_setup = 0.45  # vertically above hip → unsigned distance ≈ 0.25
+    out = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x,
+        bar_y_series=bar_y,
+        hip_x_series=hip_x,
+        knee_y_series=knee_y,
+        shoulder_x_setup=shoulder_x_setup,
+        shoulder_y_setup=shoulder_y_setup,
+        hip_y_setup=hip_y_setup,
+        setup_frame=0,
+        end_frame=3,
+        side="right",
+    )
+    assert set(out.keys()) == {"setup", "liftoff", "knee_pass", "lockout"}
+    for k in out:
+        assert out[k] is not None, f"phase {k} unexpectedly None"
+    # Normalised by ~0.25 → setup ≈ 0.05 / 0.25 = 0.20
+    assert out["setup"] == pytest.approx(0.20, abs=0.02)
+    # Lockout is smallest (bar moved toward hip)
+    assert abs(out["lockout"]) < abs(out["setup"])
+
+
+def test_session6_bar_to_hip_distance_missing_liftoff_returns_none_for_that_key() -> None:
+    """Bar never rises far enough → liftoff is None; downstream knee_pass also None."""
+    from app.cv.metric_extraction import _bar_to_hip_distance_dict
+    bar_x = np.array([0.50, 0.50, 0.50, 0.50])
+    bar_y = np.array([0.80, 0.80, 0.80, 0.80])  # never rises
+    hip_x = np.array([0.45, 0.45, 0.45, 0.45])
+    knee_y = np.array([0.70, 0.70, 0.70, 0.70])
+    out = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x,
+        bar_y_series=bar_y,
+        hip_x_series=hip_x,
+        knee_y_series=knee_y,
+        shoulder_x_setup=0.45,
+        shoulder_y_setup=0.20,
+        hip_y_setup=0.45,
+        setup_frame=0,
+        end_frame=3,
+        side="right",
+    )
+    assert out["setup"] is not None
+    assert out["lockout"] is not None
+    assert out["liftoff"] is None
+    assert out["knee_pass"] is None
+
+
+def test_session6_bar_to_hip_distance_degenerate_zero_torso_returns_all_none() -> None:
+    """Setup-frame torso length = 0 → can't normalise → all four values None."""
+    from app.cv.metric_extraction import _bar_to_hip_distance_dict
+    bar_x = np.full(4, 0.50)
+    bar_y = np.array([0.80, 0.70, 0.60, 0.50])
+    hip_x = np.full(4, 0.45)
+    knee_y = np.full(4, 0.65)
+    out = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x,
+        bar_y_series=bar_y,
+        hip_x_series=hip_x,
+        knee_y_series=knee_y,
+        shoulder_x_setup=0.45,
+        shoulder_y_setup=0.45,   # SAME as hip_y → zero shoulder-to-hip distance
+        hip_y_setup=0.45,
+        setup_frame=0,
+        end_frame=3,
+        side="right",
+    )
+    assert all(v is None for v in out.values()), out
+
+
+def test_session6_bar_to_hip_distance_side_agnostic() -> None:
+    """Same physical pose, sides mirrored (x' = 1 - x): output values match."""
+    from app.cv.metric_extraction import _bar_to_hip_distance_dict
+    bar_x_r = np.array([0.50, 0.48, 0.46, 0.455])
+    hip_x_r = np.full(4, 0.45)
+    bar_x_l = 1.0 - bar_x_r
+    hip_x_l = 1.0 - hip_x_r
+    bar_y = np.array([0.80, 0.65, 0.55, 0.40])
+    knee_y = np.full(4, 0.70)
+    common = dict(
+        bar_y_series=bar_y,
+        knee_y_series=knee_y,
+        shoulder_y_setup=0.20,
+        hip_y_setup=0.45,
+        setup_frame=0,
+        end_frame=3,
+    )
+    right = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x_r,
+        hip_x_series=hip_x_r,
+        shoulder_x_setup=0.45,
+        side="right",
+        **common,
+    )
+    left = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x_l,
+        hip_x_series=hip_x_l,
+        shoulder_x_setup=1.0 - 0.45,
+        side="left",
+        **common,
+    )
+    for phase in ("setup", "liftoff", "knee_pass", "lockout"):
+        rv, lv = right[phase], left[phase]
+        if rv is None or lv is None:
+            assert rv is None and lv is None
+        else:
+            assert rv == pytest.approx(lv, abs=1e-6), (phase, rv, lv)
+
+
+def test_session6_shoulder_protraction_stable_returns_zero() -> None:
+    """Shoulder x identical at setup and bottom → ~0 protraction."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    setup = np.zeros((33, 5))
+    setup[:, 3] = 0.9
+    setup[:, 4] = 5.0
+    setup[12, :2] = [0.50, 0.20]
+    setup[24, :2] = [0.50, 0.50]
+    bottom = setup.copy()
+    out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=setup,
+        bottom_frame_landmarks=bottom,
+        side_idx=right_idx,
+        side="right",
+    )
+    assert out == pytest.approx(0.0, abs=1e-6)
+
+
+def test_session6_shoulder_protraction_anterior_drift_positive() -> None:
+    """Shoulder moves forward by 0.06 normalised → positive normalised value."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    setup = np.zeros((33, 5))
+    setup[:, 3] = 0.9
+    setup[:, 4] = 5.0
+    setup[12, :2] = [0.50, 0.20]
+    setup[24, :2] = [0.50, 0.50]  # span = 0.30
+    bottom = setup.copy()
+    bottom[12, :2] = [0.56, 0.20]  # shoulder moved +0.06 in image
+    out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=setup,
+        bottom_frame_landmarks=bottom,
+        side_idx=right_idx,
+        side="right",
+    )
+    assert out == pytest.approx(0.20, abs=1e-3)
+
+
+def test_session6_shoulder_protraction_posterior_drift_negative() -> None:
+    """Shoulder moves backward → negative."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    setup = np.zeros((33, 5))
+    setup[:, 3] = 0.9
+    setup[:, 4] = 5.0
+    setup[12, :2] = [0.50, 0.20]
+    setup[24, :2] = [0.50, 0.50]
+    bottom = setup.copy()
+    bottom[12, :2] = [0.44, 0.20]
+    out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=setup,
+        bottom_frame_landmarks=bottom,
+        side_idx=right_idx,
+        side="right",
+    )
+    assert out == pytest.approx(-0.20, abs=1e-3)
+
+
+def test_session6_shoulder_protraction_missing_landmark_returns_none() -> None:
+    """Low-visibility shoulder → None."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    setup = np.zeros((33, 5))
+    setup[:, 3] = 0.9
+    setup[:, 4] = 5.0
+    setup[12, :2] = [0.50, 0.20]
+    setup[24, :2] = [0.50, 0.50]
+    bottom = setup.copy()
+    bottom[12, 3] = 0.10  # below threshold
+    out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=setup,
+        bottom_frame_landmarks=bottom,
+        side_idx=right_idx,
+        side="right",
+    )
+    assert out is None
+
+
+def test_session6_shoulder_protraction_degenerate_zero_torso_returns_none() -> None:
+    """Setup shoulder-hip distance = 0 → cannot normalise → None."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    setup = np.zeros((33, 5))
+    setup[:, 3] = 0.9
+    setup[:, 4] = 5.0
+    setup[12, :2] = [0.50, 0.50]  # SAME as hip
+    setup[24, :2] = [0.50, 0.50]
+    bottom = setup.copy()
+    bottom[12, :2] = [0.55, 0.50]
+    out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=setup,
+        bottom_frame_landmarks=bottom,
+        side_idx=right_idx,
+        side="right",
+    )
+    assert out is None
+
+
+@pytest.mark.parametrize("delta_x", [-0.05, 0.0, 0.04, 0.08])
+def test_session6_shoulder_protraction_side_agnostic(delta_x: float) -> None:
+    """Same physical drift, sides mirrored → same signed output."""
+    from app.cv.metric_extraction import _shoulder_protraction_proxy_px
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    r_setup = np.zeros((33, 5))
+    r_setup[:, 3] = 0.9
+    r_setup[:, 4] = 5.0
+    r_setup[12, :2] = [0.50, 0.20]
+    r_setup[24, :2] = [0.50, 0.50]
+    r_bottom = r_setup.copy()
+    r_bottom[12, :2] = [0.50 + delta_x, 0.20]
+    l_setup = np.zeros((33, 5))
+    l_setup[:, 3] = 0.9
+    l_setup[:, 4] = 5.0
+    l_setup[11, :2] = [1.0 - 0.50, 0.20]
+    l_setup[23, :2] = [1.0 - 0.50, 0.50]
+    l_bottom = l_setup.copy()
+    l_bottom[11, :2] = [1.0 - (0.50 + delta_x), 0.20]
+
+    r_out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=r_setup,
+        bottom_frame_landmarks=r_bottom,
+        side_idx=right_idx, side="right",
+    )
+    l_out = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=l_setup,
+        bottom_frame_landmarks=l_bottom,
+        side_idx=left_idx, side="left",
+    )
+    assert r_out == pytest.approx(l_out, abs=1e-6)
+
+
+def test_session6_deadlift_analyzer_emits_bar_to_hip_distance_dict() -> None:
+    """Deadlift analyzer emits ``bar_to_hip_distance`` as a dict with all four
+    phase-frame keys, where wrist-midpoint serves as the bar trajectory."""
+    n_frames = 60
+    frames = []
+    for i in range(n_frames):
+        lm = np.zeros((33, 5))
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        bar_y_t = 0.80 - 0.40 * (i / (n_frames - 1))
+        lm[12, :2] = [0.45, 0.30]   # right shoulder
+        lm[24, :2] = [0.45, 0.55]   # right hip — span ≈ 0.25
+        lm[26, :2] = [0.45, 0.70]   # right knee
+        lm[28, :2] = [0.45, 0.95]   # right ankle
+        lm[15, :2] = [0.50, bar_y_t]
+        lm[16, :2] = [0.50, bar_y_t]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    hip_ang = 110.0 + 60.0 * np.cos(t)
+    knee_ang = 130.0 + 40.0 * np.cos(t)
+    ts = {"hip_angle": hip_ang, "knee_angle": knee_ang}
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=n_frames - 1,
+        confidence_score=0.9, min_angle=50.0,
+    )
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="deadlift", exercise_variant="conventional",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "bar_to_hip_distance" in metrics
+    d = metrics["bar_to_hip_distance"]
+    assert isinstance(d, dict)
+    assert set(d.keys()) == {"setup", "liftoff", "knee_pass", "lockout"}
+    for k, v in d.items():
+        assert v is not None, f"phase {k} unexpectedly None"
+        assert isinstance(v, float)
+
+
+def test_session6_bench_analyzer_emits_shoulder_protraction() -> None:
+    """Bench analyzer emits ``shoulder_protraction_proxy_px`` per rep."""
+    n_frames = 60
+    frames = []
+    for i in range(n_frames):
+        lm = np.zeros((33, 5))
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        drift = 0.04 * abs(np.sin(np.pi * i / (n_frames - 1)))
+        lm[12, :2] = [0.50 + drift, 0.30]
+        lm[14, :2] = [0.30, 0.55]
+        lm[16, :2] = [0.20, 0.55]
+        lm[24, :2] = [0.50, 0.60]   # span ≈ 0.30
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    elbow_ang = 115.0 + 50.0 * np.cos(t)
+    shoulder_ang = 70.0 + 20.0 * np.cos(t)
+    ts = {"elbow_angle": elbow_ang, "shoulder_angle": shoulder_ang}
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=n_frames - 1,
+        confidence_score=0.9, min_angle=65.0,
+    )
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="bench", exercise_variant="flat",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "shoulder_protraction_proxy_px" in metrics
+    val = metrics["shoulder_protraction_proxy_px"]
+    assert isinstance(val, float)
+    assert -1.0 <= val <= 1.0
+
+
+def test_session6_squat_analyzer_does_not_emit_bar_or_shoulder_protraction() -> None:
+    """Squat analyzer must NOT emit either Session 6 key."""
+    n_frames = 60
+    frames = []
+    for _ in range(n_frames):
+        lm = np.zeros((33, 5))
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[12, :2] = [0.50, 0.20]
+        lm[24, :2] = [0.50, 0.55]
+        lm[26, :2] = [0.50, 0.75]
+        lm[28, :2] = [0.50, 0.95]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    ts = {"hip_angle": 125 + 45 * np.cos(t), "knee_angle": 110 + 40 * np.cos(t)}
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=n_frames - 1,
+        confidence_score=0.9, min_angle=80.0,
+    )
+    out = extract_rep_metrics(
+        reps=[rep], landmarks_per_frame=frames, angle_timeseries=ts,
+        exercise_type="squat", exercise_variant="standard",
+        fps=30.0, lifter_side="right",
+    )
+    metrics = out[0].metrics
+    assert "bar_to_hip_distance" not in metrics
+    assert "shoulder_protraction_proxy_px" not in metrics

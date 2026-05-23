@@ -34,6 +34,11 @@ _COL_Y = 1
 # ---------------------------------------------------------------------------
 
 
+# Categorical strings (Phase 1 + Session 4) and dict-valued phase-frame maps
+# (Session 6 #4 bar_to_hip_distance) coexist with float-valued metrics.
+RepMetricValue = float | str | dict[str, float | None]
+
+
 @dataclass
 class RepMetrics:
     """Per-rep biomechanical metrics for a single detected repetition."""
@@ -41,7 +46,7 @@ class RepMetrics:
     rep_index: int
     start_frame: int
     end_frame: int
-    metrics: dict[str, float | str]  # exercise-specific metrics (may include phase labels)
+    metrics: dict[str, RepMetricValue]
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +328,7 @@ def _squat_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
-) -> dict[str, float | str]:
+) -> dict[str, RepMetricValue]:
     """
     Extract squat metrics for one rep.
 
@@ -410,7 +415,7 @@ def _bench_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
-) -> dict[str, float | str]:
+) -> dict[str, RepMetricValue]:
     """
     Extract bench press metrics for one rep.
 
@@ -460,6 +465,13 @@ def _bench_metrics(
         landmarks_per_frame[bottom_frame], side_idx, lifter_side,
     )
     bar_touch_height = _bar_touch_height_pct(landmarks_per_frame[bottom_frame], side_idx)
+    # Session 6 #14 — shoulder protraction proxy (setup → bottom drift).
+    shoulder_protraction = _shoulder_protraction_proxy_px(
+        setup_frame_landmarks=landmarks_per_frame[start],
+        bottom_frame_landmarks=landmarks_per_frame[bottom_frame],
+        side_idx=side_idx,
+        side=lifter_side,
+    )
     # Build the non-rep mask. For bench, every frame outside the current rep is
     # "non-rep" for arch purposes. Multi-rep analyses where we'd want to also
     # exclude OTHER reps' frames are out-of-scope for Session 5: the analyzer
@@ -488,6 +500,9 @@ def _bench_metrics(
             float(bar_touch_height) if bar_touch_height is not None else 0.0
         ),
         "arch_deg": float(arch_value) if arch_value is not None else 0.0,
+        "shoulder_protraction_proxy_px": (
+            float(shoulder_protraction) if shoulder_protraction is not None else 0.0
+        ),
     }
 
 
@@ -498,7 +513,7 @@ def _deadlift_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
-) -> dict[str, float | str]:
+) -> dict[str, RepMetricValue]:
     """
     Extract deadlift metrics for one rep.
 
@@ -558,6 +573,31 @@ def _deadlift_metrics(
     )
     setup_knee_angle = _setup_knee_angle_deg(landmarks_per_frame[start], side_idx)
 
+    # Session 6 #4 — bar-to-hip distance at four phase frames. Uses the
+    # wrist-midpoint (lm 15+16 mean) as the bar-trajectory proxy — same
+    # fallback compute_bar_path_from_landmarks uses when HoughCircles fails.
+    bar_x_series, bar_y_series = _wrist_midpoint_trajectory(landmarks_per_frame)
+    hip_x_series = np.array(
+        [float(lm[side_idx.hip, 0]) for lm in landmarks_per_frame],
+        dtype=float,
+    )
+    knee_y_series = np.array(
+        [float(lm[side_idx.knee, 1]) for lm in landmarks_per_frame],
+        dtype=float,
+    )
+    bar_to_hip = _bar_to_hip_distance_dict(
+        bar_x_series=bar_x_series,
+        bar_y_series=bar_y_series,
+        hip_x_series=hip_x_series,
+        knee_y_series=knee_y_series,
+        shoulder_x_setup=float(landmarks_per_frame[start][side_idx.shoulder, 0]),
+        shoulder_y_setup=float(landmarks_per_frame[start][side_idx.shoulder, 1]),
+        hip_y_setup=float(landmarks_per_frame[start][side_idx.hip, 1]),
+        setup_frame=start,
+        end_frame=end,
+        side=lifter_side,
+    )
+
     return {
         "hip_angle_at_bottom": hip_angle_at_bottom,
         "knee_angle_at_lockout": knee_angle_at_lockout,
@@ -578,6 +618,7 @@ def _deadlift_metrics(
         "setup_knee_angle_deg": (
             float(setup_knee_angle) if setup_knee_angle is not None else 0.0
         ),
+        "bar_to_hip_distance": bar_to_hip,
     }
 
 
@@ -825,6 +866,182 @@ def _arch_deg(
     if abs(dx_mean) < _S5_DEGENERATE_MAGNITUDE and abs(dy_mean) < _S5_DEGENERATE_MAGNITUDE:
         return None
     return float(np.degrees(np.arctan2(dy_mean, dx_mean)))
+
+
+# ---------------------------------------------------------------------------
+# Session 6 — Bar-coordinate math helpers
+# ---------------------------------------------------------------------------
+
+# Liftoff: bar y must drop (rise in image) by at least this fraction of the
+# frame height. MediaPipe normalises y to [0, 1] so the threshold is
+# dimensionally the same as the design Section-4 "≥2% of frame height".
+_S6_LIFTOFF_THRESHOLD_PCT = 0.02
+
+_S6_BAR_TO_HIP_PHASES = ("setup", "liftoff", "knee_pass", "lockout")
+
+
+def identify_liftoff_frame(
+    bar_y_series: np.ndarray,
+    setup_frame: int,
+    end_frame: int,
+    threshold_pct: float = _S6_LIFTOFF_THRESHOLD_PCT,
+) -> int | None:
+    """Session 6 — first frame after ``setup_frame`` where the bar rises in
+    image (y decreases) by at least ``threshold_pct`` of the frame height.
+
+    Returns ``None`` when:
+    - ``setup_frame`` or ``end_frame`` is out of bounds,
+    - ``end_frame <= setup_frame``,
+    - the bar never rises far enough across ``(setup_frame, end_frame]``.
+
+    Frame height is 1.0 in MediaPipe normalised coords, so the absolute
+    threshold equals ``threshold_pct``.
+    """
+    n = bar_y_series.shape[0] if bar_y_series.ndim == 1 else 0
+    if n == 0:
+        return None
+    if setup_frame < 0 or end_frame >= n or end_frame <= setup_frame:
+        return None
+    baseline = float(bar_y_series[setup_frame])
+    cutoff = baseline - threshold_pct
+    for k in range(setup_frame + 1, end_frame + 1):
+        if float(bar_y_series[k]) < cutoff:
+            return k
+    return None
+
+
+def identify_knee_pass_frame(
+    bar_y_series: np.ndarray,
+    knee_y_series: np.ndarray,
+    liftoff_frame: int,
+    end_frame: int,
+) -> int | None:
+    """Session 6 — first frame on ascent where ``bar_y <= knee_y`` (bar
+    reaches at-or-above knee height in image coordinates).
+
+    Returns ``None`` on degenerate input (out-of-bounds frames, end <
+    liftoff, empty arrays, or bar never crosses).
+    """
+    n_bar = bar_y_series.shape[0] if bar_y_series.ndim == 1 else 0
+    n_knee = knee_y_series.shape[0] if knee_y_series.ndim == 1 else 0
+    n = min(n_bar, n_knee)
+    if n == 0:
+        return None
+    if liftoff_frame < 0 or end_frame >= n or end_frame < liftoff_frame:
+        return None
+    for k in range(liftoff_frame, end_frame + 1):
+        if float(bar_y_series[k]) <= float(knee_y_series[k]):
+            return k
+    return None
+
+
+def _wrist_midpoint_trajectory(
+    landmarks_per_frame: list[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (wrist_x_series, wrist_y_series) using MediaPipe landmarks 15
+    and 16 (bilateral wrist midpoint). Same proxy used by
+    ``compute_bar_path_from_landmarks`` when HoughCircles detection fails.
+
+    Side-agnostic by construction (always averages both wrists).
+    """
+    n = len(landmarks_per_frame)
+    xs = np.zeros(n, dtype=float)
+    ys = np.zeros(n, dtype=float)
+    for i, lm in enumerate(landmarks_per_frame):
+        xs[i] = (float(lm[15, 0]) + float(lm[16, 0])) / 2.0
+        ys[i] = (float(lm[15, 1]) + float(lm[16, 1])) / 2.0
+    return xs, ys
+
+
+def _bar_to_hip_distance_dict(
+    bar_x_series: np.ndarray,
+    bar_y_series: np.ndarray,
+    hip_x_series: np.ndarray,
+    knee_y_series: np.ndarray,
+    shoulder_x_setup: float,
+    shoulder_y_setup: float,
+    hip_y_setup: float,
+    setup_frame: int,
+    end_frame: int,
+    side: Literal["left", "right"],
+) -> dict[str, float | None]:
+    """Session 6 #4 — bar-x to hip-x signed distance at four phase frames,
+    normalised by shoulder-to-hip distance at setup.
+
+    Output dict keys: ``setup``, ``liftoff``, ``knee_pass``, ``lockout``.
+    A phase's value is ``None`` when that phase frame cannot be identified
+    (e.g. bar never lifts, never passes knee) OR when the normaliser is
+    degenerate (zero shoulder-to-hip distance at setup).
+
+    Side handling: the raw ``bar_x - hip_x`` delta is multiplied by
+    ``_facing_sign(side)`` so positive always means "bar in front of the
+    lifter" regardless of which body-side was filmed.
+    """
+    empty: dict[str, float | None] = {k: None for k in _S6_BAR_TO_HIP_PHASES}
+    n = min(
+        bar_x_series.shape[0], bar_y_series.shape[0],
+        hip_x_series.shape[0], knee_y_series.shape[0],
+    )
+    if n == 0:
+        return empty
+    if setup_frame < 0 or end_frame >= n or end_frame < setup_frame:
+        return empty
+    norm = float(np.hypot(
+        shoulder_x_setup - float(hip_x_series[setup_frame]),
+        shoulder_y_setup - hip_y_setup,
+    ))
+    if norm < _S5_DEGENERATE_MAGNITUDE:
+        return empty
+    sign = _facing_sign(side)
+
+    def _signed_norm(frame: int) -> float:
+        return ((float(bar_x_series[frame]) - float(hip_x_series[frame])) * sign) / norm
+
+    out: dict[str, float | None] = dict(empty)
+    out["setup"] = _signed_norm(setup_frame)
+    out["lockout"] = _signed_norm(end_frame)
+
+    liftoff = identify_liftoff_frame(bar_y_series, setup_frame, end_frame)
+    if liftoff is not None:
+        out["liftoff"] = _signed_norm(liftoff)
+        knee_pass = identify_knee_pass_frame(
+            bar_y_series, knee_y_series, liftoff, end_frame,
+        )
+        if knee_pass is not None:
+            out["knee_pass"] = _signed_norm(knee_pass)
+    return out
+
+
+def _shoulder_protraction_proxy_px(
+    setup_frame_landmarks: np.ndarray,
+    bottom_frame_landmarks: np.ndarray,
+    side_idx: SideIndices,
+    side: Literal["left", "right"],
+) -> float | None:
+    """Session 6 #14 — bench shoulder-x drift from setup to rep bottom,
+    normalised by setup shoulder-to-hip distance.
+
+    ``((shoulder_x_bottom - shoulder_x_setup) * facing_sign) /
+    hypot(shoulder_x_setup - hip_x_setup, shoulder_y_setup - hip_y_setup)``.
+    Positive = shoulders move anteriorly during the press. Returns ``None``
+    on missing landmark visibility (either frame) or degenerate
+    (zero-length) setup torso vector.
+    """
+    if not _vis_ok(setup_frame_landmarks, side_idx.shoulder, side_idx.hip):
+        return None
+    if not _vis_ok(bottom_frame_landmarks, side_idx.shoulder):
+        return None
+    shoulder_setup = _xy(setup_frame_landmarks, side_idx.shoulder)
+    hip_setup = _xy(setup_frame_landmarks, side_idx.hip)
+    shoulder_bottom = _xy(bottom_frame_landmarks, side_idx.shoulder)
+    span = float(np.hypot(
+        shoulder_setup[0] - hip_setup[0],
+        shoulder_setup[1] - hip_setup[1],
+    ))
+    if span < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    raw = float(shoulder_bottom[0]) - float(shoulder_setup[0])
+    return (raw * _facing_sign(side)) / span
 
 
 # ---------------------------------------------------------------------------

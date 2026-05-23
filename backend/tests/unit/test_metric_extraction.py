@@ -542,11 +542,18 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
-        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        # (Phase 1) + depth_classification (Session 4).
+        # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
+        _dict_keys = {"bar_to_hip_distance"}
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
+            elif key in _dict_keys:
+                assert isinstance(val, dict)
+                for phase_key, phase_val in val.items():
+                    assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
+                    assert phase_val is None or isinstance(phase_val, float)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
 
@@ -563,11 +570,18 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
-        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        # (Phase 1) + depth_classification (Session 4).
+        # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
+        _dict_keys = {"bar_to_hip_distance"}
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
+            elif key in _dict_keys:
+                assert isinstance(val, dict)
+                for phase_key, phase_val in val.items():
+                    assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
+                    assert phase_val is None or isinstance(phase_val, float)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
 
@@ -584,10 +598,17 @@ class TestMetricValueRanges:
             fps=30.0,
         )
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
-        # (Phase 1) + depth_classification (Session 4). All others are floats.
+        # (Phase 1) + depth_classification (Session 4).
+        # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
+        _dict_keys = {"bar_to_hip_distance"}
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
+            elif key in _dict_keys:
+                assert isinstance(val, dict)
+                for phase_key, phase_val in val.items():
+                    assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
+                    assert phase_val is None or isinstance(phase_val, float)
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"

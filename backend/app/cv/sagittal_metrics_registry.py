@@ -219,7 +219,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "shoulder-to-hip distance at setup. JSONB value is a dict."
         ),
         exercise_applicability=_DL,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
     SagittalMetricEntry(
@@ -232,7 +232,7 @@ SAGITTAL_METRICS_REGISTRY: frozenset[SagittalMetricEntry] = frozenset({
             "requires a frontal-plane camera."
         ),
         exercise_applicability=_BN,
-        computed_yet=False,
+        computed_yet=True,
         in_scoring=False,
     ),
 
