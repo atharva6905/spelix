@@ -11,6 +11,16 @@ and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
 Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
 Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
 
+## Completed — L2 Sprint — CV audit R1 dropout-aware depth-frame + aux-metric None-guards (2026-05-23)
+
+Post-Session-7 deep-dive root-caused the lumbar-proxy None values (see `docs/superpowers/investigations/2026-05-23-cv-occlusion-rootcause.md`): dominant cause is MediaPipe VIDEO-mode total pose dropout near the deep-squat bottom (not the hip-fold mis-track of ADR-LUMBAR-FLEXION-PROXY-NAMING §6, which was 1/6 reps), and `_find_depth_frame` (plain argmin) was selecting dropout frames as the rep bottom — corrupting every bottom-anchored squat metric. Fix R1: dropout-aware depth-frame selection (squat + DL), bench excluded (deferred to R3), and anatomical None-guards on `ankle_dorsiflexion_deg`/`shin_angle_deg`. Verified: 2285 unit pass, ruff + pyright clean, full sagittal integration suite 8/8 pass, squat recovers depth_angle + lumbar for all 6 reps. ADR-DEPTHFRAME-DROPOUT-GATE added (supersedes ADR-LUMBAR-FLEXION-PROXY-NAMING §6 attribution). PR + merge SHA: _pending_.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| L2-CV-DEPTHFRAME-DROPOUT | Add optional `valid_mask` to `_find_depth_frame`; squat + DL gate the rep-bottom argmin on `_vis_ok({shoulder,hip,knee})` so VIDEO-mode dropout frames (zero-filled, garbage angles) are not selected as the bottom; backward-compatible (default None = prior behaviour). Bench reverted to plain argmin (wrist proxy unreliable → R3). | done | M | — | FR-REPM-02, FR-SCOR-01 | _pending_ | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py` |
+| L2-CV-DEPTHFRAME-DROPOUT-AUX | `_ankle_dorsiflexion_deg` + `_shin_angle_deg` return None (cannot-compute) on mis-tracked frames via a geometric ordering guard (knee above ankle; ankle at/above toe) + anatomical-plausibility envelope (ankle `[10,120)`, shin `[-45,80]`). Integration test asserts float-or-None (plausibility enforced in code). | done | S | L2-CV-DEPTHFRAME-DROPOUT | FR-SCOR-01 | _pending_ | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py`, `backend/tests/integration/test_pipeline_sagittal_metrics.py` |
+| L2-CV-DEPTHFRAME-R3 | (OPEN) Bench bottom-frame + bar-path robustness — wrist landmark proxy is unreliable (vis ~0.04–0.5) in the supine press; needs barbell detection rather than wrist-midpoint. Deferred from R1. | open | M | — | FR-SCOR-03 | — | `backend/app/cv/{metric_extraction,barbell_detection}.py` |
+
 ## Completed — L2 Sprint — CV audit Session 2 lifter-side detection + refactor (2026-05-22, session 2)
 
 PR #150 (merge SHA `af1548b`) merged via `mcp__github__merge_pull_request` (`merge_method="merge"`).

@@ -138,13 +138,37 @@ def _default_parallel_angle() -> float:
         return 90.0
 
 
-def _find_depth_frame(angle_series: np.ndarray, start: int, end: int) -> int:
+def _find_depth_frame(
+    angle_series: np.ndarray,
+    start: int,
+    end: int,
+    valid_mask: np.ndarray | None = None,
+) -> int:
     """
     Return the frame index (within [start, end]) with the minimum angle value.
 
     This is the "depth" or "bottom" frame of the rep.
+
+    When *valid_mask* is provided and at least one frame in [start, end] is
+    marked valid (True), the argmin is computed only over those valid frames.
+    This prevents MediaPipe VIDEO-mode dropout frames (zero-filled, garbage
+    angles) from being selected as the rep bottom (L2-CV-DEPTHFRAME-DROPOUT).
+
+    When *valid_mask* is None, or no valid frame exists in [start, end],
+    the function falls back to the original plain argmin — preserving
+    backward-compatible behaviour for callers that pass no mask.
     """
     segment = angle_series[start : end + 1]
+
+    if valid_mask is not None:
+        seg_valid = valid_mask[start : end + 1]
+        if np.any(seg_valid):
+            # Replace invalid positions with +inf so argmin ignores them.
+            masked = np.where(seg_valid, segment, np.inf)
+            local_idx = int(np.argmin(masked))
+            return start + local_idx
+        # Fall through: all invalid — use plain argmin below.
+
     local_idx = int(np.argmin(segment))
     return start + local_idx
 
@@ -348,8 +372,16 @@ def _squat_metrics(
     hip_series = angle_timeseries["hip_angle"]
     knee_series = angle_timeseries["knee_angle"]
 
-    # Depth frame = frame with minimum hip angle within the rep
-    depth_frame = _find_depth_frame(hip_series, start, end)
+    # Depth frame = frame with minimum hip angle within the rep.
+    # Build a per-frame validity mask: a frame is valid iff shoulder, hip, and
+    # knee are all above _S5_MIN_VIS.  This gates out VIDEO-mode dropout frames
+    # (zero-filled landmarks) that inject garbage hip angles (L2-CV-DEPTHFRAME-DROPOUT).
+    squat_valid_mask = np.array(
+        [_vis_ok(f, side_idx.shoulder, side_idx.hip, side_idx.knee)
+         for f in landmarks_per_frame],
+        dtype=bool,
+    )
+    depth_frame = _find_depth_frame(hip_series, start, end, valid_mask=squat_valid_mask)
 
     depth_angle = float(hip_series[depth_frame])
     knee_angle_at_depth = float(knee_series[depth_frame])
@@ -412,10 +444,10 @@ def _squat_metrics(
         "pause_duration_s": pause_duration,
         "lockout_torso_lean_deg": lockout_torso_lean,
         "ankle_dorsiflexion_deg": (
-            float(ankle_dorsiflexion) if ankle_dorsiflexion is not None else 0.0
+            float(ankle_dorsiflexion) if ankle_dorsiflexion is not None else None
         ),
         "heel_rise_flag": float(heel_rise),
-        "shin_angle_deg": float(shin_angle) if shin_angle is not None else 0.0,
+        "shin_angle_deg": float(shin_angle) if shin_angle is not None else None,
         "lumbar_flexion_proxy_delta_deg": lumbar_delta,  # None or float
     }
 
@@ -445,7 +477,8 @@ def _bench_metrics(
     elbow_series = angle_timeseries["elbow_angle"]
     shoulder_series = angle_timeseries["shoulder_angle"]
 
-    # Bottom frame = frame with minimum elbow angle within the rep
+    # Bottom frame = frame with minimum elbow angle within the rep.
+    # Bench bottom-frame robustness deferred to R3 — wrist proxy unreliable.
     bottom_frame = _find_depth_frame(elbow_series, start, end)
 
     elbow_angle_at_bottom = float(elbow_series[bottom_frame])
@@ -559,8 +592,15 @@ def _deadlift_metrics(
     hip_series = angle_timeseries["hip_angle"]
     knee_series = angle_timeseries["knee_angle"]
 
-    # Bottom frame = frame with minimum hip angle within the rep
-    bottom_frame = _find_depth_frame(hip_series, start, end)
+    # Bottom frame = frame with minimum hip angle within the rep.
+    # Build a per-frame validity mask: a frame is valid iff shoulder, hip, and
+    # knee are all above _S5_MIN_VIS (L2-CV-DEPTHFRAME-DROPOUT).
+    dl_valid_mask = np.array(
+        [_vis_ok(f, side_idx.shoulder, side_idx.hip, side_idx.knee)
+         for f in landmarks_per_frame],
+        dtype=bool,
+    )
+    bottom_frame = _find_depth_frame(hip_series, start, end, valid_mask=dl_valid_mask)
 
     hip_angle_at_bottom = float(hip_series[bottom_frame])
 
@@ -670,6 +710,27 @@ def _deadlift_metrics(
 _S5_MIN_VIS = 0.30
 _S5_DEGENERATE_MAGNITUDE = 1e-6
 
+# Anatomical-plausibility envelopes for squat metrics (L2-CV-DEPTHFRAME-DROPOUT-R1b).
+# Values outside these bounds indicate MediaPipe mis-tracking even when visibility
+# passes and y-ordering holds.  Expert refines the clinically meaningful sub-range
+# via FR-EXPV-08; these are the outer anatomical limits only.
+#
+# ankle_dorsiflexion_deg: joint angle at ankle (knee-ankle-foot_index triangle).
+#   Full squat ROM spans ~45–110 deg. Anatomical ceiling ~120 deg (maximum
+#   plantarflexion, toes pointing straight down); values at or above 120 mean the
+#   foot_index vector points backward relative to the tibia — impossible in a squat.
+#   Lower bound 10 deg (extreme dorsiflexion with heel-elevated technique; below 10
+#   would require >80 deg passive ROM which exceeds bony-joint limits).
+_ANKLE_DORSIFLEXION_MIN_DEG = 10.0
+_ANKLE_DORSIFLEXION_MAX_DEG = 120.0  # exclusive upper bound
+
+# shin_angle_deg: shin deviation from vertical (positive = knee forward).
+#   Maximum forward knee travel is ~45 deg; extreme heel-elevated cases reach
+#   ~60–70 deg; absolute upper bound 80 deg.  Backward shin (negative) of more
+#   than ~30–45 deg is impossible in any standing or squatting posture; bound -45.
+_SHIN_ANGLE_MIN_DEG = -45.0
+_SHIN_ANGLE_MAX_DEG = 80.0
+
 
 def _vis_ok(landmarks: np.ndarray, *indices: int) -> bool:
     """Return True iff every named landmark has visibility >= _S5_MIN_VIS."""
@@ -683,14 +744,26 @@ def _ankle_dorsiflexion_deg(
     """Session 5 #1 — joint angle at S_ankle between S_knee and S_foot_index.
 
     Stored as the raw joint angle (registry description: "90 minus this is
-    dorsiflexion magnitude"). Returns None on missing landmark or degenerate
-    zero-length vector. Side-agnostic (joint-angle math).
+    dorsiflexion magnitude"). Returns None on missing landmark, degenerate
+    zero-length vector, or failed geometric plausibility check.
+
+    Geometric plausibility (L2-CV-DEPTHFRAME-DROPOUT-R1): in a valid sagittal
+    squat pose (MediaPipe normalised coords, y increases downward):
+      • knee_y < ankle_y  — knee is above ankle in image
+      • ankle_y <= foot_y — ankle is at or above toe in image
+    Violations indicate MediaPipe mis-tracking (visibility > 0.30 but
+    coordinates inverted) — return None rather than an impossible angle.
     """
     if not _vis_ok(landmarks, side_idx.knee, side_idx.ankle, side_idx.foot_index):
         return None
     knee = _xy(landmarks, side_idx.knee)
     ankle = _xy(landmarks, side_idx.ankle)
     foot = _xy(landmarks, side_idx.foot_index)
+    # Geometric plausibility guard — rejects mis-tracked frames.
+    if float(knee[1]) >= float(ankle[1]):  # knee at or below ankle in image
+        return None
+    if float(ankle[1]) > float(foot[1]):   # ankle below toe in image
+        return None
     v_kn = knee - ankle
     v_ft = foot - ankle
     mag_kn = float(np.linalg.norm(v_kn))
@@ -698,7 +771,12 @@ def _ankle_dorsiflexion_deg(
     if mag_kn < _S5_DEGENERATE_MAGNITUDE or mag_ft < _S5_DEGENERATE_MAGNITUDE:
         return None
     cos_t = float(np.clip(np.dot(v_kn, v_ft) / (mag_kn * mag_ft), -1.0, 1.0))
-    return float(np.degrees(np.arccos(cos_t)))
+    angle = float(np.degrees(np.arccos(cos_t)))
+    # Anatomical-plausibility envelope — rejects values outside the achievable
+    # squat ROM even when visibility and y-ordering guards pass (L2-CV-DEPTHFRAME-DROPOUT-R1b).
+    if angle < _ANKLE_DORSIFLEXION_MIN_DEG or angle >= _ANKLE_DORSIFLEXION_MAX_DEG:
+        return None
+    return angle
 
 
 def _heel_rise_flag(
@@ -828,17 +906,30 @@ def _shin_angle_deg(
 
     ``atan2((knee_x - ankle_x) * facing_sign, ankle_y - knee_y)``. 0° = vertical
     shin. Positive = knee forward of ankle (forward shin lean) regardless of
-    filmed side. Returns None on missing landmark or zero-magnitude vector.
+    filmed side. Returns None on missing landmark, zero-magnitude vector, or
+    failed geometric plausibility check.
+
+    Geometric plausibility (L2-CV-DEPTHFRAME-DROPOUT-R1): knee_y < ankle_y
+    (knee above ankle in image; y increases downward in MediaPipe normalised
+    coords). Violations indicate mis-tracking → return None.
     """
     if not _vis_ok(landmarks, side_idx.knee, side_idx.ankle):
         return None
     knee = _xy(landmarks, side_idx.knee)
     ankle = _xy(landmarks, side_idx.ankle)
+    # Geometric plausibility guard — rejects mis-tracked frames.
+    if float(knee[1]) >= float(ankle[1]):  # knee at or below ankle in image
+        return None
     dx = (float(knee[0]) - float(ankle[0])) * _facing_sign(side)
     dy = float(ankle[1]) - float(knee[1])
     if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
         return None
-    return float(np.degrees(np.arctan2(dx, dy)))
+    angle = float(np.degrees(np.arctan2(dx, dy)))
+    # Anatomical-plausibility envelope — rejects values outside achievable squat
+    # shin-lean ROM (L2-CV-DEPTHFRAME-DROPOUT-R1b).
+    if angle < _SHIN_ANGLE_MIN_DEG or angle > _SHIN_ANGLE_MAX_DEG:
+        return None
+    return angle
 
 
 def _setup_knee_angle_deg(
