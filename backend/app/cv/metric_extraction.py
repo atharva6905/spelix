@@ -1018,14 +1018,24 @@ def _lumbar_proxy_angle(
     """Composite trunk-flexion proxy angle at one frame:
     ``degrees(atan2((shoulder_x - hip_x)*facing_sign, hip_y - shoulder_y))``.
     NOT lumbar-isolated (ADR-LUMBAR-FLEXION-PROXY-NAMING). Returns None on
-    low visibility or degenerate (zero-length) torso vector."""
+    low visibility, a degenerate (zero-length) torso vector, OR a non-physical
+    shoulder-below-hip pose.
+
+    The shoulder-below-hip guard (``dy <= 0``) is load-bearing: for squat and
+    deadlift the shoulder always sits above the hip in image space
+    (``hip_y > shoulder_y`` -> ``dy > 0``). A deep-squat hip-fold occlusion (a
+    known high-occlusion phase) can mis-place a landmark so the shoulder appears
+    below the hip; ``atan2`` would then wrap toward +/-180 deg, producing an
+    implausible delta (-165 deg was observed on the squat fixture). Guarding
+    ``dy <= 0`` returns None on that artifact and bounds the proxy to
+    (-90, 90) deg."""
     if not _vis_ok(landmarks, side_idx.shoulder, side_idx.hip):
         return None
     shoulder = _xy(landmarks, side_idx.shoulder)
     hip = _xy(landmarks, side_idx.hip)
     dx = (float(shoulder[0]) - float(hip[0])) * _facing_sign(side)
     dy = float(hip[1]) - float(shoulder[1])  # +ve: hip below shoulder (normal)
-    if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
+    if dy <= _S5_DEGENERATE_MAGNITUDE:
         return None
     return float(np.degrees(np.arctan2(dx, dy)))
 
