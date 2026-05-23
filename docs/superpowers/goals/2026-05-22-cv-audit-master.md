@@ -294,18 +294,21 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 **Completion checklist:**
 
-- [ ] Extractors for #7, #8, #9, #12 in `metric_extraction.py`
-- [ ] Scoring branches for #7 (Technique) and #8 (Control) in `scoring.py`
-- [ ] Threshold config entries in `thresholds_v1.json`
-- [ ] Unit tests including side-agnosticism mirror tests
-- [ ] Scoring tests assert correct docks
-- [ ] Integration test on `atharva-squat.mov`
-- [ ] Frontend badges + panel rows
-- [ ] PR merged via `/team` coordination; CI green
-- [ ] E2E on prod confirms badges + panel values
-- [ ] ADR-AUTO-FLOW-REFINEMENTS in `decisions.md`
-- [ ] Draft expert-onboarding email in `.claude/handoff.md`
-- [ ] Master manifest updated; Session 5 active
+- [x] Extractors for #7, #8, #9, #12 in `metric_extraction.py` — `_classify_depth`, `_pause_duration_s`, `_lockout_torso_lean_deg` helpers + `_default_parallel_angle` lazy loader + analyzer wirings (commit `2ffad86`)
+- [x] Scoring branches for #7 (Technique) and #8 (Control) in `scoring.py` — `TechniqueScore._score_squat.depth_classification` (-1.5/-2.5 dock), `ControlScore.compute.ecc_con_ratio` (-1.0/-0.5 dock) (commit `8e0aa71`)
+- [x] Threshold config entries in `thresholds_v1.json` — `squat.depth_classification_min="at_parallel"` (Schoenfeld 2010), `control.ecc_con_ratio_target_min=1.0` / `_max=3.0` (Wilk et al. 1993) (commit `0c24937`)
+- [x] Unit tests including side-agnosticism mirror tests — 24 new tests in `test_metric_extraction_sagittal.py` covering happy paths, boundaries, side-agnosticism (5 parametrised lean values), aggregator forwarding (commit `2ffad86`); `_default_parallel_angle` lazy-loaded with 90.0 fallback
+- [x] Scoring tests assert correct docks — 11 new tests in `test_scoring.py` covering depth dock 1.5/2.5, ecc/con dock 1.0/0.5, cross-exercise applicability, missing-key + zero-sentinel fall-through (commit `8e0aa71`)
+- [x] Integration test on `atharva-squat.mov` — `test_pipeline_session4_metrics.py` (commit `943f630`): 6 reps detected, all four keys populated per rep, aggregate ecc/con=2.16, OverallFormScore.overall=6.90, 2/2 tests pass in 913.41s
+- [x] Frontend badges + panel rows — `<AutoFlowMetricsChips />` on ResultsPage reads `metrics_json.{depth_classification, ecc_con_ratio}` (commit `cbc846a`); expert `UnvalidatedMetricsPanel._extractValue` fixed to read nested `metrics_json[key]` (commit `d6c6d60`, regression test added)
+- [x] PR merged via `/team` coordination; CI green — PR #157 (impl) `e17c1d6`, PR #158 (close + panel fix) `b8f67e1`; all 6 PR-level checks pass on both final commits; Backend Tests / Frontend Tests / Lint / Type Check / Secret Scanning / Vercel
+- [x] E2E on prod confirms badges + panel values — analysis `3525fb45-1c89-4431-aee0-298469d516ff`. Regular ResultsPage: `Depth: below parallel` + `Ecc/Con: 2.0`. Expert panel: 4 metrics populated across all 8 reps (depth=below_parallel ×8; ecc/con 0.1..7.0; pause 0.0..0.1s; lockout_lean 16.7..82.4°). Console errors: 0. Screenshots `e2e/screenshots/session4-results-autoflow.png` + `session4-expert-panel.png`
+- [x] ADR-AUTO-FLOW-REFINEMENTS in `decisions.md` (commit `f4fe96e`) — refinement metrics bypass compute-only rule because their underlying math is already validated; single-commit rollback path documented
+- [x] Draft expert-onboarding email in `.claude/handoff.md` (commit `00c0b14`) — Schoenfeld 2010 / Wilk 1993 defaults, FR-EXPV-08 threshold-flag instructions, link to prod analysis
+- [x] Master manifest updated; Session 5 active (commits `f4fe96e` + `00c0b14`) — Session Status Overview row 4 → `complete` SHA `e17c1d6` PR #157; row 5 → `active`
+- [x] **spelix-security-reviewer** PASS_WITH_FINDINGS (no CRITICAL, no HIGH; one LOW on pre-existing test docstring, fixed in commit `3467689`)
+- [x] **Droplet HEAD** matches latest merge (`b8f67e1 Merge pull request #158`); containers `(healthy)` per `docker ps`
+- [x] **Post-merge Deploy to Production** `conclusion=success` on main runs `26317692627` (PR #157) and `26318442564` (PR #158)
 
 ---
 
