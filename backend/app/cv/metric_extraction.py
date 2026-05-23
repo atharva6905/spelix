@@ -1087,10 +1087,11 @@ def _inject_technique_consistency_std(
     key = _S7_CONSISTENCY_KEY.get(exercise_type.lower())
     if key is None:
         return
-    values = [
-        float(r.metrics[key]) for r in result
-        if isinstance(r.metrics.get(key), (int, float))
-    ]
+    values: list[float] = []
+    for r in result:
+        v = r.metrics.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            values.append(float(v))
     std: float | None = float(np.std(values)) if len(values) >= 2 else None
     for r in result:
         r.metrics["technique_consistency_std"] = std
@@ -1102,11 +1103,11 @@ def session_modal_bar_path_classification(
     """Most common non-None bar_path_classification across reps (smoke/
     calibration only — NOT persisted to JSONB)."""
     from collections import Counter
-    labels = [
-        rm.metrics.get("bar_path_classification")
-        for rm in rep_metrics_list
-        if isinstance(rm.metrics.get("bar_path_classification"), str)
-    ]
+    labels: list[str] = []
+    for rm in rep_metrics_list:
+        v = rm.metrics.get("bar_path_classification")
+        if isinstance(v, str):
+            labels.append(v)
     if not labels:
         return None
     return Counter(labels).most_common(1)[0][0]
