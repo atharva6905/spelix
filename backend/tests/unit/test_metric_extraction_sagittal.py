@@ -368,6 +368,21 @@ def test_session4_ecc_con_ratio_value_correct() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Session 5 — facing-sign helper
+# ---------------------------------------------------------------------------
+
+
+def test_session5_facing_sign_right_is_positive_one() -> None:
+    from app.cv.metric_extraction import _facing_sign
+    assert _facing_sign("right") == 1.0
+
+
+def test_session5_facing_sign_left_is_negative_one() -> None:
+    from app.cv.metric_extraction import _facing_sign
+    assert _facing_sign("left") == -1.0
+
+
 def test_session4_pipeline_aggregate_passes_through_session4_keys() -> None:
     """The aggregator that feeds OverallFormScore must propagate
     depth_classification (modal string) and ecc_con_ratio (mean float)."""

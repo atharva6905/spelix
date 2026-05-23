@@ -54,6 +54,20 @@ def _xy(landmarks: np.ndarray, idx: int) -> np.ndarray:
     return landmarks[idx, :2]
 
 
+def _facing_sign(side: Literal["left", "right"]) -> float:
+    """Return +1.0 if the lifter faces right in the image, -1.0 if left.
+
+    Multiplies x-direction signed metrics (wrist_alignment_deg, shin_angle_deg,
+    setup_shoulder_x_offset, arch_deg) so the same pose filmed from either side
+    produces the same signed output. Without this, swapping side indices alone
+    flips the sign of every x-derived value because anterior-posterior direction
+    in image coordinates depends on which way the subject faces.
+
+    See ADR-LIFTER-SIDE-DETECTION (Session 2) and design Section 5 mirror tests.
+    """
+    return 1.0 if side == "right" else -1.0
+
+
 def _torso_lean_deg(landmarks: np.ndarray, side_idx: SideIndices) -> float:
     """
     Compute torso lean — the angle between the shoulder–hip line and vertical.
@@ -308,6 +322,7 @@ def _squat_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract squat metrics for one rep.
@@ -384,6 +399,7 @@ def _bench_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract bench press metrics for one rep.
@@ -450,6 +466,7 @@ def _deadlift_metrics(
     angle_timeseries: dict[str, np.ndarray],
     fps: float,
     side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
 ) -> dict[str, float | str]:
     """
     Extract deadlift metrics for one rep.
@@ -599,7 +616,9 @@ def extract_rep_metrics(
 
     result: list[RepMetrics] = []
     for rep in reps:
-        metrics = analyzer(rep, landmarks_per_frame, angle_timeseries, fps, side_idx)
+        metrics = analyzer(
+            rep, landmarks_per_frame, angle_timeseries, fps, side_idx, lifter_side,
+        )
         result.append(
             RepMetrics(
                 rep_index=rep.rep_index,
