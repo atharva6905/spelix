@@ -2051,3 +2051,34 @@ def test_session7_lumbar_proxy_side_agnostic(flex_deg: float) -> None:
     rd = extract_lumbar_flexion_proxy_delta_deg(right_frames, 1, 0, right_idx, "right")
     ld = extract_lumbar_flexion_proxy_delta_deg(left_frames, 1, 0, left_idx, "left")
     assert rd == pytest.approx(ld, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #6 — _classify_bar_path
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import _classify_bar_path  # noqa: E402
+
+
+def test_session7_barpath_vertical() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.50) == "vertical"
+
+
+def test_session7_barpath_jcurve() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.44) == "j_curve"
+
+
+def test_session7_barpath_drift() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.52, ascent_end_x=0.54) == "drift"
+
+
+def test_session7_barpath_jcurve_mirrored_left_facing() -> None:
+    """Left-facing lifter's j-curve sweeps to higher x -- symmetrized abs() catches it."""
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.56) == "j_curve"
+
+
+def test_session7_barpath_jcurve_precedence_over_neardrift() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.46) == "j_curve"
+
+
+def test_session7_barpath_degenerate_none() -> None:
+    assert _classify_bar_path(None, None, None) is None

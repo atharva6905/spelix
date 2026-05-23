@@ -1012,6 +1012,28 @@ def extract_lumbar_flexion_proxy_delta_deg(
     return bot - base
 
 
+_S7_JCURVE_THRESHOLD = 0.03
+_S7_VERTICAL_DEADBAND = 0.02
+
+
+def _classify_bar_path(
+    descent_start_x: float | None,
+    bottom_x: float | None,
+    ascent_end_x: float | None,
+) -> str | None:
+    """Session 7 #6 — bar-path shape from three x anchors (wrist-midpoint).
+    Side-agnostic: uses ``abs()`` so a left-facing lifter's j-curve (which
+    sweeps toward higher x) classifies identically to a right-facing one
+    (v0 heuristic — design R5; expect post-onboarding refinement)."""
+    if descent_start_x is None or bottom_x is None or ascent_end_x is None:
+        return None
+    if abs(ascent_end_x - bottom_x) > _S7_JCURVE_THRESHOLD:
+        return "j_curve"
+    if abs(descent_start_x - ascent_end_x) < _S7_VERTICAL_DEADBAND:
+        return "vertical"
+    return "drift"
+
+
 def _wrist_midpoint_trajectory(
     landmarks_per_frame: list[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
