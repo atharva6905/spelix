@@ -1317,3 +1317,131 @@ def test_session4_pipeline_aggregate_passes_through_session4_keys() -> None:
     assert agg["ecc_con_ratio"] == pytest.approx(0.8, abs=0.01)
     # depth_classification is the modal label (2× above_parallel → above_parallel).
     assert agg["depth_classification"] == "above_parallel"
+
+
+# ---------------------------------------------------------------------------
+# Session 5 — defensive guard coverage (Task 14 Step 4)
+# These tests target specific lines reported as uncovered by coverage tooling.
+# ---------------------------------------------------------------------------
+
+
+# --- _heel_rise_flag defensive guards (lines 653, 656, 662-663) ---
+
+
+def test_session5_heel_rise_low_visibility_during_baseline_returns_false() -> None:
+    """All baseline frames have heel visibility below _S5_MIN_VIS → no
+    baseline_ys collected → return False (covers line 656)."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    # Build 20 frames; set heel visibility to 0.10 for the first 5 (baseline window).
+    frames: list[np.ndarray] = []
+    for i in range(20):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.heel, :2] = (0.42, 0.90)
+        # Baseline frames (0-4): crash heel visibility so they are skipped (line 653).
+        if i < 5:
+            lm[right_idx.heel, 3] = 0.10
+        frames.append(lm)
+    result = _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx)
+    assert result is False
+
+
+def test_session5_heel_rise_low_visibility_during_detection_resets_triggered() -> None:
+    """A low-visibility heel frame mid-detection resets the consecutive-frame
+    counter (covers lines 662-663).  Pattern: 2 rising frames → invisible frame
+    → 2 more rising frames → total consecutive never reaches 3 → False."""
+    from app.cv.metric_extraction import _heel_rise_flag
+    right_idx = landmark_indices_for_side("right")
+    baseline_y = 0.90
+    rise_y = baseline_y - 0.05  # above threshold (0.02)
+    n = 20
+    frames: list[np.ndarray] = []
+    for i in range(n):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        # Baseline frames 0-4: heel at baseline_y, visible.
+        y = baseline_y
+        vis = 0.9
+        if i == 7 or i == 8:
+            # Two rising frames.
+            y = rise_y
+        elif i == 9:
+            # Invisible frame mid-streak — resets triggered counter (lines 662-663).
+            vis = 0.10
+        elif i == 10 or i == 11:
+            # Two more rising frames (counter restarts from 0, never reaches 3).
+            y = rise_y
+        lm[right_idx.heel, :2] = (0.42, y)
+        lm[right_idx.heel, 3] = vis
+        frames.append(lm)
+    result = _heel_rise_flag(frames, start=0, depth_frame=15, side_idx=right_idx)
+    assert result is False
+
+
+# --- _arch_deg defensive guards (lines 804, 826) ---
+
+
+def test_session5_arch_deg_mismatched_length_returns_none() -> None:
+    """len(landmarks_per_frame) != len(non_rep_frame_mask) → return None (line 804)."""
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.30, 0.55), hip_xy=(0.60, 0.50))
+        for _ in range(10)
+    ]
+    # Mask length differs from frames length — triggers the guard.
+    result = _arch_deg(frames, non_rep_frame_mask=[True] * 7,
+                       side_idx=right_idx, side="right")
+    assert result is None
+
+
+def test_session5_arch_deg_degenerate_zero_mean_vector_returns_none() -> None:
+    """After averaging, dx_mean and dy_mean are both < _S5_DEGENERATE_MAGNITUDE
+    (shoulder and hip at identical position) → return None (line 826)."""
+    from app.cv.metric_extraction import _arch_deg
+    right_idx = landmark_indices_for_side("right")
+    # shoulder_xy == hip_xy → dx=0, dy=0 → zero mean vector.
+    frames = [
+        _make_bench_arch_frame(shoulder_xy=(0.50, 0.50), hip_xy=(0.50, 0.50))
+        for _ in range(10)
+    ]
+    result = _arch_deg(frames, non_rep_frame_mask=[True] * 10,
+                       side_idx=right_idx, side="right")
+    assert result is None
+
+
+# --- extract_rep_metrics public API defensive guards (lines 894, 899) ---
+
+
+def test_session5_extract_rep_metrics_empty_reps_returns_empty_list() -> None:
+    """reps=[] → return [] without entering the exercise dispatch (line 894)."""
+    out = extract_rep_metrics(
+        reps=[],
+        landmarks_per_frame=[np.zeros((33, 5))],
+        angle_timeseries={"hip_angle": np.zeros(1)},
+        exercise_type="squat",
+        exercise_variant="standard",
+        fps=30.0,
+    )
+    assert out == []
+
+
+def test_session5_extract_rep_metrics_unknown_exercise_raises_value_error() -> None:
+    """exercise_type not in ('squat','bench','deadlift') → ValueError (line 899)."""
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=9,
+        confidence_score=0.9, min_angle=90.0,
+    )
+    frames = [np.zeros((33, 5)) for _ in range(10)]
+    with pytest.raises(ValueError, match="overhead_press"):
+        extract_rep_metrics(
+            reps=[rep],
+            landmarks_per_frame=frames,
+            angle_timeseries={"elbow_angle": np.zeros(10)},
+            exercise_type="overhead_press",
+            exercise_variant="barbell",
+            fps=30.0,
+        )
