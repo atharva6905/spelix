@@ -544,8 +544,16 @@ class TestMetricValueRanges:
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
         # (Phase 1) + depth_classification (Session 4).
         # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
+        # Session 7 nullable keys: lumbar_flexion_proxy_delta_deg (requires baseline
+        # frame cross-rep context), technique_consistency_std (requires ≥2 reps),
+        # bar_path_classification (string or None).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         _dict_keys = {"bar_to_hip_distance"}
+        _SESSION7_NULLABLE = {
+            "lumbar_flexion_proxy_delta_deg",
+            "technique_consistency_std",
+            "bar_path_classification",
+        }
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
@@ -554,6 +562,10 @@ class TestMetricValueRanges:
                 for phase_key, phase_val in val.items():
                     assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
                     assert phase_val is None or isinstance(phase_val, float)
+            elif key in _SESSION7_NULLABLE:
+                assert val is None or isinstance(val, (float, int, str)), (
+                    f"metric {key} has unexpected type {type(val)}"
+                )
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
 
@@ -572,8 +584,16 @@ class TestMetricValueRanges:
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
         # (Phase 1) + depth_classification (Session 4).
         # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
+        # Session 7 nullable keys: lumbar_flexion_proxy_delta_deg (requires baseline
+        # frame cross-rep context), technique_consistency_std (requires ≥2 reps),
+        # bar_path_classification (string or None).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         _dict_keys = {"bar_to_hip_distance"}
+        _SESSION7_NULLABLE = {
+            "lumbar_flexion_proxy_delta_deg",
+            "technique_consistency_std",
+            "bar_path_classification",
+        }
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
@@ -582,6 +602,10 @@ class TestMetricValueRanges:
                 for phase_key, phase_val in val.items():
                     assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
                     assert phase_val is None or isinstance(phase_val, float)
+            elif key in _SESSION7_NULLABLE:
+                assert val is None or isinstance(val, (float, int, str)), (
+                    f"metric {key} has unexpected type {type(val)}"
+                )
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
 
@@ -600,8 +624,16 @@ class TestMetricValueRanges:
         # Categorical string-valued keys (ADR-022): phase_of_max_deviation
         # (Phase 1) + depth_classification (Session 4).
         # Dict-valued keys: bar_to_hip_distance (Session 6 — phase-frame map).
+        # Session 7 nullable keys: lumbar_flexion_proxy_delta_deg (requires baseline
+        # frame cross-rep context), technique_consistency_std (requires ≥2 reps),
+        # bar_path_classification (string or None).
         _categorical_keys = {"phase_of_max_deviation", "depth_classification"}
         _dict_keys = {"bar_to_hip_distance"}
+        _SESSION7_NULLABLE = {
+            "lumbar_flexion_proxy_delta_deg",
+            "technique_consistency_std",
+            "bar_path_classification",
+        }
         for key, val in result[0].metrics.items():
             if key in _categorical_keys:
                 assert isinstance(val, str)
@@ -610,5 +642,9 @@ class TestMetricValueRanges:
                 for phase_key, phase_val in val.items():
                     assert phase_key in {"setup", "liftoff", "knee_pass", "lockout"}
                     assert phase_val is None or isinstance(phase_val, float)
+            elif key in _SESSION7_NULLABLE:
+                assert val is None or isinstance(val, (float, int, str)), (
+                    f"metric {key} has unexpected type {type(val)}"
+                )
             else:
                 assert isinstance(val, float), f"metric {key} is not a float"
