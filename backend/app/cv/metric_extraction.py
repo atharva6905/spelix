@@ -34,9 +34,10 @@ _COL_Y = 1
 # ---------------------------------------------------------------------------
 
 
-# Categorical strings (Phase 1 + Session 4) and dict-valued phase-frame maps
-# (Session 6 #4 bar_to_hip_distance) coexist with float-valued metrics.
-RepMetricValue = float | str | dict[str, float | None]
+# Categorical strings, dict-valued phase-frame maps, and None (Session 7
+# #2/#16 cannot-compute sentinel — stored as JSON null, NOT a 0.0 sentinel,
+# because 0.0 is a valid biomechanical outcome for a delta / std).
+RepMetricValue = float | str | dict[str, float | None] | None
 
 
 @dataclass
@@ -328,6 +329,8 @@ def _squat_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
+    all_reps: list[DetectedRep] | None = None,
+    rep_position: int = 0,
 ) -> dict[str, RepMetricValue]:
     """
     Extract squat metrics for one rep.
@@ -385,6 +388,14 @@ def _squat_metrics(
     heel_rise = _heel_rise_flag(landmarks_per_frame, start, depth_frame, side_idx)
     shin_angle = _shin_angle_deg(landmarks_per_frame[depth_frame], side_idx, lifter_side)
 
+    # Session 7 #2 — lumbar flexion proxy delta vs standing baseline.
+    baseline = identify_standing_baseline_frame(
+        "squat", rep, rep_position, all_reps, bar_y_series=None,
+    )
+    lumbar_delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame, depth_frame, baseline, side_idx, lifter_side,
+    )
+
     return {
         "depth_angle": depth_angle,
         "knee_angle_at_depth": knee_angle_at_depth,
@@ -405,6 +416,7 @@ def _squat_metrics(
         ),
         "heel_rise_flag": float(heel_rise),
         "shin_angle_deg": float(shin_angle) if shin_angle is not None else 0.0,
+        "lumbar_flexion_proxy_delta_deg": lumbar_delta,  # None or float
     }
 
 
@@ -415,6 +427,8 @@ def _bench_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
+    all_reps: list[DetectedRep] | None = None,
+    rep_position: int = 0,
 ) -> dict[str, RepMetricValue]:
     """
     Extract bench press metrics for one rep.
@@ -481,6 +495,18 @@ def _bench_metrics(
     non_rep_mask = [not (start <= i <= end) for i in range(n_total)]
     arch_value = _arch_deg(landmarks_per_frame, non_rep_mask, side_idx, lifter_side)
 
+    # Session 7 #6 — bar-path classification using wrist-midpoint x trajectory.
+    bar_x_series, _ = _wrist_midpoint_trajectory(landmarks_per_frame)
+    span = end - start
+    if span < 2:
+        bar_path: str | None = None
+    else:
+        bar_path = _classify_bar_path(
+            descent_start_x=float(bar_x_series[start]),
+            bottom_x=float(bar_x_series[bottom_frame]),
+            ascent_end_x=float(bar_x_series[end]),
+        )
+
     return {
         "elbow_angle_at_bottom": elbow_angle_at_bottom,
         "shoulder_angle_at_bottom": shoulder_angle_at_bottom,
@@ -503,6 +529,7 @@ def _bench_metrics(
         "shoulder_protraction_proxy_px": (
             float(shoulder_protraction) if shoulder_protraction is not None else 0.0
         ),
+        "bar_path_classification": bar_path,  # None or str
     }
 
 
@@ -513,6 +540,8 @@ def _deadlift_metrics(
     fps: float,
     side_idx: SideIndices,
     lifter_side: Literal["left", "right"] = "right",
+    all_reps: list[DetectedRep] | None = None,
+    rep_position: int = 0,
 ) -> dict[str, RepMetricValue]:
     """
     Extract deadlift metrics for one rep.
@@ -598,6 +627,15 @@ def _deadlift_metrics(
         side=lifter_side,
     )
 
+    # Session 7 #2 — lumbar flexion proxy delta vs standing baseline.
+    # bar_y_series is already computed above for bar_to_hip_distance.
+    dl_baseline = identify_standing_baseline_frame(
+        "deadlift", rep, rep_position, all_reps, bar_y_series=bar_y_series,
+    )
+    dl_lumbar_delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame, bottom_frame, dl_baseline, side_idx, lifter_side,
+    )
+
     return {
         "hip_angle_at_bottom": hip_angle_at_bottom,
         "knee_angle_at_lockout": knee_angle_at_lockout,
@@ -619,6 +657,7 @@ def _deadlift_metrics(
             float(setup_knee_angle) if setup_knee_angle is not None else 0.0
         ),
         "bar_to_hip_distance": bar_to_hip,
+        "lumbar_flexion_proxy_delta_deg": dl_lumbar_delta,  # None or float
     }
 
 
@@ -935,6 +974,145 @@ def identify_knee_pass_frame(
     return None
 
 
+def identify_standing_baseline_frame(
+    exercise_type: str,
+    rep: DetectedRep,
+    rep_position: int,
+    all_reps: list[DetectedRep] | None,
+    bar_y_series: np.ndarray | None,
+) -> int | None:
+    """Session 7 #2 — index of the standing-baseline frame for the lumbar
+    flexion proxy delta.
+
+    Squat: one global baseline = ``all_reps[0].start_frame`` (the cleanest
+    upright posture in the clip — see ADR-LUMBAR-FLEXION-PROXY-NAMING).
+    Deadlift: previous rep's ``end_frame`` (lockout). First rep has no
+    previous rep, so use the last frame before liftoff
+    (``identify_liftoff_frame - 1``), falling back to ``rep.start_frame``
+    when liftoff is undetectable.
+
+    Returns ``None`` when no reps are available.
+    """
+    ex = exercise_type.lower()
+    if ex == "squat":
+        if not all_reps:
+            return None
+        return all_reps[0].start_frame
+    if ex == "deadlift":
+        if all_reps and rep_position > 0:
+            return all_reps[rep_position - 1].end_frame
+        # First rep: pre-liftoff frame, fallback to start.
+        if bar_y_series is not None:
+            liftoff = identify_liftoff_frame(
+                bar_y_series, rep.start_frame, rep.end_frame,
+            )
+            if liftoff is not None:
+                return max(rep.start_frame, liftoff - 1)
+        return rep.start_frame
+    return None
+
+
+def _lumbar_proxy_angle(
+    landmarks: np.ndarray, side_idx: SideIndices, side: Literal["left", "right"],
+) -> float | None:
+    """Composite trunk-flexion proxy angle at one frame:
+    ``degrees(atan2((shoulder_x - hip_x)*facing_sign, hip_y - shoulder_y))``.
+    NOT lumbar-isolated (ADR-LUMBAR-FLEXION-PROXY-NAMING). Returns None on
+    low visibility or degenerate (zero-length) torso vector."""
+    if not _vis_ok(landmarks, side_idx.shoulder, side_idx.hip):
+        return None
+    shoulder = _xy(landmarks, side_idx.shoulder)
+    hip = _xy(landmarks, side_idx.hip)
+    dx = (float(shoulder[0]) - float(hip[0])) * _facing_sign(side)
+    dy = float(hip[1]) - float(shoulder[1])  # +ve: hip below shoulder (normal)
+    if abs(dx) < _S5_DEGENERATE_MAGNITUDE and abs(dy) < _S5_DEGENERATE_MAGNITUDE:
+        return None
+    return float(np.degrees(np.arctan2(dx, dy)))
+
+
+def extract_lumbar_flexion_proxy_delta_deg(
+    landmarks_per_frame: list[np.ndarray],
+    bottom_frame: int,
+    baseline_frame: int | None,
+    side_idx: SideIndices,
+    lifter_side: Literal["left", "right"] = "right",
+) -> float | None:
+    """Session 7 #2 — composite trunk-flexion proxy delta (NOT lumbar-isolated).
+    ``proxy(bottom) - proxy(baseline)``. Returns None if baseline is None,
+    a frame is out of bounds, or either proxy angle is None."""
+    n = len(landmarks_per_frame)
+    if baseline_frame is None or not (0 <= baseline_frame < n) or not (0 <= bottom_frame < n):
+        return None
+    base = _lumbar_proxy_angle(landmarks_per_frame[baseline_frame], side_idx, lifter_side)
+    bot = _lumbar_proxy_angle(landmarks_per_frame[bottom_frame], side_idx, lifter_side)
+    if base is None or bot is None:
+        return None
+    return bot - base
+
+
+_S7_JCURVE_THRESHOLD = 0.03
+_S7_VERTICAL_DEADBAND = 0.02
+
+
+def _classify_bar_path(
+    descent_start_x: float | None,
+    bottom_x: float | None,
+    ascent_end_x: float | None,
+) -> str | None:
+    """Session 7 #6 — bar-path shape from three x anchors (wrist-midpoint).
+    Side-agnostic: uses ``abs()`` so a left-facing lifter's j-curve (which
+    sweeps toward higher x) classifies identically to a right-facing one
+    (v0 heuristic — design R5; expect post-onboarding refinement)."""
+    if descent_start_x is None or bottom_x is None or ascent_end_x is None:
+        return None
+    if abs(ascent_end_x - bottom_x) > _S7_JCURVE_THRESHOLD:
+        return "j_curve"
+    if abs(descent_start_x - ascent_end_x) < _S7_VERTICAL_DEADBAND:
+        return "vertical"
+    return "drift"
+
+
+_S7_CONSISTENCY_KEY = {
+    "squat": "depth_angle",
+    "deadlift": "lockout_torso_lean_deg",
+}
+
+
+def _inject_technique_consistency_std(
+    result: list[RepMetrics], exercise_type: str,
+) -> None:
+    """Session 7 #16 — population std (ddof=0) of the chosen technique metric
+    across reps, written into EVERY rep's dict. Single-rep -> None (one
+    observation has no measurable consistency). In-place mutation."""
+    key = _S7_CONSISTENCY_KEY.get(exercise_type.lower())
+    if key is None:
+        return
+    values: list[float] = []
+    for r in result:
+        v = r.metrics.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            values.append(float(v))
+    std: float | None = float(np.std(values)) if len(values) >= 2 else None
+    for r in result:
+        r.metrics["technique_consistency_std"] = std
+
+
+def session_modal_bar_path_classification(
+    rep_metrics_list: list[RepMetrics],
+) -> str | None:
+    """Most common non-None bar_path_classification across reps (smoke/
+    calibration only — NOT persisted to JSONB)."""
+    from collections import Counter
+    labels: list[str] = []
+    for rm in rep_metrics_list:
+        v = rm.metrics.get("bar_path_classification")
+        if isinstance(v, str):
+            labels.append(v)
+    if not labels:
+        return None
+    return Counter(labels).most_common(1)[0][0]
+
+
 def _wrist_midpoint_trajectory(
     landmarks_per_frame: list[np.ndarray],
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1121,10 +1299,16 @@ def extract_rep_metrics(
     side_idx = landmark_indices_for_side(lifter_side)
 
     result: list[RepMetrics] = []
-    for rep in reps:
-        metrics = analyzer(
-            rep, landmarks_per_frame, angle_timeseries, fps, side_idx, lifter_side,
-        )
+    for i, rep in enumerate(reps):
+        if ex in ("squat", "deadlift"):
+            metrics = analyzer(
+                rep, landmarks_per_frame, angle_timeseries, fps, side_idx,
+                lifter_side, all_reps=reps, rep_position=i,
+            )
+        else:
+            metrics = analyzer(
+                rep, landmarks_per_frame, angle_timeseries, fps, side_idx, lifter_side,
+            )
         result.append(
             RepMetrics(
                 rep_index=rep.rep_index,
@@ -1134,4 +1318,6 @@ def extract_rep_metrics(
             )
         )
 
+    # Session 7 #16 — session-level consistency std injected into every rep.
+    _inject_technique_consistency_std(result, ex)
     return result

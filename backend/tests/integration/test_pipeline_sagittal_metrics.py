@@ -238,3 +238,137 @@ def test_session6_atharva_bench_shoulder_protraction(
                 f"[session-6-integration] bench rep {r.rep_index}: "
                 f"shoulder_protraction={val:.3f}"
             )
+
+
+@pytest.mark.integration
+def test_session7_squat_fixture(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Squat fixture must populate lumbar_flexion_proxy_delta_deg and
+    technique_consistency_std (the latter only when >=2 reps are detected).
+
+    Sanity ranges (Section 7):
+    - lumbar_flexion_proxy_delta_deg: [-90, 90] — delta of torso-vertical angle
+    - technique_consistency_std: [0, 45] or None (None when single rep)
+    """
+    rep_metrics, reps, side, _fps = _run_pipeline_through_metrics(
+        _SQUAT_FIXTURE, "squat", "standard",
+    )
+    with capsys.disabled():
+        print(
+            f"\n[session-7-integration] squat side={side} reps={len(rep_metrics)}"
+        )
+    for r in rep_metrics:
+        m = r.metrics
+        assert "lumbar_flexion_proxy_delta_deg" in m, (
+            f"missing lumbar_flexion_proxy_delta_deg on rep {r.rep_index}"
+        )
+        lumbar = m["lumbar_flexion_proxy_delta_deg"]
+        # First rep may be None if baseline frame not available; subsequent reps
+        # should resolve. Log but don't hard-fail on None for the very first rep.
+        if lumbar is not None:
+            assert isinstance(lumbar, float), (
+                f"lumbar_flexion_proxy_delta_deg is not float: {type(lumbar).__name__}"
+            )
+            assert -90.0 <= lumbar <= 90.0, (
+                f"rep {r.rep_index} lumbar delta out of sanity range: {lumbar}"
+            )
+        assert "technique_consistency_std" in m, (
+            f"missing technique_consistency_std on rep {r.rep_index}"
+        )
+        tcs = m["technique_consistency_std"]
+        if tcs is not None:
+            assert isinstance(tcs, float), (
+                f"technique_consistency_std is not float: {type(tcs).__name__}"
+            )
+            assert 0.0 <= tcs <= 45.0, (
+                f"technique_consistency_std out of sanity range: {tcs}"
+            )
+        with capsys.disabled():
+            print(
+                f"[session-7-integration] squat rep {r.rep_index}: "
+                f"lumbar_delta={lumbar}, tcs={tcs}"
+            )
+
+
+@pytest.mark.integration
+def test_session7_bench_fixture(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bench fixture must populate bar_path_classification per rep.
+
+    Valid values: 'vertical', 'j_curve', 'drift', or None (when wrist midpoint
+    x-trajectory is too short to classify).
+    """
+    rep_metrics, _reps, side, _fps = _run_pipeline_through_metrics(
+        _BENCH_FIXTURE, "bench", "flat",
+    )
+    with capsys.disabled():
+        print(
+            f"\n[session-7-integration] bench side={side} reps={len(rep_metrics)}"
+        )
+    _VALID_BAR_PATH_LABELS = {"vertical", "j_curve", "drift"}
+    for r in rep_metrics:
+        m = r.metrics
+        assert "bar_path_classification" in m, (
+            f"missing bar_path_classification on rep {r.rep_index}"
+        )
+        label = m["bar_path_classification"]
+        if label is not None:
+            assert label in _VALID_BAR_PATH_LABELS, (
+                f"rep {r.rep_index}: unexpected bar_path_classification {label!r}"
+            )
+        with capsys.disabled():
+            print(
+                f"[session-7-integration] bench rep {r.rep_index}: "
+                f"bar_path={label}"
+            )
+
+
+@pytest.mark.integration
+def test_session7_deadlift_fixture(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Deadlift fixture must populate lumbar_flexion_proxy_delta_deg and
+    technique_consistency_std.
+
+    Sanity ranges (Section 7):
+    - lumbar_flexion_proxy_delta_deg: [-90, 90] — delta of torso-vertical angle
+    - technique_consistency_std: [0, 45] or None (None when single rep)
+    """
+    rep_metrics, reps, side, _fps = _run_pipeline_through_metrics(
+        _DEADLIFT_FIXTURE, "deadlift", "conventional",
+    )
+    with capsys.disabled():
+        print(
+            f"\n[session-7-integration] dl side={side} reps={len(rep_metrics)}"
+        )
+    for r in rep_metrics:
+        m = r.metrics
+        assert "lumbar_flexion_proxy_delta_deg" in m, (
+            f"missing lumbar_flexion_proxy_delta_deg on dl rep {r.rep_index}"
+        )
+        lumbar = m["lumbar_flexion_proxy_delta_deg"]
+        if lumbar is not None:
+            assert isinstance(lumbar, float), (
+                f"lumbar_flexion_proxy_delta_deg is not float: {type(lumbar).__name__}"
+            )
+            assert -90.0 <= lumbar <= 90.0, (
+                f"dl rep {r.rep_index} lumbar delta out of sanity range: {lumbar}"
+            )
+        assert "technique_consistency_std" in m, (
+            f"missing technique_consistency_std on dl rep {r.rep_index}"
+        )
+        tcs = m["technique_consistency_std"]
+        if tcs is not None:
+            assert isinstance(tcs, float), (
+                f"technique_consistency_std is not float: {type(tcs).__name__}"
+            )
+            assert 0.0 <= tcs <= 45.0, (
+                f"technique_consistency_std out of sanity range: {tcs}"
+            )
+        with capsys.disabled():
+            print(
+                f"[session-7-integration] dl rep {r.rep_index}: "
+                f"lumbar_delta={lumbar}, tcs={tcs}"
+            )

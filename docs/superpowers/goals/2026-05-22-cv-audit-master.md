@@ -436,6 +436,7 @@ On STOP: handoff + remediation per policy. Recursion cap 2.
 
 ```
 Complete Session 7 of cv-audit. Reference documents:
+- Handoff from prev session: .claude/handoff.md
 - Design spec: docs/superpowers/specs/2026-05-22-cv-audit-fixes-design.md §Session-7 (architecture, decisions, scope)
 - Implementation plan: docs/superpowers/plans/2026-05-22-session-7-complex-multi-frame.md — THIS IS A SKELETON PLAN. Session 7 ALSO requires a mandatory /plan spike with spelix-cv-engineer BEFORE skeleton expansion (see plan's "Pre-implementation" section). Both the /plan spike output AND the expanded skeleton must be committed to repo before this /goal continues to task execution. Expansion preserves task ordering, file lists, gates; adds concrete TDD test bodies + commit messages + the spike's decisions on baseline-frame identification, J-curve boundaries, and consistency-metric choice.
 - Master manifest: docs/superpowers/goals/2026-05-22-cv-audit-master.md (Standing Rules and Remediation Policy apply throughout)

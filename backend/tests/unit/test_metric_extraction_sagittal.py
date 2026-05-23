@@ -1915,3 +1915,325 @@ def test_session6_squat_analyzer_does_not_emit_bar_or_shoulder_protraction() -> 
     metrics = out[0].metrics
     assert "bar_to_hip_distance" not in metrics
     assert "shoulder_protraction_proxy_px" not in metrics
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #2 — standing baseline frame identification
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import identify_standing_baseline_frame  # noqa: E402
+
+
+def test_session7_baseline_squat_uses_first_rep_start() -> None:
+    """Squat baseline is the global first-rep start frame, for every rep."""
+    reps = [
+        DetectedRep(rep_index=0, start_frame=5, end_frame=40, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=45, end_frame=80, confidence_score=0.9, min_angle=80.0),
+    ]
+    # rep_position is ignored for squat — always returns reps[0].start_frame
+    assert identify_standing_baseline_frame(
+        "squat", reps[1], rep_position=1, all_reps=reps, bar_y_series=None
+    ) == 5
+
+
+def test_session7_baseline_squat_no_reps_returns_none() -> None:
+    assert identify_standing_baseline_frame(
+        "squat",
+        DetectedRep(rep_index=0, start_frame=0, end_frame=10, confidence_score=0.9, min_angle=80.0),
+        rep_position=0, all_reps=None, bar_y_series=None,
+    ) is None
+
+
+def test_session7_baseline_deadlift_uses_prev_rep_lockout() -> None:
+    """DL non-first rep baseline = previous rep's end_frame (lockout)."""
+    reps = [
+        DetectedRep(rep_index=0, start_frame=0, end_frame=30, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=35, end_frame=70, confidence_score=0.9, min_angle=80.0),
+    ]
+    bar_y = np.full(80, 0.5)
+    assert identify_standing_baseline_frame(
+        "deadlift", reps[1], rep_position=1, all_reps=reps, bar_y_series=bar_y
+    ) == 30
+
+
+def test_session7_baseline_deadlift_first_rep_uses_preliftoff() -> None:
+    """DL first rep: liftoff detected at frame 10 -> baseline = 9."""
+    rep = DetectedRep(rep_index=0, start_frame=2, end_frame=40, confidence_score=0.9, min_angle=80.0)
+    bar_y = np.full(50, 0.80)          # set position, bar low (high y)
+    bar_y[10:] = 0.50                  # bar rises (y drops) at frame 10 -> liftoff
+    out = identify_standing_baseline_frame(
+        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+    )
+    assert out == 9
+
+
+def test_session7_baseline_deadlift_first_rep_no_liftoff_falls_back_to_start() -> None:
+    """DL first rep, bar never lifts -> fall back to rep.start_frame."""
+    rep = DetectedRep(rep_index=0, start_frame=3, end_frame=40, confidence_score=0.9, min_angle=80.0)
+    bar_y = np.full(50, 0.80)  # never rises
+    out = identify_standing_baseline_frame(
+        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+    )
+    assert out == 3
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #2 — lumbar_flexion_proxy_delta_deg extractor
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import extract_lumbar_flexion_proxy_delta_deg  # noqa: E402
+
+
+def _upright_then_flexed_frames(flex_dx: float) -> list[np.ndarray]:
+    """Frame 0 = upright (shoulder over hip); frame 1 = trunk flexed forward
+    by flex_dx (shoulder ahead of hip in +x for a right-facing lifter)."""
+    upright = _make_landmark_frame_right_side(shoulder_xy=(0.50, 0.20), hip_xy=(0.50, 0.55))
+    flexed = _make_landmark_frame_right_side(shoulder_xy=(0.50 + flex_dx, 0.20), hip_xy=(0.50, 0.55))
+    return [upright, flexed]
+
+
+def test_session7_lumbar_proxy_no_buttwink_near_zero() -> None:
+    """Clean squat: trunk angle at bottom ~= trunk angle at baseline -> delta ~= 0."""
+    frames = _upright_then_flexed_frames(flex_dx=0.0)
+    right_idx = landmark_indices_for_side("right")
+    delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    )
+    assert delta == pytest.approx(0.0, abs=0.5)
+
+
+def test_session7_lumbar_proxy_buttwink_positive_delta() -> None:
+    """Pronounced forward flexion at bottom -> delta > 15 degrees."""
+    dy = 0.35
+    flex_dx = dy * math.tan(math.radians(20.0))  # ~20 degrees of trunk flexion
+    frames = _upright_then_flexed_frames(flex_dx=flex_dx)
+    right_idx = landmark_indices_for_side("right")
+    delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    )
+    assert delta is not None and delta > 15.0
+
+
+def test_session7_lumbar_proxy_no_baseline_returns_none() -> None:
+    frames = _upright_then_flexed_frames(flex_dx=0.1)
+    right_idx = landmark_indices_for_side("right")
+    assert extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=None,
+        side_idx=right_idx, lifter_side="right",
+    ) is None
+
+
+def test_session7_lumbar_proxy_low_visibility_returns_none() -> None:
+    frames = _upright_then_flexed_frames(flex_dx=0.1)
+    frames[0][24, 3] = 0.1  # hip low-vis at baseline frame (right hip = lm 24)
+    right_idx = landmark_indices_for_side("right")
+    assert extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=frames, bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    ) is None
+
+
+@pytest.mark.parametrize("flex_deg", [0.0, 10.0, 20.0])
+def test_session7_lumbar_proxy_side_agnostic(flex_deg: float) -> None:
+    """Same physical flexion filmed from either side -> equal delta."""
+    dy = 0.35
+    dx = dy * math.tan(math.radians(flex_deg))
+    right_idx = landmark_indices_for_side("right")
+    left_idx = landmark_indices_for_side("left")
+    right_frames = [
+        _make_landmark_frame_right_side((0.50, 0.20), (0.50, 0.55)),
+        _make_landmark_frame_right_side((0.50 + dx, 0.20), (0.50, 0.55)),
+    ]
+    left_frames = [
+        _make_landmark_frame_left_side((1.0 - 0.50, 0.20), (1.0 - 0.50, 0.55)),
+        _make_landmark_frame_left_side((1.0 - (0.50 + dx), 0.20), (1.0 - 0.50, 0.55)),
+    ]
+    rd = extract_lumbar_flexion_proxy_delta_deg(right_frames, 1, 0, right_idx, "right")
+    ld = extract_lumbar_flexion_proxy_delta_deg(left_frames, 1, 0, left_idx, "left")
+    assert rd == pytest.approx(ld, abs=0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #6 — _classify_bar_path
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import _classify_bar_path  # noqa: E402
+
+
+def test_session7_barpath_vertical() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.50) == "vertical"
+
+
+def test_session7_barpath_jcurve() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.44) == "j_curve"
+
+
+def test_session7_barpath_drift() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.52, ascent_end_x=0.54) == "drift"
+
+
+def test_session7_barpath_jcurve_mirrored_left_facing() -> None:
+    """Left-facing lifter's j-curve sweeps to higher x -- symmetrized abs() catches it."""
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.56) == "j_curve"
+
+
+def test_session7_barpath_jcurve_precedence_over_neardrift() -> None:
+    assert _classify_bar_path(descent_start_x=0.50, bottom_x=0.50, ascent_end_x=0.46) == "j_curve"
+
+
+def test_session7_barpath_degenerate_none() -> None:
+    assert _classify_bar_path(None, None, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Session 7 #16 — technique_consistency_std + session-modal bar-path
+# ---------------------------------------------------------------------------
+from app.cv.metric_extraction import (  # noqa: E402
+    _inject_technique_consistency_std,
+    session_modal_bar_path_classification,
+)
+from app.cv.metric_extraction import RepMetrics  # noqa: E402
+
+
+def _rep_with(metrics: dict) -> RepMetrics:
+    return RepMetrics(rep_index=0, start_frame=0, end_frame=1, metrics=dict(metrics))
+
+
+def test_session7_consistency_identical_reps_zero() -> None:
+    reps = [_rep_with({"depth_angle": 90.0}) for _ in range(3)]
+    _inject_technique_consistency_std(reps, "squat")
+    assert all(r.metrics["technique_consistency_std"] == pytest.approx(0.0) for r in reps)
+
+
+def test_session7_consistency_fatigued_reps_positive() -> None:
+    reps = [_rep_with({"depth_angle": v}) for v in (90.0, 95.0, 105.0)]
+    _inject_technique_consistency_std(reps, "squat")
+    std = reps[0].metrics["technique_consistency_std"]
+    assert std == pytest.approx(float(np.std([90.0, 95.0, 105.0])))  # ddof=0
+    assert std > 0.0
+
+
+def test_session7_consistency_deadlift_uses_lockout_lean() -> None:
+    reps = [_rep_with({"lockout_torso_lean_deg": v}) for v in (5.0, 9.0)]
+    _inject_technique_consistency_std(reps, "deadlift")
+    assert reps[0].metrics["technique_consistency_std"] == pytest.approx(2.0)
+
+
+def test_session7_consistency_single_rep_none() -> None:
+    reps = [_rep_with({"depth_angle": 90.0})]
+    _inject_technique_consistency_std(reps, "squat")
+    assert reps[0].metrics["technique_consistency_std"] is None
+
+
+def test_session7_session_modal_bar_path() -> None:
+    reps = [
+        _rep_with({"bar_path_classification": "vertical"}),
+        _rep_with({"bar_path_classification": "vertical"}),
+        _rep_with({"bar_path_classification": "drift"}),
+    ]
+    assert session_modal_bar_path_classification(reps) == "vertical"
+
+
+def test_session7_session_modal_all_none() -> None:
+    reps = [_rep_with({"bar_path_classification": None})]
+    assert session_modal_bar_path_classification(reps) is None
+
+
+# ---------------------------------------------------------------------------
+# Session 7 Task 5 — wiring tests
+# ---------------------------------------------------------------------------
+
+
+def _make_full_bench_session_with_landmarks(n_frames: int = 60):
+    """Bench session helper: full landmarks + elbow/shoulder timeseries + one rep."""
+    frames = []
+    right_idx = landmark_indices_for_side("right")
+    for i in range(n_frames):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.30, 0.55]
+        lm[right_idx.elbow, :2] = [0.40, 0.42]
+        lm[right_idx.wrist, :2] = [0.42, 0.30]
+        lm[right_idx.hip, :2] = [0.60, 0.50]
+        # Bilateral wrist midpoint for bar-x trajectory (landmarks 15 + 16)
+        lm[15, :2] = [0.42, 0.30]
+        lm[16, :2] = [0.42, 0.30]
+        frames.append(lm)
+    t = np.linspace(0, 2 * np.pi, n_frames)
+    ts = {
+        "elbow_angle": 115.0 + 50.0 * np.cos(t),
+        "shoulder_angle": 70.0 + 20.0 * np.cos(t),
+    }
+    rep = DetectedRep(
+        rep_index=0, start_frame=5, end_frame=n_frames - 5,
+        confidence_score=0.9, min_angle=65.0,
+    )
+    return frames, ts, rep
+
+
+def test_session7_squat_emits_lumbar_and_consistency_keys() -> None:
+    frames, angles, _ = _make_full_squat_session_with_landmarks(80)
+    reps = [
+        DetectedRep(rep_index=0, start_frame=2, end_frame=38, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=42, end_frame=78, confidence_score=0.9, min_angle=80.0),
+    ]
+    out = extract_rep_metrics(reps, frames, angles, "squat", "standard", 30.0, "right")
+    assert "lumbar_flexion_proxy_delta_deg" in out[0].metrics
+    assert "technique_consistency_std" in out[0].metrics
+    # consistency identical across reps
+    assert out[0].metrics["technique_consistency_std"] == out[1].metrics["technique_consistency_std"]
+    # bench-only key absent
+    assert "bar_path_classification" not in out[0].metrics
+
+
+def test_session7_bench_emits_bar_path_only() -> None:
+    frames, angles, rep = _make_full_bench_session_with_landmarks(60)
+    out = extract_rep_metrics([rep], frames, angles, "bench", "standard", 30.0, "right")
+    assert "bar_path_classification" in out[0].metrics
+    assert "lumbar_flexion_proxy_delta_deg" not in out[0].metrics
+    assert "technique_consistency_std" not in out[0].metrics
+
+
+def test_session7_squat_lumbar_none_when_baseline_frame_low_vis() -> None:
+    """M-01: low visibility at the global baseline frame (rep0 start) → lumbar
+    delta None for EVERY rep (visibility is enforced downstream in
+    _lumbar_proxy_angle, per identify_standing_baseline_frame's contract)."""
+    right_idx = landmark_indices_for_side("right")
+    frames, angles, _ = _make_full_squat_session_with_landmarks(80)
+    reps = [
+        DetectedRep(rep_index=0, start_frame=2, end_frame=38, confidence_score=0.9, min_angle=80.0),
+        DetectedRep(rep_index=1, start_frame=42, end_frame=78, confidence_score=0.9, min_angle=80.0),
+    ]
+    # Tank shoulder + hip visibility at the global baseline frame (rep0 start=2).
+    frames[2][right_idx.shoulder, 3] = 0.1
+    frames[2][right_idx.hip, 3] = 0.1
+    out = extract_rep_metrics(reps, frames, angles, "squat", "standard", 30.0, "right")
+    assert all(rm.metrics["lumbar_flexion_proxy_delta_deg"] is None for rm in out)
+
+
+def test_session7_bench_bar_path_none_on_degenerate_short_rep() -> None:
+    """M-03: a bench rep spanning fewer than 3 frames → bar_path_classification
+    None (the span<2 caller-side gate in _bench_metrics)."""
+    right_idx = landmark_indices_for_side("right")
+    frames = []
+    for _ in range(3):
+        lm = np.zeros((33, 5), dtype=float)
+        lm[:, 3] = 0.9
+        lm[:, 4] = 5.0
+        lm[right_idx.shoulder, :2] = [0.30, 0.55]
+        lm[right_idx.elbow, :2] = [0.40, 0.42]
+        lm[right_idx.wrist, :2] = [0.42, 0.30]
+        lm[right_idx.hip, :2] = [0.60, 0.50]
+        lm[15, :2] = [0.42, 0.30]
+        lm[16, :2] = [0.42, 0.30]
+        frames.append(lm)
+    ts = {
+        "elbow_angle": np.array([160.0, 90.0, 160.0]),
+        "shoulder_angle": np.array([70.0, 60.0, 70.0]),
+    }
+    rep = DetectedRep(
+        rep_index=0, start_frame=0, end_frame=1,
+        confidence_score=0.9, min_angle=90.0,
+    )
+    out = extract_rep_metrics([rep], frames, ts, "bench", "standard", 30.0, "right")
+    assert out[0].metrics["bar_path_classification"] is None
