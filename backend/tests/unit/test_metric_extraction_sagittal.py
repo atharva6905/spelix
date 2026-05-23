@@ -2237,3 +2237,20 @@ def test_session7_bench_bar_path_none_on_degenerate_short_rep() -> None:
     )
     out = extract_rep_metrics([rep], frames, ts, "bench", "standard", 30.0, "right")
     assert out[0].metrics["bar_path_classification"] is None
+
+
+def test_session7_lumbar_proxy_none_when_shoulder_below_hip_occlusion() -> None:
+    """Deep-squat hip-fold occlusion can mis-place a landmark so the shoulder
+    appears BELOW the hip (dy = hip_y - shoulder_y <= 0), which is non-physical
+    for squat/deadlift. atan2 would then wrap toward +/-180 deg and produce an
+    implausible delta (observed -165 deg on the squat fixture). The dy<=0 guard
+    returns None instead, bounding the proxy to (-90, 90) deg."""
+    right_idx = landmark_indices_for_side("right")
+    baseline = _make_landmark_frame_right_side(shoulder_xy=(0.50, 0.20), hip_xy=(0.50, 0.55))
+    # Occluded bottom frame: shoulder-y (0.58) is BELOW hip-y (0.50) -> dy < 0.
+    occluded = _make_landmark_frame_right_side(shoulder_xy=(0.48, 0.58), hip_xy=(0.50, 0.50))
+    delta = extract_lumbar_flexion_proxy_delta_deg(
+        landmarks_per_frame=[baseline, occluded], bottom_frame=1, baseline_frame=0,
+        side_idx=right_idx, lifter_side="right",
+    )
+    assert delta is None
