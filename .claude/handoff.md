@@ -1,4 +1,4 @@
-# cv-audit handoff — EFFORT COMPLETE + R1 occlusion follow-up shipped (2026-05-23)
+# cv-audit handoff — EFFORT COMPLETE + R1/R2/R3/R6 occlusion follow-ups shipped (2026-05-24)
 
 ## R1 — dropout-aware depth-frame fix (shipped 2026-05-23, PR #170 `050dc9e`)
 
@@ -8,13 +8,15 @@ A post-Session-7 deep-dive root-caused the squat lumbar-proxy None values (full 
 
 **R3 — bench bar-path None-interim (shipped 2026-05-23):** a feasibility spike proved a reliable bench bar-path is not readily achievable — raw HoughCircles can't isolate the lifter's plate from background circles, temporal association locks onto stationary circles / loses the bar at the bottom-occlusion, and the wrist proxy hallucinates (~0.72 y-jumps, impossible >180° elbow ranges). Shipped the honest None-interim: `bar_path_classification` anchors gated on bilateral wrist visibility → None when unreliable, real label when wrists visible. ADR-BENCH-BARPATH-NONE-INTERIM. Backlog `L2-CV-DEPTHFRAME-R3` done; **R3b** (real bar-tracker — motion-correlation + occlusion handling, dedicated CV effort) logged open.
 
+**R6 — deadlift first-rep lumbar baseline (shipped 2026-05-24, PR #174 `e48e2cc`, impl `8acafb4`):** instrumenting the real `atharva-deadlift.mov` fixture made R6 quantitative — `lumbar_flexion_proxy_delta_deg` was **0.19° on rep 0** vs **64–69° on reps 1–4**. Root cause: `identify_standing_baseline_frame`'s first-rep deadlift branch anchored to the pre-liftoff frame, which for a deadlift is the *hinged setup pose* (not standing), so rep 0's baseline and bottom were the same hinged frame → delta ≈ 0. Fix: first rep now anchors to its OWN `end_frame` (the standing lockout); reps >0 unchanged (previous lockout); squat unchanged. Dropped the now-dead `bar_y_series` param. Fixture-verified rep 0 → **69.18°** (consistent with the set; reps 1–4 byte-identical). Verified: 2287 unit pass, ruff/pyright clean, sagittal integration **8/8** (printed DL rep 0 = 69.18°). CI green, deployed (droplet HEAD `e48e2cc`, containers healthy), prod read-only render clean (0 console errors, `/api/v1/consent` 200). ADR-DEADLIFT-FIRSTREP-BASELINE. Backlog `L2-CV-DEPTHFRAME-R6` done.
+
+**R2 — angle-series validity gate (shipped 2026-05-24, PR #175, impl `336e4e8`):** `compute_angle_timeseries` now NaN-gates **squat + deadlift** frames whose joint landmarks fall below `_MIN_VIS` 0.30 (zero-filled VIDEO-mode dropout + confident mis-track), linear-interpolates the gaps (`np.interp`, holds endpoints — conservative: under-reads a peak/valley, never fabricates a deeper-than-observed extremum), then clamps `[0,180]`. This de-noises rep detection (`detect_reps`) **and** the still-un-gated Step-7 confidence depth `argmin` in `pipeline.py` at the source — complementing R1's metric depth-frame mask (defense-in-depth). **Bench is deliberately excluded** (Option-discovery: its wrists are systematically near-invisible — median vis 0.008, `<0.30` on ~100% of frames — so gating NaN'd the whole bench series and cut reps **13→3** / `bar_touch_height_pct` to **76.4**; the sagittal integration suite **caught this over-gating before merge**, fixed via R1's bench-exclusion precedent → bench is R3/R3b). Squat real-fixture proof: `hip_angle` now **[25.63, 180.00]** (was −32.5…192.5), min cleaned value at any dropout frame **52.58°** (was ~0° spikes). Verified: 34 `test_signal_processing` (8 new), **2294 unit pass**, ruff/pyright clean, **bench integration 3/3**, squat/DL integration unaffected, barbell wall-time test green solo (the lone full-suite failure was CPU contention from a parallel MediaPipe run). ADR-ANGLE-SERIES-VALIDITY-GATE. Backlog `L2-CV-DEPTHFRAME-R2` done.
+
 **Open follow-ups from the investigation (NOT started):**
 - **R3b** (`L2-CV-DEPTHFRAME-R3b`, open) — real bench bar-path tracker (the deferred dedicated CV effort).
-- **R2** — angle-series validity gate + clamp upstream of rep detection (larger; de-noises rep detection too).
 - **R4** — re-evaluate MediaPipe VIDEO vs IMAGE running mode (attacks the dropout source; needs droplet perf benchmark).
-- **R5** — surface landmark-confidence in the expert portal so None shows *why*.
-- **R6** — deadlift first-rep standing-baseline robustness (rep-0 baseline can land on a non-standing frame).
-- Fresh-upload prod demonstration of R1 deferred (account-identity + Supabase free-tier Storage 507 constraints; code path covered by integration tests on the identical fixtures).
+- **R5** — surface landmark-confidence in the expert portal so None shows *why*. R2 left a documented hook: a future cap (≈ `round(0.15·fps)` frames) would *flag* heavily-interpolated reps (it never drops them).
+- Fresh-upload prod demonstration of R1/R2/R3/R6 deferred (account-identity + Supabase free-tier Storage 507 constraints; the corrected behaviour is integration-proven on the identical prod fixtures — R2 squat `hip_angle` [25.63,180.00], R6 rep 0 = 69.18°).
 
 ## Status: ALL 7 SESSIONS COMPLETE ✅ + R1 follow-up shipped
 
