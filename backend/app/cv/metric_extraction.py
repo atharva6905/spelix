@@ -422,7 +422,7 @@ def _squat_metrics(
 
     # Session 7 #2 — lumbar flexion proxy delta vs standing baseline.
     baseline = identify_standing_baseline_frame(
-        "squat", rep, rep_position, all_reps, bar_y_series=None,
+        "squat", rep, rep_position, all_reps,
     )
     lumbar_delta = extract_lumbar_flexion_proxy_delta_deg(
         landmarks_per_frame, depth_frame, baseline, side_idx, lifter_side,
@@ -679,9 +679,8 @@ def _deadlift_metrics(
     )
 
     # Session 7 #2 — lumbar flexion proxy delta vs standing baseline.
-    # bar_y_series is already computed above for bar_to_hip_distance.
     dl_baseline = identify_standing_baseline_frame(
-        "deadlift", rep, rep_position, all_reps, bar_y_series=bar_y_series,
+        "deadlift", rep, rep_position, all_reps,
     )
     dl_lumbar_delta = extract_lumbar_flexion_proxy_delta_deg(
         landmarks_per_frame, bottom_frame, dl_baseline, side_idx, lifter_side,
@@ -1081,19 +1080,24 @@ def identify_standing_baseline_frame(
     rep: DetectedRep,
     rep_position: int,
     all_reps: list[DetectedRep] | None,
-    bar_y_series: np.ndarray | None,
 ) -> int | None:
     """Session 7 #2 — index of the standing-baseline frame for the lumbar
     flexion proxy delta.
 
     Squat: one global baseline = ``all_reps[0].start_frame`` (the cleanest
     upright posture in the clip — see ADR-LUMBAR-FLEXION-PROXY-NAMING).
-    Deadlift: previous rep's ``end_frame`` (lockout). First rep has no
-    previous rep, so use the last frame before liftoff
-    (``identify_liftoff_frame - 1``), falling back to ``rep.start_frame``
-    when liftoff is undetectable.
+    Deadlift: previous rep's ``end_frame`` (lockout). The first rep has no
+    previous lockout, so it uses its OWN ``end_frame`` (the standing-upright
+    top of the pull) as the baseline.
 
-    Returns ``None`` when no reps are available.
+    The first-rep deadlift previously used the pre-liftoff frame, but for a
+    deadlift that frame is the HINGED setup pose — not standing — so the
+    rep-0 lumbar_flexion_proxy_delta_deg collapsed toward zero (0.19 deg
+    observed) while reps 1-4 measured the true ~68 deg trunk-hinge ROM.
+    Anchoring to the rep's own lockout makes rep 0 consistent with the rest
+    (ADR-DEADLIFT-FIRSTREP-BASELINE, L2-CV-DEPTHFRAME-R6).
+
+    Returns ``None`` when no reps are available (squat) / unknown exercise.
     """
     ex = exercise_type.lower()
     if ex == "squat":
@@ -1103,14 +1107,8 @@ def identify_standing_baseline_frame(
     if ex == "deadlift":
         if all_reps and rep_position > 0:
             return all_reps[rep_position - 1].end_frame
-        # First rep: pre-liftoff frame, fallback to start.
-        if bar_y_series is not None:
-            liftoff = identify_liftoff_frame(
-                bar_y_series, rep.start_frame, rep.end_frame,
-            )
-            if liftoff is not None:
-                return max(rep.start_frame, liftoff - 1)
-        return rep.start_frame
+        # First rep: no previous lockout -> use this rep's own lockout.
+        return rep.end_frame
     return None
 
 
