@@ -32,7 +32,9 @@ _COL_Y = 1
 # ``metric_extraction._S5_MIN_VIS`` (kept in sync — same physical threshold)
 # so the angle-series validity gate (R2, L2-CV-DEPTHFRAME-R2) and the
 # depth-frame validity mask (R1, L2-CV-DEPTHFRAME-DROPOUT) agree on what
-# counts as a dropout frame. Raw MediaPipe visibility (column 3), not sigmoid.
+# counts as a dropout frame. Column 3 is post-sigmoid visibility — sigmoid is
+# applied once at ingestion by ``pose_extraction._guard_sigmoid``, so values
+# here are already in [0, 1] and compared directly (no second sigmoid).
 _MIN_VIS = 0.30
 
 # Landmark dependencies per joint angle, used to gate dropout / low-visibility
@@ -256,6 +258,46 @@ def _interpolate_invalid(series: np.ndarray) -> np.ndarray:
     out = s.copy()
     out[~valid] = np.interp(idx[~valid], idx[valid], s[valid])
     return out
+
+
+def compute_invalid_frame_mask(
+    landmarks_per_frame: list[np.ndarray],
+    exercise_type: str,
+    lifter_side: Literal["left", "right"] = "right",
+) -> np.ndarray:
+    """
+    Per-frame boolean mask of R2-gated (dropout / low-visibility) frames.
+
+    Returns a 1-D ``bool`` array, one entry per input frame, where ``True``
+    marks a frame :func:`compute_angle_timeseries` would NaN-gate and
+    reconstruct for THIS exercise — i.e. at least one of the exercise's
+    R2-gated joints has a defining landmark below ``_MIN_VIS`` (zero-filled
+    VIDEO-mode dropout or a confident mis-track). The mean of this mask over a
+    rep's inclusive frame range is that rep's *interpolation fraction*: how much
+    of its angle signal R2 had to reconstruct. Surfaced per-rep in the expert
+    portal so a ``None`` metric shows *why* (L2-CV-DEPTHFRAME-R5).
+
+    Shares the gating predicate with :func:`compute_angle_timeseries` exactly
+    (same ``_JOINT_LANDMARK_DEPS``, same ``_landmarks_visible`` / ``_MIN_VIS``),
+    so the two never disagree. Exercises absent from ``_JOINT_LANDMARK_DEPS``
+    (bench — wrists are systematically invisible, see the module note) are not
+    gated: the mask is all ``False`` and the interpolation fraction is 0.0.
+    """
+    side_idx = landmark_indices_for_side(lifter_side)
+    joint_deps = _JOINT_LANDMARK_DEPS.get(exercise_type.lower(), {})
+    joint_indices = [
+        tuple(getattr(side_idx, attr) for attr in attrs)
+        for attrs in joint_deps.values()
+    ]
+    mask = np.zeros(len(landmarks_per_frame), dtype=bool)
+    if not joint_indices:
+        return mask
+    for f, frame in enumerate(landmarks_per_frame):
+        for indices in joint_indices:
+            if not _landmarks_visible(frame, indices):
+                mask[f] = True
+                break
+    return mask
 
 
 # ---------------------------------------------------------------------------

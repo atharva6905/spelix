@@ -10,10 +10,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from app.cv.lifter_side import landmark_indices_for_side
 from app.cv.signal_processing import (
     calculate_angle,
     calculate_joint_angles,
     compute_angle_timeseries,
+    compute_invalid_frame_mask,
     smooth_signal,
 )
 
@@ -467,3 +469,53 @@ class TestComputeAngleTimeseriesValidityGating:
             "bench elbow_angle must not be gated to NaN on low wrist visibility"
         )
         assert abs(float(np.mean(elbow)) - 90.0) < 1.0
+
+
+# ---------------------------------------------------------------------------
+# compute_invalid_frame_mask (R5, L2-CV-DEPTHFRAME-R5)
+# ---------------------------------------------------------------------------
+
+
+class TestComputeInvalidFrameMask:
+    """compute_invalid_frame_mask — R5 per-rep interpolation-fraction source."""
+
+    def test_clean_squat_clip_all_false(self):
+        frames = [_valid_squat_frame() for _ in range(10)]
+        mask = compute_invalid_frame_mask(frames, "squat", "right")
+        assert mask.dtype == bool
+        assert mask.shape == (10,)
+        assert not mask.any()
+
+    def test_zero_filled_frame_flagged(self):
+        frames = [_valid_squat_frame() for _ in range(10)]
+        frames[4] = _zero_filled_frame()  # dropout — hip landmarks vis 0.0
+        mask = compute_invalid_frame_mask(frames, "squat", "right")
+        assert mask[4]
+        assert mask.sum() == 1
+
+    def test_visibility_boundary_is_min_vis(self):
+        # A defining-landmark visibility exactly at _MIN_VIS is VISIBLE (not gated);
+        # just below is gated. Guards against threshold drift vs _landmarks_visible.
+        from app.cv.signal_processing import _MIN_VIS
+
+        at = _valid_squat_frame()
+        below = _valid_squat_frame()
+        side = landmark_indices_for_side("right")
+        for f, v in ((at, _MIN_VIS), (below, _MIN_VIS - 0.01)):
+            for idx in (side.shoulder, side.hip, side.knee, side.ankle):
+                f[idx, 3] = v
+        assert not compute_invalid_frame_mask([at], "squat", "right")[0]
+        assert compute_invalid_frame_mask([below], "squat", "right")[0]
+
+    def test_bench_never_gated(self):
+        # Bench is excluded from _JOINT_LANDMARK_DEPS (wrists systematically
+        # invisible) — mask is all False so its interpolation fraction is 0.0.
+        frames = [_zero_filled_frame() for _ in range(8)]
+        mask = compute_invalid_frame_mask(frames, "bench", "right")
+        assert mask.shape == (8,)
+        assert not mask.any()
+
+    def test_empty_clip_returns_empty_bool_array(self):
+        mask = compute_invalid_frame_mask([], "squat", "right")
+        assert mask.shape == (0,)
+        assert mask.dtype == bool

@@ -381,3 +381,26 @@ async def test_get_analysis_detail_includes_rep_metrics_and_coaching_result():
     assert detail.coaching_result is not None
     assert detail.coaching_result["structured_output_json"] == {"summary": "good squat"}
     assert detail.coaching_result["agent_trace_json"] == {"mode": "deterministic"}
+
+
+@pytest.mark.asyncio
+async def test_get_analysis_detail_serializes_interpolation_fraction():
+    """R5 (L2-CV-DEPTHFRAME-R5): per-rep interpolation_fraction is serialized
+    into each rep_metrics dict alongside confidence_score, so the expert panel
+    can explain a None metric (how much of the rep R2 reconstructed)."""
+    service, analysis_repo, _, _ = _make_service()
+
+    mock_rm = MagicMock()
+    mock_rm.rep_index = 0
+    mock_rm.metrics_json = {"depth_angle": None}
+    mock_rm.confidence_score = 0.41
+    mock_rm.interpolation_fraction = 0.375
+
+    mock_analysis = _make_mock_analysis(rep_metrics=[mock_rm])
+    analysis_repo.get_by_id_with_relations.return_value = mock_analysis
+
+    detail = await service.get_analysis_detail(mock_analysis.id)
+
+    assert detail is not None
+    assert detail.rep_metrics[0]["interpolation_fraction"] == 0.375
+    assert detail.rep_metrics[0]["confidence_score"] == 0.41

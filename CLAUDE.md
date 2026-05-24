@@ -213,7 +213,7 @@ Use the Explore built-in subagent for file discovery — its reads stay out of m
 When asked to summarize for compaction: preserve current phase, last 5 modified files, failing tests, current task.
 After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirements before resuming. Run `/status` to confirm environment state.
 
-**Phase completion criterion**: All MUST requirements for the phase implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10. Phase 2 passed 2026-04-14. Phase 3 + L2 sprint passed 2026-05-03. Current: **2225 backend tests, 746 frontend tests, 23 migrations applied** (head: `0906139da711`).
+**Phase completion criterion**: All MUST requirements for the phase implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10. Phase 2 passed 2026-04-14. Phase 3 + L2 sprint passed 2026-05-03. Current: **2301 backend unit tests, 765 frontend tests, 27 migrations applied** (head: `47c8e446162e`).
 
 At the end of any session that didn't complete all planned batches, write a handoff note to `.claude/handoff.md` containing: (1) completed tasks with commit SHAs, (2) remaining tasks with backlog IDs, (3) current test count and any failures, (4) any blockers discovered.
 

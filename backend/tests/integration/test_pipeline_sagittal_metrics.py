@@ -42,7 +42,10 @@ from app.cv.lifter_side import detect_lifter_side  # noqa: E402
 from app.cv.metric_extraction import extract_rep_metrics  # noqa: E402
 from app.cv.pose_extraction import extract_landmarks  # noqa: E402
 from app.cv.rep_detection import detect_reps  # noqa: E402
-from app.cv.signal_processing import compute_angle_timeseries  # noqa: E402
+from app.cv.signal_processing import (  # noqa: E402
+    compute_angle_timeseries,
+    compute_invalid_frame_mask,
+)
 
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[3] / "e2e" / "fixtures"
@@ -382,3 +385,72 @@ def test_session7_deadlift_fixture(
                 f"[session-7-integration] dl rep {r.rep_index}: "
                 f"lumbar_delta={lumbar}, tcs={tcs}"
             )
+
+
+# ---------------------------------------------------------------------------
+# R5 (L2-CV-DEPTHFRAME-R5): per-rep interpolation fraction on real fixtures.
+# compute_invalid_frame_mask shares R2's gating predicate; the mean over a
+# rep's frame range is the "% reconstructed" surfaced in the expert portal.
+# ---------------------------------------------------------------------------
+
+
+def _landmarks_reps_side(fixture: Path, exercise: str, variant: str):
+    """Like _run_pipeline_through_metrics but returns raw landmarks + reps so
+    the R2-gate mask can be sliced per rep."""
+    _require_fixture(fixture)
+    landmarks, fps, _w, _h = extract_landmarks(str(fixture))
+    assert landmarks, f"no landmarks extracted from {fixture.name}"
+    session = np.stack(landmarks)
+    side = detect_lifter_side(session, fps=fps)
+    angles = compute_angle_timeseries(
+        landmarks, exercise_type=exercise, lifter_side=side
+    )
+    cfg = ThresholdConfig(_V1_PATH)
+    primary = angles["hip_angle"] if exercise != "bench" else angles["elbow_angle"]
+    reps = detect_reps(
+        angle_timeseries=primary,
+        landmarks_per_frame=landmarks,
+        exercise_type=exercise,
+        exercise_variant=variant,
+        fps=fps,
+        cfg=cfg,
+    )
+    assert len(reps) >= 1, f"{fixture.name} must contain at least one detected rep"
+    return landmarks, reps, side
+
+
+def _per_rep_interpolation_fractions(landmarks, reps, exercise, side):
+    mask = compute_invalid_frame_mask(landmarks, exercise, side)
+    return [float(mask[r.start_frame:r.end_frame + 1].mean()) for r in reps]
+
+
+@pytest.mark.integration
+def test_r5_squat_interpolation_fraction_real_fixture(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Squat: every rep gets a fraction in [0,1]; the deep-squat occlusion this
+    whole effort addresses means >=1 rep had frames reconstructed (frac > 0)."""
+    landmarks, reps, side = _landmarks_reps_side(_SQUAT_FIXTURE, "squat", "standard")
+    fracs = _per_rep_interpolation_fractions(landmarks, reps, "squat", side)
+    with capsys.disabled():
+        print(
+            f"\n[r5-integration] squat side={side} "
+            f"interp_fracs={[f'{f:.3f}' for f in fracs]}"
+        )
+    assert all(0.0 <= f <= 1.0 for f in fracs)
+    assert any(f > 0.0 for f in fracs), (
+        "deep-squat dropout should reconstruct frames in >=1 rep"
+    )
+
+
+@pytest.mark.integration
+def test_r5_bench_interpolation_fraction_is_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bench is excluded from R2 gating (wrists systematically invisible), so no
+    frames are reconstructed and every rep's interpolation fraction is 0.0."""
+    landmarks, reps, side = _landmarks_reps_side(_BENCH_FIXTURE, "bench", "flat")
+    fracs = _per_rep_interpolation_fractions(landmarks, reps, "bench", side)
+    with capsys.disabled():
+        print(f"\n[r5-integration] bench side={side} interp_fracs={fracs}")
+    assert all(f == 0.0 for f in fracs), "bench is not R2-gated"

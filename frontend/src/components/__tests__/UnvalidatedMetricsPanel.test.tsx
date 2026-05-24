@@ -257,3 +257,93 @@ describe("UnvalidatedMetricsPanel", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("UnvalidatedMetricsPanel — R5 cannot-compute + confidence", () => {
+  // registry: one computed_yet=true squat metric ("ecc_con_ratio") and one
+  // computed_yet=false metric ("ankle_dorsiflexion_deg"). The computed_yet=true
+  // entry's key is present-but-null in rep_metrics[0].metrics_json.
+  beforeEach(() => {
+    vi.mocked(expertApi.getSagittalMetricsRegistry).mockResolvedValue({
+      entries: [
+        {
+          key_name: "ecc_con_ratio",
+          display_label: "Eccentric / Concentric Ratio",
+          unit: "ratio",
+          description: "Per-rep descent / ascent duration.",
+          exercise_applicability: ["squat"],
+          computed_yet: true,
+          in_scoring: true,
+        },
+        {
+          key_name: "ankle_dorsiflexion_deg",
+          display_label: "Ankle Dorsiflexion",
+          unit: "deg",
+          description: "Angle at the ankle at rep bottom.",
+          exercise_applicability: ["squat"],
+          computed_yet: false,
+          in_scoring: false,
+        },
+      ],
+    });
+  });
+
+  const analysis = _makeAnalysis({
+    exercise_type: "squat",
+    rep_metrics: [
+      {
+        rep_index: 1,
+        metrics_json: { ecc_con_ratio: null }, // computed_yet=true but null this rep
+        confidence_score: 0.41,               // → "Very Low"
+        interpolation_fraction: 0.38,
+      },
+    ],
+  });
+
+  it("renders 'Cannot compute' (not 'Not yet computed') for a null value on a computed metric", async () => {
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    expect(await screen.findByText(/Cannot compute/i)).toBeInTheDocument();
+  });
+
+  it("shows the rep's confidence category as the reason", async () => {
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    // "Very Low" appears in the cell reason line (and also in the header chip)
+    const matches = await screen.findAllByText(/Very Low/i);
+    expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the interpolation percentage when > 0", async () => {
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    expect(await screen.findByText(/38% interpolated/i)).toBeInTheDocument();
+  });
+
+  it("still renders 'Not yet computed' for a metric whose registry computed_yet=false", async () => {
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    expect(await screen.findByText(/Not yet computed/i)).toBeInTheDocument();
+  });
+
+  it("renders a per-rep confidence chip in the column header", async () => {
+    render(<UnvalidatedMetricsPanel analysis={analysis} />);
+    // header chip uses the same category helper → "Very Low" appears for the rep column
+    const veryLow = await screen.findAllByText(/Very Low/i);
+    expect(veryLow.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does NOT show an interpolation line when the fraction is 0 (regression guard)", async () => {
+    const zeroFrac = _makeAnalysis({
+      exercise_type: "squat",
+      rep_metrics: [
+        {
+          rep_index: 1,
+          metrics_json: { ecc_con_ratio: null }, // computed_yet=true but null this rep
+          confidence_score: 0.41,
+          interpolation_fraction: 0.0, // nothing reconstructed (clean rep / bench)
+        },
+      ],
+    });
+    render(<UnvalidatedMetricsPanel analysis={zeroFrac} />);
+    // Cannot-compute cell still renders (the rep mounted)…
+    expect(await screen.findByText(/Cannot compute/i)).toBeInTheDocument();
+    // …but the "% interpolated" line is suppressed by the `> 0` guard — never "0% interpolated".
+    expect(screen.queryByText(/interpolated/i)).toBeNull();
+  });
+});
