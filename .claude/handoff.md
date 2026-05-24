@@ -6,8 +6,10 @@ A post-Session-7 deep-dive root-caused the squat lumbar-proxy None values (full 
 
 **Shipped (R1):** dropout-aware `_find_depth_frame` validity mask for squat + DL; bench excluded (deferred to R3); `_ankle_dorsiflexion_deg`/`_shin_angle_deg` return None on mis-tracked frames (geometric + anatomical-envelope guards). Verified: 2285 unit pass, ruff/pyright clean, sagittal integration 8/8, squat recovers depth_angle + lumbar for all 6 reps. CI green, deployed (droplet HEAD `050dc9e`, containers healthy), prod results page renders read-only-verified. ADR-DEPTHFRAME-DROPOUT-GATE added. Backlog: `L2-CV-DEPTHFRAME-DROPOUT` + `-AUX` done.
 
+**R3 — bench bar-path None-interim (shipped 2026-05-23):** a feasibility spike proved a reliable bench bar-path is not readily achievable — raw HoughCircles can't isolate the lifter's plate from background circles, temporal association locks onto stationary circles / loses the bar at the bottom-occlusion, and the wrist proxy hallucinates (~0.72 y-jumps, impossible >180° elbow ranges). Shipped the honest None-interim: `bar_path_classification` anchors gated on bilateral wrist visibility → None when unreliable, real label when wrists visible. ADR-BENCH-BARPATH-NONE-INTERIM. Backlog `L2-CV-DEPTHFRAME-R3` done; **R3b** (real bar-tracker — motion-correlation + occlusion handling, dedicated CV effort) logged open.
+
 **Open follow-ups from the investigation (NOT started):**
-- **R3** (`L2-CV-DEPTHFRAME-R3`, open) — bench bottom-frame + bar-path robustness; wrist proxy unreliable (vis ~0.04–0.5), needs barbell detection.
+- **R3b** (`L2-CV-DEPTHFRAME-R3b`, open) — real bench bar-path tracker (the deferred dedicated CV effort).
 - **R2** — angle-series validity gate + clamp upstream of rep detection (larger; de-noises rep detection too).
 - **R4** — re-evaluate MediaPipe VIDEO vs IMAGE running mode (attacks the dropout source; needs droplet perf benchmark).
 - **R5** — surface landmark-confidence in the expert portal so None shows *why*.

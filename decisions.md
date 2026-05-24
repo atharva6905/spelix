@@ -1436,3 +1436,28 @@ Frontend renders the same two values on the regular user's `ResultsPage` as smal
 - **Revert R1 entirely.** Rejected — depth_angle/lumbar recovery is a real correctness win on robust landmarks.
 
 **Related.** Supersedes the root-cause attribution in **ADR-LUMBAR-FLEXION-PROXY-NAMING §6** (the `dy ≤ 0` guard remains correct but covered only 1/6 reps; the dominant cause was dropout + un-gated `argmin`). ADR-058 (VIDEO running mode), ADR-AUDIT-2026-05-22, ADR-SAGITTAL-METRICS-REGISTRY. Files `backend/app/cv/metric_extraction.py` (`_find_depth_frame`, `_ankle_dorsiflexion_deg`, `_shin_angle_deg`, `_squat_metrics`, `_bench_metrics`, `_deadlift_metrics`), `backend/tests/unit/test_metric_extraction{,_sagittal}.py`, `backend/tests/integration/test_pipeline_sagittal_metrics.py`. Backlog row `L2-CV-DEPTHFRAME-DROPOUT`. R3 (bench wrist/bar-path) and R2/R4/R5/R6 remain open per the investigation doc.
+
+## ADR-BENCH-BARPATH-NONE-INTERIM: Bench bar-path is visibility-gated to None until a real bar-tracker exists (2026-05-23, cv-audit R3)
+
+**Context.** R3 set out to make bench `bar_path_classification` (#6) robust — R1 had deferred bench because its wrist-midpoint proxy is unreliable. A feasibility spike (instrumentation in `backend/scripts/oneoff/investigate_bench_barpath_r3.py` + `spike_bench_bar_tracker_r3.py`, local-only) tested the obvious alternative — the existing HoughCircles barbell detector — and a temporal nearest-circle association tracker on top of it:
+
+- **Raw HoughCircles** detects a circle in 100% of bench frames but cannot isolate the lifter's plate from background plates/racks: the picked-circle x swings ~0.4 of frame width *within a single rep* (per-rep x-std 0.13–0.24), physically impossible for a controlled press.
+- **Temporal association** (seed largest-radius, track nearest within a gate) stabilises x-std to <0.03 on most reps but locks onto a near-*stationary* circle (track y-range ~0.02 — far too small for real bar travel) and loses the bar at the bottom where it is occluded by the torso/arms — exactly where the j-curve discriminator needs data.
+- **Wrist-midpoint fallback** hallucinates: wrist-midpoint y jumps ~0.72 of frame height on ~half the reps, with impossible >180° elbow ranges on the same reps.
+
+Conclusion: **no current building block reliably yields a bench bar path.** A genuine solution is a dedicated CV effort (motion-correlation bar identification, occlusion handling, or a trained/optical-flow tracker), not a quick fix.
+
+**Decision.** Ship the honest **None-interim** (chosen by the user over a speculative tracker build): in `_bench_metrics`, each of the three bar-path anchors (`descent_start` / `bottom` / `ascent_end`) is gated on **bilateral wrist visibility** — `_vis_ok(frame, 15, 16)` (≥ `_S5_MIN_VIS` 0.30); an unreliable anchor → `None` → `_classify_bar_path` returns `None`. Net: `bar_path_classification` is `None` (cannot-classify, shows "—") on the supine-occluded footage that dominates real bench clips, while it still classifies when both wrists are genuinely visible. Same None-over-garbage philosophy as ADR-DEPTHFRAME-DROPOUT-GATE / ADR-LUMBAR-FLEXION-PROXY-NAMING §5. Wrists 15/16 are bilateral (the midpoint averages both) and are NOT routed through `side_idx`.
+
+**Consequences.**
+- (+) Bench stops emitting noise (the prior wrist proxy produced ~9/13 artifact `j_curve` labels, 5 from `bottom_x=0` dropout frames). "—" is honest; the metric is compute-only (`in_scoring=False`), so no scoring impact.
+- (+) The metric remains functional on footage where wrists are reliably visible — the gate suppresses only unreliable frames.
+- (−) On typical commercial-gym bench footage the metric will almost always be `None`. That is the truthful state until R3b.
+- (−) `bar_path_classification` is already a nullable key (ADR-LUMBAR-FLEXION-PROXY-NAMING §5) — no type/schema/invariant change.
+
+**Alternatives considered.**
+- **Switch bench bar-path to HoughCircles** — rejected; raw detection cannot isolate the lifter's bar (spike evidence).
+- **Build the temporal-association tracker now** — rejected for R3 scope; the spike showed seeding + bottom-occlusion are unsolved, making payoff uncertain. Logged as **R3b** (`L2-CV-DEPTHFRAME-R3b`).
+- **Unconditional None for bench** — rejected; over-suppresses on footage where wrists are visible. The visibility gate is the honest, footage-adaptive version.
+
+**Related.** Follows ADR-DEPTHFRAME-DROPOUT-GATE (R1) and the same investigation (`docs/superpowers/investigations/2026-05-23-cv-occlusion-rootcause.md`, local). Files `backend/app/cv/metric_extraction.py` (`_bench_metrics` anchor gate), `backend/tests/unit/test_metric_extraction_sagittal.py` (2 R3 tests). Backlog `L2-CV-DEPTHFRAME-R3` (done, this interim) + `L2-CV-DEPTHFRAME-R3b` (open, real bar-tracker).
