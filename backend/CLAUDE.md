@@ -4,7 +4,7 @@ Python 3.12, FastAPI, SQLAlchemy 2.0 async, Alembic, streaq + Redis, MediaPipe B
 
 **Current phase: Phase 3 COMPLETE — private beta live.** Phase 3 shipped: LangGraph agent (deterministic + adaptive modes), distillation pipeline, CoVe verification, Coach Brain candidate lifecycle, expert portal with PDF upload + annotated video, landing page, beta flow, streaq migration. All on prod since 2026-05-03.
 
-Test counts: **~2225 passing.** Current alembic head: `0906139da711` (23 migration files).
+Test counts: **2301 unit passing.** Current alembic head: `47c8e446162e` (27 migration files).
 
 **Backend changes ship via PR, not direct push to main** — see root `CLAUDE.md` "Checkpoint Workflow" section. Any backend change that touches the analysis pipeline, coaching, upload endpoint, auth, or a schema migration is a meaningful checkpoint that requires: (1) a feature branch, (2) a PR with green CI, (3) merge via `mcp__github__merge_pull_request` (merge method: `merge`, NEVER squash), (4) Playwright MCP E2E verification against spelix.app after the deploy settles. Unit tests green is not enough — prod has a different Supabase project and different env vars, and production-only bugs (PgBouncer asyncpg, JWT issuer, CORS) have burned us before.
 
