@@ -26,13 +26,19 @@ import {
   type ThresholdRow,
 } from "@/api/expert";
 import ThresholdFlagModal from "@/components/ThresholdFlagModal";
+import { getConfidenceCategory } from "@/lib/confidence";
 
 interface Props {
   analysis: ExpertAnalysisDetail;
 }
 
 interface ApplicableEntry extends SagittalMetricRegistryEntry {
-  perRep: Array<{ repIndex: number; value: number | string | null }>;
+  perRep: Array<{
+    repIndex: number;
+    value: number | string | null;
+    confidenceScore: number | null;
+    interpolationFraction: number | null;
+  }>;
 }
 
 function _extractValue(
@@ -68,6 +74,26 @@ function _formatValue(value: number | string | null, unit: string): string {
     return trimmed ? `${value.toFixed(1)} ${trimmed}` : value.toFixed(1);
   }
   return String(value);
+}
+
+function _confidenceChip(score: number | null) {
+  if (score === null) return null;
+  const cat = getConfidenceCategory(score);
+  const tone =
+    cat === "High"
+      ? "bg-green-100 text-green-700"
+      : cat === "Moderate"
+        ? "bg-yellow-100 text-yellow-700"
+        : cat === "Low"
+          ? "bg-orange-100 text-orange-700"
+          : "bg-red-100 text-red-700";
+  return (
+    <span
+      className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
+    >
+      {cat}
+    </span>
+  );
 }
 
 export default function UnvalidatedMetricsPanel({ analysis }: Props) {
@@ -106,6 +132,14 @@ export default function UnvalidatedMetricsPanel({ analysis }: Props) {
         repIndex:
           typeof rep.rep_index === "number" ? (rep.rep_index as number) : i + 1,
         value: _extractValue(rep, e.key_name),
+        confidenceScore:
+          typeof rep.confidence_score === "number"
+            ? (rep.confidence_score as number)
+            : null,
+        interpolationFraction:
+          typeof rep.interpolation_fraction === "number"
+            ? (rep.interpolation_fraction as number)
+            : null,
       })),
     }));
 
@@ -176,11 +210,20 @@ export default function UnvalidatedMetricsPanel({ analysis }: Props) {
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-2 pr-3">Metric</th>
-                {analysis.rep_metrics.map((_, i) => (
-                  <th key={i} className="py-2 pr-3">
-                    Rep {i + 1}
-                  </th>
-                ))}
+                {analysis.rep_metrics.map((rep, i) => {
+                  const score =
+                    typeof rep.confidence_score === "number"
+                      ? (rep.confidence_score as number)
+                      : null;
+                  return (
+                    <th key={i} className="py-2 pr-3">
+                      <div className="flex flex-col gap-0.5">
+                        <span>Rep {i + 1}</span>
+                        {_confidenceChip(score)}
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="py-2 pr-3">Description</th>
               </tr>
             </thead>
@@ -192,7 +235,14 @@ export default function UnvalidatedMetricsPanel({ analysis }: Props) {
                   </td>
                   {entry.perRep.map((rep, i) => (
                     <td key={i} className="py-2 pr-3 text-gray-700">
-                      {entry.computed_yet && rep.value !== null ? (
+                      {!entry.computed_yet ? (
+                        <span
+                          className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500"
+                          aria-label="Not yet computed"
+                        >
+                          Not yet computed
+                        </span>
+                      ) : rep.value !== null ? (
                         <div className="flex items-center gap-2">
                           <span>{_formatValue(rep.value, entry.unit)}</span>
                           <button
@@ -216,12 +266,25 @@ export default function UnvalidatedMetricsPanel({ analysis }: Props) {
                           </button>
                         </div>
                       ) : (
-                        <span
-                          className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500"
-                          aria-label="Not yet computed"
+                        <div
+                          className="flex flex-col gap-0.5"
+                          title="Landmark dropout this rep — R2 reconstructed the affected frames; metrics that depend on the occluded joint can't be computed."
                         >
-                          Not yet computed
-                        </span>
+                          <span className="inline-flex w-fit items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+                            Cannot compute
+                          </span>
+                          {rep.confidenceScore !== null && (
+                            <span className="text-[11px] text-gray-500">
+                              {getConfidenceCategory(rep.confidenceScore)} confidence
+                            </span>
+                          )}
+                          {rep.interpolationFraction !== null &&
+                            rep.interpolationFraction > 0 && (
+                              <span className="text-[11px] text-gray-500">
+                                {Math.round(rep.interpolationFraction * 100)}% interpolated
+                              </span>
+                            )}
+                        </div>
                       )}
                     </td>
                   ))}
