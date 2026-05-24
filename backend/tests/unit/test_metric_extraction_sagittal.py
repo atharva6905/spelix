@@ -1931,7 +1931,7 @@ def test_session7_baseline_squat_uses_first_rep_start() -> None:
     ]
     # rep_position is ignored for squat — always returns reps[0].start_frame
     assert identify_standing_baseline_frame(
-        "squat", reps[1], rep_position=1, all_reps=reps, bar_y_series=None
+        "squat", reps[1], rep_position=1, all_reps=reps
     ) == 5
 
 
@@ -1939,7 +1939,7 @@ def test_session7_baseline_squat_no_reps_returns_none() -> None:
     assert identify_standing_baseline_frame(
         "squat",
         DetectedRep(rep_index=0, start_frame=0, end_frame=10, confidence_score=0.9, min_angle=80.0),
-        rep_position=0, all_reps=None, bar_y_series=None,
+        rep_position=0, all_reps=None,
     ) is None
 
 
@@ -1949,31 +1949,35 @@ def test_session7_baseline_deadlift_uses_prev_rep_lockout() -> None:
         DetectedRep(rep_index=0, start_frame=0, end_frame=30, confidence_score=0.9, min_angle=80.0),
         DetectedRep(rep_index=1, start_frame=35, end_frame=70, confidence_score=0.9, min_angle=80.0),
     ]
-    bar_y = np.full(80, 0.5)
     assert identify_standing_baseline_frame(
-        "deadlift", reps[1], rep_position=1, all_reps=reps, bar_y_series=bar_y
+        "deadlift", reps[1], rep_position=1, all_reps=reps
     ) == 30
 
 
-def test_session7_baseline_deadlift_first_rep_uses_preliftoff() -> None:
-    """DL first rep: liftoff detected at frame 10 -> baseline = 9."""
+def test_session7_baseline_deadlift_first_rep_uses_own_lockout() -> None:
+    """DL first rep has no previous lockout, so the standing baseline is the
+    rep's OWN lockout (``end_frame``) — the standing-upright top of the pull.
+
+    Regression for L2-CV-DEPTHFRAME-R6: the previous design used the
+    pre-liftoff frame, which for a deadlift is the HINGED setup pose, not
+    standing. That made the rep-0 lumbar_flexion_proxy_delta_deg ~0.19 deg
+    while reps 1-4 (which correctly used the prior lockout) measured ~68 deg
+    on the deadlift fixture."""
     rep = DetectedRep(rep_index=0, start_frame=2, end_frame=40, confidence_score=0.9, min_angle=80.0)
-    bar_y = np.full(50, 0.80)          # set position, bar low (high y)
-    bar_y[10:] = 0.50                  # bar rises (y drops) at frame 10 -> liftoff
     out = identify_standing_baseline_frame(
-        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+        "deadlift", rep, rep_position=0, all_reps=[rep]
     )
-    assert out == 9
+    assert out == 40  # end_frame (own lockout), NOT a pre-liftoff setup frame
 
 
-def test_session7_baseline_deadlift_first_rep_no_liftoff_falls_back_to_start() -> None:
-    """DL first rep, bar never lifts -> fall back to rep.start_frame."""
-    rep = DetectedRep(rep_index=0, start_frame=3, end_frame=40, confidence_score=0.9, min_angle=80.0)
-    bar_y = np.full(50, 0.80)  # never rises
+def test_session7_baseline_deadlift_single_rep_no_all_reps_uses_own_lockout() -> None:
+    """DL with no all_reps list still resolves the first-rep baseline to the
+    rep's own lockout (end_frame) rather than returning None."""
+    rep = DetectedRep(rep_index=0, start_frame=3, end_frame=55, confidence_score=0.9, min_angle=80.0)
     out = identify_standing_baseline_frame(
-        "deadlift", rep, rep_position=0, all_reps=[rep], bar_y_series=bar_y
+        "deadlift", rep, rep_position=0, all_reps=None
     )
-    assert out == 3
+    assert out == 55
 
 
 # ---------------------------------------------------------------------------
