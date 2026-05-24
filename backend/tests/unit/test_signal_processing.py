@@ -338,3 +338,132 @@ class TestComputeAngleTimeseries:
         result = compute_angle_timeseries(frames, "squat")
         assert "hip_angle" in result
         assert len(result["hip_angle"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# compute_angle_timeseries — validity gating (R2, L2-CV-DEPTHFRAME-R2)
+# ---------------------------------------------------------------------------
+
+
+def _valid_squat_frame() -> np.ndarray:
+    """A clean squat frame (subject-right indices): hip_angle == 90°.
+
+    shoulder(12) directly above hip(24); knee(26) directly right of hip.
+    All landmarks fully visible (visibility 1.0 from ``_make_landmarks``).
+    """
+    return _make_landmarks(
+        {
+            12: (0.5, 0.0),  # shoulder above hip
+            24: (0.5, 0.5),  # hip (vertex)
+            26: (1.0, 0.5),  # knee right of hip -> hip_angle 90°
+            28: (1.0, 1.0),  # ankle
+        }
+    )
+
+
+def _zero_filled_frame() -> np.ndarray:
+    """Total MediaPipe VIDEO-mode dropout: all landmarks at origin, visibility 0.
+
+    ``calculate_angle`` on origin points returns 0.0° — the spurious spike R2
+    must gate out before smoothing.
+    """
+    return np.zeros((33, 5), dtype=float)
+
+
+class TestComputeAngleTimeseriesValidityGating:
+    """R2 (L2-CV-DEPTHFRAME-R2): gate dropout / low-visibility frames out of the
+    angle series before smoothing so garbage angles (the 0° spikes and the
+    Savitzky-Golay over/undershoot they cause) never reach rep detection or
+    depth-frame selection. See ADR-ANGLE-SERIES-VALIDITY-GATE.
+    """
+
+    def test_interior_dropout_interpolated_not_zero_spike(self) -> None:
+        # 8 valid (hip=90) | 3 zero-filled dropout | 8 valid (hip=90)
+        frames = (
+            [_valid_squat_frame() for _ in range(8)]
+            + [_zero_filled_frame() for _ in range(3)]
+            + [_valid_squat_frame() for _ in range(8)]
+        )
+        result = compute_angle_timeseries(frames, "squat")
+        hip = result["hip_angle"]
+        # Dropout frames (indices 8,9,10) must be linearly interpolated to ~90,
+        # NOT the spurious 0° spike a zero-filled frame produces pre-fix.
+        for i in (8, 9, 10):
+            assert hip[i] > 45.0, f"frame {i}: expected interpolated ~90, got {hip[i]}"
+
+    def test_output_clamped_to_valid_range(self) -> None:
+        # Pre-fix, savgol undershoots below 0° near the 0-spike (the −32°
+        # artifact from the investigation). Post-fix interp + clamp -> [0,180].
+        frames = (
+            [_valid_squat_frame() for _ in range(8)]
+            + [_zero_filled_frame() for _ in range(3)]
+            + [_valid_squat_frame() for _ in range(8)]
+        )
+        result = compute_angle_timeseries(frames, "squat")
+        for key, arr in result.items():
+            assert float(np.min(arr)) >= 0.0, f"{key}: min {float(np.min(arr))} < 0"
+            assert float(np.max(arr)) <= 180.0, f"{key}: max {float(np.max(arr))} > 180"
+
+    def test_leading_dropout_held_at_first_valid(self) -> None:
+        frames = [_zero_filled_frame() for _ in range(3)] + [
+            _valid_squat_frame() for _ in range(10)
+        ]
+        result = compute_angle_timeseries(frames, "squat")
+        hip = result["hip_angle"]
+        assert hip[0] > 45.0, f"leading dropout should hold ~90, got {hip[0]}"
+
+    def test_trailing_dropout_held_at_last_valid(self) -> None:
+        frames = [_valid_squat_frame() for _ in range(10)] + [
+            _zero_filled_frame() for _ in range(3)
+        ]
+        result = compute_angle_timeseries(frames, "squat")
+        hip = result["hip_angle"]
+        assert hip[-1] > 45.0, f"trailing dropout should hold ~90, got {hip[-1]}"
+
+    def test_low_visibility_frame_gated_even_if_pose_present(self) -> None:
+        # Confident-mis-track mode (B): a frame whose knee is geometrically
+        # valid (gives a 180° hip reading) but has visibility 0.10 < 0.30.
+        # It must be gated (interpolated to ~90), not bias the series toward 180.
+        bad = _valid_squat_frame()
+        bad[26] = (0.5, 1.0, 0.0, 0.10, 1.0)  # knee collinear -> 180°, low vis
+        frames = (
+            [_valid_squat_frame() for _ in range(8)]
+            + [bad]
+            + [_valid_squat_frame() for _ in range(8)]
+        )
+        result = compute_angle_timeseries(frames, "squat")
+        hip = result["hip_angle"]
+        assert abs(hip[8] - 90.0) < 10.0, (
+            f"low-vis frame should be gated to ~90, got {hip[8]}"
+        )
+
+    def test_all_frames_dropout_does_not_crash(self) -> None:
+        # Fully-occluded clip (quality gate rejects these upstream in prod).
+        # Must not raise; returns same-length arrays.
+        frames = [_zero_filled_frame() for _ in range(12)]
+        result = compute_angle_timeseries(frames, "squat")
+        assert len(result["hip_angle"]) == 12
+
+    def test_clean_signal_not_altered_by_gating(self) -> None:
+        # Regression guard: a fully-valid clip is unchanged (interp + clamp are
+        # both no-ops when nothing is invalid and all values are in-range).
+        frames = [_valid_squat_frame() for _ in range(20)]
+        result = compute_angle_timeseries(frames, "squat")
+        assert float(np.std(result["hip_angle"])) < 1e-3
+
+    def test_bench_not_gated_on_invisible_wrist(self) -> None:
+        # Bench wrists are SYSTEMATICALLY near-invisible (supine occlusion —
+        # ~0.008 median vis, <0.30 on 100% of frames on real footage). Gating
+        # bench elbow_angle on wrist visibility would NaN the entire series and
+        # collapse rep detection (the 76.4 bar_touch_height_pct artifact R1 also
+        # avoided by excluding bench). Bench is deliberately NOT validity-gated
+        # — its bar-path/wrist robustness is R3/R3b, not R2.
+        f = _make_landmarks({12: (0.5, 0.0), 14: (0.5, 0.5), 16: (1.0, 0.5)})
+        f[16, 3] = 0.10  # right wrist barely visible (realistic bench)
+        frames = [f.copy() for _ in range(20)]
+        result = compute_angle_timeseries(frames, "bench")
+        elbow = result["elbow_angle"]
+        assert not np.isnan(elbow).any(), (
+            "bench elbow_angle must not be gated to NaN on low wrist visibility"
+        )
+        assert abs(float(np.mean(elbow)) - 90.0) < 1.0
