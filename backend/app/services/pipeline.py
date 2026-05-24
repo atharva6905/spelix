@@ -41,7 +41,10 @@ from app.cv.metric_extraction import extract_rep_metrics
 from app.cv.pose_extraction import extract_landmarks
 from app.cv.quality_gates import run_quality_gates
 from app.cv.rep_detection import detect_reps
-from app.cv.signal_processing import compute_angle_timeseries
+from app.cv.signal_processing import (
+    compute_angle_timeseries,
+    compute_invalid_frame_mask,
+)
 from app.cv.video_probe import probe_duration_seconds
 from app.models.analysis import Analysis
 from app.models.rep_metric import RepMetric
@@ -591,6 +594,13 @@ async def run_cv_pipeline(
             None, compute_angle_timeseries, landmarks_per_frame, exercise_type, lifter_side,
         )
     result.angle_timeseries = angle_timeseries
+
+    # R5 (L2-CV-DEPTHFRAME-R5): per-frame mask of R2-gated (dropout /
+    # low-visibility) frames, sliced per-rep in Step 8 to give each rep's
+    # interpolation fraction — how much of its angle signal R2 reconstructed.
+    invalid_frame_mask = await loop.run_in_executor(
+        None, compute_invalid_frame_mask, landmarks_per_frame, exercise_type, lifter_side,
+    )
     await _persist_timing_telemetry(analysis.id, timer.as_dict())
 
     # Load threshold config once — used by rep_detection (Step 5),
@@ -686,17 +696,28 @@ async def run_cv_pipeline(
     # Step 8: Write rep metrics to DB
     # ------------------------------------------------------------------ #
     if rep_metrics:
-        db_metrics = [
-            RepMetric(
-                analysis_id=analysis_id,
-                rep_index=rm.rep_index,
-                start_frame=rm.start_frame,
-                end_frame=rm.end_frame,
-                confidence_score=reps[rm.rep_index].confidence_score if rm.rep_index < len(reps) else None,
-                metrics_json=rm.metrics,
+        db_metrics = []
+        for rm in rep_metrics:
+            # R5: fraction of this rep's frames R2 had to reconstruct over
+            # dropout. None for an empty window; 0.0 when nothing was gated
+            # (clean rep, or bench which is not R2-gated).
+            rep_slice = invalid_frame_mask[rm.start_frame:rm.end_frame + 1]
+            interp_frac = float(rep_slice.mean()) if rep_slice.size > 0 else None
+            db_metrics.append(
+                RepMetric(
+                    analysis_id=analysis_id,
+                    rep_index=rm.rep_index,
+                    start_frame=rm.start_frame,
+                    end_frame=rm.end_frame,
+                    confidence_score=(
+                        reps[rm.rep_index].confidence_score
+                        if rm.rep_index < len(reps)
+                        else None
+                    ),
+                    interpolation_fraction=interp_frac,
+                    metrics_json=rm.metrics,
+                )
             )
-            for rm in rep_metrics
-        ]
         await rep_metric_repo.create_batch(db_metrics)
 
     await write_heartbeat(redis)

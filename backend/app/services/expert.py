@@ -87,6 +87,7 @@ class ExpertService:
                     "rep_index": rm.rep_index,
                     "metrics_json": rm.metrics_json,
                     "confidence_score": rm.confidence_score,
+                    "interpolation_fraction": rm.interpolation_fraction,
                 })
 
         coaching_result_dict = None
