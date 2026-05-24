@@ -32,7 +32,9 @@ _COL_Y = 1
 # ``metric_extraction._S5_MIN_VIS`` (kept in sync — same physical threshold)
 # so the angle-series validity gate (R2, L2-CV-DEPTHFRAME-R2) and the
 # depth-frame validity mask (R1, L2-CV-DEPTHFRAME-DROPOUT) agree on what
-# counts as a dropout frame. Raw MediaPipe visibility (column 3), not sigmoid.
+# counts as a dropout frame. Column 3 is post-sigmoid visibility — sigmoid is
+# applied once at ingestion by ``pose_extraction._guard_sigmoid``, so values
+# here are already in [0, 1] and compared directly (no second sigmoid).
 _MIN_VIS = 0.30
 
 # Landmark dependencies per joint angle, used to gate dropout / low-visibility

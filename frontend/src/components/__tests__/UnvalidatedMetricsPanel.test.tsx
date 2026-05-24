@@ -327,4 +327,23 @@ describe("UnvalidatedMetricsPanel — R5 cannot-compute + confidence", () => {
     const veryLow = await screen.findAllByText(/Very Low/i);
     expect(veryLow.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("does NOT show an interpolation line when the fraction is 0 (regression guard)", async () => {
+    const zeroFrac = _makeAnalysis({
+      exercise_type: "squat",
+      rep_metrics: [
+        {
+          rep_index: 1,
+          metrics_json: { ecc_con_ratio: null }, // computed_yet=true but null this rep
+          confidence_score: 0.41,
+          interpolation_fraction: 0.0, // nothing reconstructed (clean rep / bench)
+        },
+      ],
+    });
+    render(<UnvalidatedMetricsPanel analysis={zeroFrac} />);
+    // Cannot-compute cell still renders (the rep mounted)…
+    expect(await screen.findByText(/Cannot compute/i)).toBeInTheDocument();
+    // …but the "% interpolated" line is suppressed by the `> 0` guard — never "0% interpolated".
+    expect(screen.queryByText(/interpolated/i)).toBeNull();
+  });
 });
