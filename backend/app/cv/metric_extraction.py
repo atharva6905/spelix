@@ -529,15 +529,26 @@ def _bench_metrics(
     arch_value = _arch_deg(landmarks_per_frame, non_rep_mask, side_idx, lifter_side)
 
     # Session 7 #6 — bar-path classification using wrist-midpoint x trajectory.
+    # L2-CV-DEPTHFRAME-R3 (None-interim): gate each anchor on bilateral wrist
+    # visibility. Wrists 15 (left) + 16 (right) are bilateral — NOT side-
+    # dependent — because _wrist_midpoint_trajectory always averages both. On
+    # the supine press the wrists are frequently occluded/hallucinated; an
+    # unreliable anchor → None → _classify_bar_path returns None (cannot-classify)
+    # rather than a misleading label. A real bar-tracker replaces this proxy (R3b).
     bar_x_series, _ = _wrist_midpoint_trajectory(landmarks_per_frame)
     span = end - start
     if span < 2:
         bar_path: str | None = None
     else:
+        def _anchor_x(frame_idx: int) -> float | None:
+            if _vis_ok(landmarks_per_frame[frame_idx], 15, 16):
+                return float(bar_x_series[frame_idx])
+            return None
+
         bar_path = _classify_bar_path(
-            descent_start_x=float(bar_x_series[start]),
-            bottom_x=float(bar_x_series[bottom_frame]),
-            ascent_end_x=float(bar_x_series[end]),
+            descent_start_x=_anchor_x(start),
+            bottom_x=_anchor_x(bottom_frame),
+            ascent_end_x=_anchor_x(end),
         )
 
     return {

@@ -2239,6 +2239,31 @@ def test_session7_bench_bar_path_none_on_degenerate_short_rep() -> None:
     assert out[0].metrics["bar_path_classification"] is None
 
 
+def test_r3_bench_barpath_none_when_wrist_low_vis_at_anchor() -> None:
+    """R3 (L2-CV-DEPTHFRAME-R3): bench bar_path_classification is None
+    (cannot-classify) when a wrist landmark is below _S5_MIN_VIS at a bar-path
+    anchor frame. The bilateral wrist-midpoint proxy is unreliable on the
+    supine press (occluded/hallucinated wrists), so emit None rather than a
+    misleading label. Pre-fix this returned 'vertical' from the garbage midpoint."""
+    frames, angles, rep = _make_full_bench_session_with_landmarks(60)
+    # Tank LEFT wrist (15) visibility at the descent-start anchor (rep.start_frame).
+    frames[rep.start_frame][15, 3] = 0.1
+    out = extract_rep_metrics([rep], frames, angles, "bench", "standard", 30.0, "right")
+    assert out[0].metrics["bar_path_classification"] is None
+
+
+def test_r3_bench_barpath_label_when_both_wrists_visible() -> None:
+    """R3: the metric STILL classifies (no over-suppression) when BOTH wrists
+    are reliably visible (>=_S5_MIN_VIS) at all three anchors — the gate only
+    suppresses unreliable frames, not reliable ones."""
+    frames, angles, rep = _make_full_bench_session_with_landmarks(60)
+    # Shift the ascent-end wrist x well past the (constant) bottom x → j-curve.
+    frames[rep.end_frame][15, 0] = 0.60
+    frames[rep.end_frame][16, 0] = 0.60
+    out = extract_rep_metrics([rep], frames, angles, "bench", "standard", 30.0, "right")
+    assert out[0].metrics["bar_path_classification"] == "j_curve"
+
+
 def test_session7_lumbar_proxy_none_when_shoulder_below_hip_occlusion() -> None:
     """Deep-squat hip-fold occlusion can mis-place a landmark so the shoulder
     appears BELOW the hip (dy = hip_y - shoulder_y <= 0), which is non-physical
