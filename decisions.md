@@ -1529,3 +1529,40 @@ Conclusion: **no current building block reliably yields a bench bar path.** A ge
 - **Store the fraction in `metrics_json`.** Rejected — `SummaryService._compute_consistency_metrics` iterates all numeric `metrics_json` keys, so a float there would pollute the consistency stats. A dedicated nullable column mirrors `confidence_score` cleanly (no consistency-pass pollution, no `test_all_*_metric_values_are_floats` change).
 
 **Related.** Implements the R5 hook from **ADR-ANGLE-SERIES-VALIDITY-GATE** (R2). Reuses FR-CVPL-24/25 confidence. Surface is FR-EXPV-08; per-rep storage FR-REPM-04. Files: `backend/app/cv/signal_processing.py` (`compute_invalid_frame_mask`), `backend/app/models/rep_metric.py` + migration `47c8e446162e` (`interpolation_fraction`), `backend/app/services/pipeline.py` (Step 4 mask + Step 8 store), `backend/app/services/expert.py` (per-rep serialization), `frontend/src/components/UnvalidatedMetricsPanel.tsx` (3-state cell + chip). Built via `/team` (spelix-cv-engineer + spelix-migration + spelix-tdd, lead-integrated). Backlog `L2-CV-DEPTHFRAME-R5`. Open follow-ups now **R3b** (bench bar-tracker) + **R4** (VIDEO vs IMAGE running mode).
+
+## ADR-CV-RUNNING-MODE-NO-CHANGE: Keep MediaPipe RunningMode.VIDEO — IMAGE mode is worse for deep-squat occlusion (2026-05-25, cv-audit R4)
+
+**Context.** R1/R2 attributed squat-bottom dropout partly to MediaPipe `RunningMode.VIDEO` total pose loss (zero-filled frames). R4 tested the hypothesis that `RunningMode.IMAGE` (full detection every frame, no inter-frame bbox tracking) would re-acquire the pose at the deep-squat bottom where VIDEO drops it.
+
+**Decision.** **Keep `RunningMode.VIDEO`** (ADR-058 unchanged). A local sniff test (`scripts/oneoff/r4_running_mode_sniff.py`) on the real fixtures falsified the hypothesis: on `atharva-squat.mov`, IMAGE mode was **worse** — fully-dropped frames 13.8% → 45.1%, R2-predicate invalid frames 47.6% → 69.0% — because VIDEO's inter-frame tracker is *mitigating* the occlusion (carrying the bbox through the fold), not causing it. Bench/deadlift were ≈equal between modes. No latency advantage for IMAGE either.
+
+**Consequences.**
+- (+) Cheap, decisive negative result (~12 min compute) avoided a droplet latency benchmark on a dead end. Confirms the R1/R2 gate-and-interpolate layer is the correct response, not a running-mode change.
+- (+) Reframed the root cause: the bottom loss is genuine occlusion (see ADR-CV-OBLIQUE-3D-DIRECTION), not a VIDEO-mode artifact.
+- (−) None — no code change.
+
+**Alternatives considered.** IMAGE mode (worse, above). Merging VIDEO+IMAGE per-frame (VIDEO ⊇ IMAGE, no benefit). Tuning detection/tracking confidence thresholds (marginal; deferred).
+
+**Related.** Telemetry-first rule (ADR-059). Backlog `L2-CV-DEPTHFRAME-R4` (closed, no-change). Supersedes the implicit "switch running mode" option left open by R1/R2.
+
+## ADR-CV-OBLIQUE-3D-DIRECTION: Squat-bottom loss is barbell-plate occlusion; the fix is front-oblique capture + monocular 3D (MeTRAbs), parked pending GPU offload (2026-05-25)
+
+**Context.** After R1–R6 + R4, the question remained: is the deep-squat-bottom metric loss recoverable at all? Full investigation in `docs/audit/2026-05-25-squat-oblique-3d-investigation.md`.
+
+**Findings (evidence-backed).**
+1. **Root cause is the loaded barbell plate occluding the torso/hips from a pure-side (sagittal) camera** — NOT limb self-occlusion and NOT a pose-model weakness. RTMPose (Halpe-26) overlays at the deep bottom show only the lifter's shoes visible below the plate; confidence collapses to ~0.15. This supersedes the "limb self-occlusion at the deep-squat fold" framing in the R1 investigation.
+2. **No 2D pose-model swap fixes a pure-side view.** RTMPose never drops (top-down) but confidently hallucinates the occluded joints, and ran ~8× slower than BlazePose on CPU. Dead end.
+3. **A front-oblique (~45°) camera clears the plate** — on a real ATG squat the deepest-frame joint visibility was 0.90–1.00 (vs ~0.15 pure-side), 0% dropout.
+4. **BlazePose 3D is too weak** to exploit the oblique view (~10.6° body-angle error, depth-compressed, inconsistent bone lengths). **MeTRAbs** (`metrabs_l`, h36m_17) gives anatomically-stable 3D: bone-length CV <1–2% (good res), 100% detection across 7 clips / side+oblique+rear angles / lighting; smooth descent→bottom→ascent angle traces. Higher input resolution tightens 3D (720p → <2% CV vs 4–10% at 360p). Far/occluded-side thigh is the residual weak spot (~5% CV).
+
+**Decision.** The fix — **front-oblique capture guidance + accurate monocular 3D (MeTRAbs) via a serverless-GPU offload** — is **validated and PARKED**, not built. Compute cost is ≈ free at beta scale (~$3–6/mo, covered by Modal free credits; ~$0.01–0.02/analysis on a T4; cold-start latency acceptable for the async pipeline). The blocker is **effort/risk, not money**: ~2–3 weeks dominated by a 2D→3D angle-computation rewrite + full threshold/scoring recalibration (the scoring foundation assumes perpendicular-sagittal 2D). Deferred because it competes with the mid-May internship-application window; build post-internship as a squat-only 3D path behind a feature flag.
+
+**Consequences.**
+- (+) The squat-bottom problem is now *solvable* with a known, de-risked path — and the failure was correctly attributed (plate occlusion + camera geometry), so no future effort is wasted re-trying 2D model swaps or running-mode changes.
+- (+) Reusable test-clip corpus gathered (`e2e/fixtures/CORPUS.md`) for whenever the build proceeds.
+- (−) No user-facing improvement now; R1/R2/R5 (gate + honestly surface) remain the shipped behaviour. Pure-side uploads still lose the plate-occluded bottom (now with a precise documented reason).
+- (−) Introduces, when built, a new infra dependency (serverless GPU) + a parallel 3D path — accepted cost, flagged.
+
+**Alternatives considered.** RTMPose / model swap on pure-side (dead end — plate occlusion). BlazePose 3D (too weak). Pose2Sim multi-camera 3D (3–4° but needs ≥2 cameras — not single-phone). Sports2D single-camera 2D angles (validated but 2D → perspective-biased on oblique). On-droplet accurate 3D (MeTRAbs ~3 s/frame CPU → infeasible). Movement-aware reconstruction of the occluded hip from the visible knee/ankle chain (cheaper, but fabricates an unobserved extremum — product/ethics line; not pursued).
+
+**Related.** Supersedes the root-cause attribution in ADR-DEPTHFRAME-DROPOUT-GATE (R1). Builds on R2/R5 (the honest-None surface). Backlog `L2-CV-DEPTHFRAME-OBLIQUE-3D` (open, parked). Investigation + reproduction: `docs/audit/2026-05-25-squat-oblique-3d-investigation.md`.
