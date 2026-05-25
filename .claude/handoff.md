@@ -1,3 +1,21 @@
+# Session 2026-05-25 — squat-bottom occlusion: root cause found, oblique/3D fix validated + PARKED
+
+**No code shipped. Investigation + documentation only.** Pursued R4 and the broader "is the squat-bottom loss fixable?" question.
+
+**Outcomes:**
+- **R4 (VIDEO vs IMAGE running mode) → closed, no change.** IMAGE is worse (squat fully-dropped 13.8%→45.1%). VIDEO's tracker mitigates occlusion. ADR-CV-RUNNING-MODE-NO-CHANGE.
+- **Root cause re-attributed:** the deep-squat-bottom loss is the **barbell plate occluding torso/hips from a pure-side camera** — not limb self-occlusion, not a 2D-model weakness (RTMPose hits the same wall + is 8× slower on CPU). Supersedes R1's "self-occlusion" framing.
+- **Fix validated:** **front-oblique ~45° capture + accurate monocular 3D (MeTRAbs)**. BlazePose 3D too weak (~10.6°, depth-compressed); MeTRAbs gives <1–2% bone-length CV, 100% detection across 7 clips/angles (side/oblique/rear, incl. dark). Higher res tightens 3D.
+- **PARKED.** Compute cost ≈ free (serverless GPU, ~$3–6/mo, Modal free credits). Blocker = effort/risk: ~2–3 wk dominated by a 2D→3D angle rewrite + threshold/scoring recalibration. Deferred — competes with mid-May internship apps. Build post-internship as a squat-only path behind a flag.
+
+**Artifacts:** `docs/audit/2026-05-25-squat-oblique-3d-investigation.md` (full record + reproduction), ADR-CV-RUNNING-MODE-NO-CHANGE + ADR-CV-OBLIQUE-3D-DIRECTION (`decisions.md`), backlog `L2-CV-DEPTHFRAME-R4` (closed) + `L2-CV-DEPTHFRAME-OBLIQUE-3D` (open/parked), `e2e/fixtures/CORPUS.md` (test corpus).
+
+**Scratch to clean up:** `backend/scripts/oneoff/{r4_running_mode_sniff,rtmpose_squat_sniff,squat_3d_oblique_sniff,render_full_skeleton,metrabs_probe,metrabs_spike,metrabs_spike_multi,probe_clip,probe_corpus}.py` + their `*_out/` dirs (gitignored). Ad-hoc venv pkgs (`rtmlib`, `onnxruntime`, `tensorflow`, `tensorflow_hub`, `yt-dlp`) installed via `uv pip install` — venv-only, `pyproject.toml`/`uv.lock` untouched; `uv sync` prunes them.
+
+**No prod/CI/migration changes this session. Test counts unchanged (2301 backend / 765 frontend).**
+
+---
+
 # cv-audit handoff — EFFORT COMPLETE + R1/R2/R3/R5/R6 occlusion follow-ups shipped (2026-05-24)
 
 ## R1 — dropout-aware depth-frame fix (shipped 2026-05-23, PR #170 `050dc9e`)
