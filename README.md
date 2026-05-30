@@ -75,8 +75,8 @@ docs/         SRS, architecture docs, ADRs
 
 ## Testing
 
-- **Backend:** 2,301 unit + integration tests, including **89 MC/DC (Modified Condition/Decision Coverage) vectors across 7 decision tables** for safety-critical scoring and quality-gate logic — the coverage standard used in DO-178C Level A avionics software.
-- **Frontend:** 765 component + hook tests across 79 files (Vitest + React Testing Library).
+- **Backend:** 2,496 tests (unit, integration, and MC/DC), including **86 MC/DC (Modified Condition/Decision Coverage) decision tests across 7 decision tables** for safety-critical scoring and quality-gate logic — the coverage standard used in DO-178C Level A avionics software.
+- **Frontend:** 765 component + hook tests across 77 files (Vitest + React Testing Library).
 - **Database:** 27 Alembic migrations.
 - **CI:** GitHub Actions runs the full suite plus TruffleHog secret scanning on every push; merges to `main` auto-deploy to production.
 
