@@ -4,7 +4,7 @@ Science-based barbell form coaching platform. Users upload squat/bench/deadlift 
 
 **Current phase: Post-L2 sprint — private beta live.** Phase 0 complete (93 items). Phase 1 complete (44 items). Phase 2 complete (44 items). Phase 3 complete (LangGraph agent, distillation pipeline, landing page, expert portal, beta flow, streaq migration — all on prod since 2026-05-03). L2 sprint hard gate met. Now in beta ops: real users, expert reviews, Coach Brain growing. Next: internship applications (mid-May 2026), Phase 4 eval infrastructure when needed. SRS v2.1 (north star — set in stone).
 
-Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`. **Strategy & priorities: `STRATEGY.md`** — L2 beta launch plan, internship timeline, time budgets, stop-loss triggers. Read before suggesting new features or scope changes.
+Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Open work: [GitHub Issues](https://github.com/atharva6905/spelix/issues); completed archive: `backlog.md`. Strategy & priorities (launch plan, timelines, time budgets, stop-loss triggers) are kept in a local-only strategy note (not in the public repo) — consult it before suggesting new features or scope changes.
 
 Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at migration 001.
 

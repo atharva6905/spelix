@@ -641,7 +641,7 @@ Phase 2 transition gate passed. All 33 Must requirements implemented, E2E smoke 
 
 ## Phase 3 — LangGraph Agent Orchestration (seeded 2026-04-13, session 27) — completed (on prod since 2026-05-03)
 
-**Phase 3 is deferred until post-Saturniq (mid-August 2026).** Per STRATEGY.md, feature work freezes after L2 beta launch (May 9, 2026). Phase 3 tasks are seeded here for reference but NOT active.
+**(Historical note — this plan was later superseded; Phase 3 was pulled forward into the L2 sprint and shipped 2026-05-03.)** The original sprint plan deferred Phase 3 and froze feature work after the L2 beta launch. Phase 3 tasks were seeded below for reference.
 
 Active agents when Phase 3 begins: add `spelix-langgraph-engineer`.
 
@@ -1070,7 +1070,7 @@ Two-phase signed-URL PDF upload end-to-end on the expert reviewer portal (ADR-EX
 
 ## Completed — L2 Sprint Day 2 — Landing V1 (2026-04-15, session 29)
 
-Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2 hard gate met. No SRS FR IDs — growth/ops surface (see migration 008 docstring + ADR-049). Backend 1436 tests passing (15 new), frontend 256 tests passing (30 new), 91% coverage preserved. E2E verified on live `spelix.app/` — POST `/api/v1/beta/requests` returned 201 for anonymous submission. See ADR-049..ADR-052.
+Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). L2-sprint Day 1-2 hard gate met. No SRS FR IDs — growth/ops surface (see migration 008 docstring + ADR-049). Backend 1436 tests passing (15 new), frontend 256 tests passing (30 new), 91% coverage preserved. E2E verified on live `spelix.app/` — POST `/api/v1/beta/requests` returned 201 for anonymous submission. See ADR-049..ADR-052.
 
 | ID | Title | Size | Deps | Refs | Status | Commit |
 |----|-------|------|------|------|--------|--------|
@@ -1093,7 +1093,7 @@ Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2
 | L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) | S | — | landing V2 polish | not migrated (revisit when landing V2 resumes) |
 | L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing V2 polish | not migrated (revisit when landing V2 resumes) |
 | L2-LANDING-V2-04 | Admin beta-request approval UI — BetaRequestsPanel in AdminPage with table, status filter, approve/reject buttons, pagination, stats bar. Transactional-email invite flow deferred. | M | L2-LANDING-02 | ADR-050 | done — `e8e82a5` (PR #142, session 64) |
-| L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | done — `9b78e39` (PR #143, session 65) |
+| L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | done — `9b78e39` (PR #143, session 65) |
 
 
 ## Completed — Pre-Beta Audit Full Closeout (2026-04-20/21, session 58)
