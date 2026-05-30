@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/atharva6905/spelix/blob/main/SECURITY.md
+    about: Please report security issues privately per SECURITY.md — do not open a public issue.
+  - name: Questions about the project
+    url: https://spelix.app
+    about: Spelix is a personal portfolio project. General questions may not receive a response.
