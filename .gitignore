@@ -232,13 +232,13 @@ marimo/_lsp/
 __marimo__/
 .gstack/
 
-# Landing page analysis artefacts (feat/landing-v1 branch, L2 sprint)
-# Screenshots are bulky reference captures of the Framer template and
-# dev-time verification; template-export is a 435 KB Framer HTML export
-# of uncertain licence. Both live on disk for the branch but must not
-# ship on main. See landing-page/landing-page-plan.md §16.10.
-landing-page/screenshots/
-landing-page/template-export/
+# Landing page analysis artefacts (feat/landing-v1 branch, L2 sprint).
+# The whole dir is design-extraction + planning scaffolding that produced
+# the live React landing page in frontend/. It is dead/superseded, not
+# referenced by any build, and derived from a Framer template "of uncertain
+# licence" (screenshots + template-export). Kept on local disk, never shipped.
+# See landing-page/landing-page-plan.md §16.10.
+landing-page/
 
 # MediaPipe model binaries (download at build time)
 backend/models/*.task
@@ -275,6 +275,8 @@ generate_expert_guide.cjs
 .claude/handoff.md
 e2e/
 docs/superpowers/
+# Internal strategy — internship timeline, time budgets, stop-loss triggers
+STRATEGY.md
 # Frontend env files tracked by accident (VITE_API_URL only — no secrets)
 frontend/.env.development
 frontend/.env.production
