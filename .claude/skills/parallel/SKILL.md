@@ -151,7 +151,7 @@ After merging all worktrees back to main:
 
 # 3. Resolve any conflicts (rare with correct dispatch)
 # 4. Update backlog.md — mark completed tasks done
-# 5. Update memory.md — log last_modified files, next task, current test count
+# 5. Update .claude/handoff.md — log last_modified files, next task, current test count
 # 6. Commit merged state
 git commit -m "chore: merge batch N (B-0XX–B-0XX)"
 

@@ -72,7 +72,7 @@ Run each, confirm no errors:
 The local PC has GSD framework hooks (SessionStart, PostToolUse, PreToolUse). These are additive to project hooks. Potential conflicts:
 - `gsd-prompt-guard.js` and `gsd-read-guard.js` run on PreToolUse Write|Edit — may warn on first writes to new files. This is expected, not a blocker.
 - `gsd-context-monitor.js` runs on PostToolUse — monitors context size. May suggest compaction. Follow its guidance.
-- `gsd-workflow-guard.js` — may enforce workflow patterns. If it blocks a legitimate write, note in memory.md.
+- `gsd-workflow-guard.js` — may enforce workflow patterns. If it blocks a legitimate write, note in `.claude/handoff.md`.
 
 ### 2d. MCP Servers (auto-connect via .mcp.json)
 
@@ -209,7 +209,7 @@ mkdir -p config
 mkdir -p reports/templates
 
 # Agent files
-touch memory.md backlog.md restart.md decisions.md
+touch backlog.md restart.md decisions.md
 ```
 
 ## 5. Backend Dependency Setup
