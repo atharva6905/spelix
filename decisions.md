@@ -1005,7 +1005,7 @@ ADR-REPDET-02 hybrid-detection decisions.
 
 **Consequences:**
 - New admins default to `biomechanics_qualified=False`. They can promote cue/correction/principle/drill candidates but receive HTTP 403 on compensation candidates.
-- Set the flag via Supabase service-role: `PUT /auth/v1/admin/users/{id}` with `{"app_metadata": {"biomechanics_qualified": true}}`. Applied in this session for `atharva6905+admin-p3006@gmail.com`.
+- Set the flag via Supabase service-role: `PUT /auth/v1/admin/users/{id}` with `{"app_metadata": {"biomechanics_qualified": true}}`. Applied in this session for the maintainer admin account.
 - Frontend gates the biomechanics banner on `candidate.requires_technical_review` (the authoritative DB flag), not on `entry_type === "compensation"`. The two are decoupled so future entry types can require technical review without a string match.
 - The approve endpoint surfaces `NOT_BIOMECHANICS_QUALIFIED` specifically so the admin UI can render a clear "you can't approve this one" state rather than a generic 403.
 

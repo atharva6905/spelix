@@ -1105,7 +1105,7 @@ Closed 20 audit findings across 4 PRs, then ran Phase 3 audit and fixed 2 HIGH f
 
 **Ops completed this session:**
 - `migrate_roles_to_app_metadata.py` ran against prod Supabase: 0 users needed migration
-- `app_metadata.biomechanics_qualified=true` set on `atharva6905+admin-p3006@gmail.com`
+- `app_metadata.biomechanics_qualified=true` set on the maintainer admin account
 - Migrations 015→021 applied via CI deploy pipeline
 
 **Deferred items (still open):**
