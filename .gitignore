@@ -266,3 +266,18 @@ e2e/screenshots/occlusion/
 
 # Word lock files
 ~$*.docx
+
+# ── Private — excluded from the public OSS repo (BSL flip, 2026-05-30) ──
+# Kept on local disk, NOT published. Plan: docs/superpowers/plans/2026-05-30-spelix-oss-flip-bsl.md
+graphify-out/
+Spelix_Expert_Reviewer_Guide.docx
+generate_expert_guide.cjs
+.claude/handoff.md
+e2e/
+docs/superpowers/
+# Frontend env files tracked by accident (VITE_API_URL only — no secrets)
+frontend/.env.development
+frontend/.env.production
+# Secret-scan reports — never commit
+gitleaks-report.json
+trufflehog-report.json
