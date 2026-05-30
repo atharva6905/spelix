@@ -82,7 +82,7 @@ docs/         SRS, architecture docs, ADRs
 
 ## License
 
-Spelix is source-available under the [Business Source License 1.1](./LICENSE). You may read, modify, and make non-production and limited production use of the code; use that competes with Spelix as a hosted or embedded coaching product is not granted during the license term. The license **automatically converts to Apache License 2.0 on 2030-05-14**.
+Spelix is source-available under the [Business Source License 1.1](./LICENSE). You may read, modify, and make non-production and limited production use of the code; use that competes with Spelix as a hosted or embedded coaching product is not granted during the license term. The license **automatically converts to Apache License 2.0 on 2030-05-30** (four years after first public release).
 
 This repository is the application source. The live production deployment, its infrastructure, and all real user data are **not** part of this repository. See [SECURITY.md](./SECURITY.md) to report vulnerabilities and [CONTRIBUTING.md](./CONTRIBUTING.md) before opening issues or PRs.
 
