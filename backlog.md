@@ -104,7 +104,7 @@ Private beta was blocked: the 3 atharva fixture videos (squat 20.6 s, bench 23.4
 - **PR #121** (`ebfa4dd9`): anchor-based identity-jump detection in `check_single_person` (lifter centroid from first 3 high-visibility samples; reject only on sustained ≥4-consecutive or >30% off-anchor samples at >0.25 frame-width drift; new user_message "Could not consistently track a single lifter — try filming side-on with your full body in frame"); visibility-gated bbox in `check_framing` (skip landmarks with `sigmoid(visibility) < 0.5`; skip samples with <10 visible landmarks); `_FRAMING_MIN_FRACTION` 0.30 → 0.20. 8 new unit tests + 2 rewritten; 98 passed in test_quality_gates.py.
 - **PR #122** (`b5b9d80f`): empirical follow-up — after PR #121 the squat still failed `framing` by 0.0009 (0.1115 vs 0.1125 portrait floor). Visibility-gating barely moved the squat metric (commercial-gym lifters at 3-4 m have high visibility on most landmarks). Lowered `_FRAMING_MIN_FRACTION` 0.20 → 0.18 (portrait floor 0.10125) per the spec's authorised follow-up path. 2 tests renamed + constants updated.
 
-**Prod E2E verification:** Playwright MCP re-upload of all 3 fixtures as `atharva6905@gmail.com` on https://spelix.app post-deploy. Final gate metrics captured from prod DB:
+**Prod E2E verification:** Playwright MCP re-upload of all 3 fixtures as the maintainer admin account on https://spelix.app post-deploy. Final gate metrics captured from prod DB:
 
 | Fixture | Analysis ID | Duration | body_vis | framing (thr 0.10125) | single_person (thr 4) | Terminal status |
 |---------|-------------|----------|----------|------------------------|------------------------|-----------------|
