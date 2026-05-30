@@ -1,15 +1,47 @@
-# backlog.md — Phase 0, Phase 1 Build, Phase 2 Prep
+# backlog.md — Completed Archive
 
-Phase 0 core build complete (B-001 through B-042). Audit on 2026-04-09 found 67 issues.
-Full audit: `docs/phase0-audit.md`. Detailed reports: `docs/audit-{backend,frontend,tests,infra}.md`.
+> **Open work is tracked in [GitHub Issues](https://github.com/atharva6905/spelix/issues), not here.**
+> This file is the completed-work archive — a per-phase record of everything shipped, kept for
+> provenance (each row carries its merge SHA). Newest phases are summarized first in the Contents below.
 
-**Phase 1 code-complete 2026-04-10** — all MUST requirements implemented; tests green; transition gate passed.
-**Phase 1 production-functional 2026-04-11** — twelve dormant Phase 0 bugs surfaced and fixed across PRs #3–#14 in session 13.
-The full upload → worker pipeline → quality gates path now runs end-to-end on `spelix.app`. See B-138–B-149 below
-and ADR-027 through ADR-032 in `decisions.md` for the full breakdown.
+**Project status:** Post-L2, private beta live on `spelix.app`. Phase 0/1/2/3 + the L2 sprint are complete;
+the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2301 backend unit tests,
+765 frontend tests, 27 migrations** (alembic head `47c8e446162e`). See `decisions.md` for the ADR log.
 
-Backend: **960** tests passing (was 895 at code-complete), 91% coverage. Frontend: **178** tests passing (was 177).
-Migration 003 applied to Supabase. Ready for Phase 2 (RAG).
+## Open work (→ GitHub Issues)
+
+Migrated 2026-05-30. Open/parked items now live as Issues; the detailed history stays in the archive below.
+
+| Item | Issue | Size | Notes |
+|------|-------|------|-------|
+| L2-CV-DEPTHFRAME-OBLIQUE-3D | [#181](https://github.com/atharva6905/spelix/issues/181) | XL | parked — front-oblique + MeTRAbs squat fix, post-internship |
+| L2-CV-DEPTHFRAME-R3b | [#180](https://github.com/atharva6905/spelix/issues/180) | L | real bench bar-path tracker |
+| D-036 | [#182](https://github.com/atharva6905/spelix/issues/182) | L | GPU pose offload, post-beta |
+| M-06 | [#183](https://github.com/atharva6905/spelix/issues/183) | S | Phase 4 — eval_scores.overall precedence |
+| D-AUDIT-H-11 | [#184](https://github.com/atharva6905/spelix/issues/184) | — | Phase 4 — deepeval CI vs golden dataset |
+| D-069 | [#185](https://github.com/atharva6905/spelix/issues/185) | S | consolidate test_distillation_validate.py surface |
+| D-AUDIT-M-07 | [#186](https://github.com/atharva6905/spelix/issues/186) | — | pin apt packages in Dockerfile |
+| D-AUDIT-M-10 | [#187](https://github.com/atharva6905/spelix/issues/187) | — | refactor files > 300 lines |
+| (P3-007) NodeEvent.error sanitize | [#188](https://github.com/atharva6905/spelix/issues/188) | S | strip infra paths before JSONB write (security) |
+| (P3-007) AgentReasoningSidebar focus trap | [#189](https://github.com/atharva6905/spelix/issues/189) | S | full Tab-cycle keyboard trap |
+| (P3-007) adaptive-mode reasoner UI | [#190](https://github.com/atharva6905/spelix/issues/190) | M | iteration counters + tool-call nesting |
+| (P3-007) CoVe iteration drill-down pane | [#191](https://github.com/atharva6905/spelix/issues/191) | M | per-iteration Q/A/judgment |
+| (P3-007) LangSmith run link-out | [#192](https://github.com/atharva6905/spelix/issues/192) | S | admin-only run link |
+
+**Not migrated** (deliberately): `D-068` (remove an unused `fireEvent` import — drop on next edit to that test),
+`D-AUDIT-L-03` (enable ufw on the droplet — manual server config, not a code change), and the three
+`L2-LANDING-V2-*` polish items (their spec lives in a local-only planning doc; revisit when landing V2 resumes).
+
+## Contents (completed work, by phase — newest first)
+
+The sections below are in reverse-chronological build order. Group by phase:
+
+- **Post-L2 / cv-audit** (private beta ops, CV occlusion fixes R1–R6, sagittal metric sessions 1–7) — see the `L2 Sprint — CV audit` and `cv-audit Session` sections.
+- **L2 Sprint** (landing, expert portal, streaq migration, Phase 3 pull-forward, quality-gate + timeout fixes, pre-beta audit) — see the `L2 Sprint Day N` sections.
+- **Phase 3** (LangGraph agent, distillation pipeline, Coach Brain review queue, reasoning sidebar).
+- **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
+- **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
+- **Phase 0** (core build B-001..B-093, audit fixes).
 
 ## Completed — L2 Sprint — CV audit R1 dropout-aware depth-frame + aux-metric None-guards (2026-05-23)
 
@@ -20,12 +52,12 @@ Post-Session-7 deep-dive root-caused the lumbar-proxy None values (see `docs/sup
 | L2-CV-DEPTHFRAME-DROPOUT | Add optional `valid_mask` to `_find_depth_frame`; squat + DL gate the rep-bottom argmin on `_vis_ok({shoulder,hip,knee})` so VIDEO-mode dropout frames (zero-filled, garbage angles) are not selected as the bottom; backward-compatible (default None = prior behaviour). Bench reverted to plain argmin (wrist proxy unreliable → R3). | done | M | — | FR-REPM-02, FR-SCOR-01 | `584f4f7` | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py` |
 | L2-CV-DEPTHFRAME-DROPOUT-AUX | `_ankle_dorsiflexion_deg` + `_shin_angle_deg` return None (cannot-compute) on mis-tracked frames via a geometric ordering guard (knee above ankle; ankle at/above toe) + anatomical-plausibility envelope (ankle `[10,120)`, shin `[-45,80]`). Integration test asserts float-or-None (plausibility enforced in code). | done | S | L2-CV-DEPTHFRAME-DROPOUT | FR-SCOR-01 | `584f4f7` | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py`, `backend/tests/integration/test_pipeline_sagittal_metrics.py` |
 | L2-CV-DEPTHFRAME-R3 | Bench bar-path None-interim: gate `bar_path_classification` anchors on bilateral wrist visibility (`_vis_ok(frame,15,16)`) → None (cannot-classify) when wrists unreliable, real label when visible. Spike showed raw HoughCircles can't isolate the lifter's plate (background circles) and temporal association locks onto stationary circles / loses the bar at the bottom; a real tracker is R3b. See ADR-BENCH-BARPATH-NONE-INTERIM. | done | S | — | FR-SCOR-03 | `44125f9` (PR #172, merge `df5393c`) | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py` |
-| L2-CV-DEPTHFRAME-R3b | (OPEN) Real bench bar-path tracker — dedicated CV effort: motion-correlation bar-circle identification (correlate candidate-circle y with the rep signal) + bottom-occlusion handling, or a trained/optical-flow tracker. Both the wrist proxy and raw HoughCircles fail (R3 spike evidence). | open | L | — | FR-SCOR-03 | — | `backend/app/cv/{metric_extraction,barbell_detection}.py` |
+| L2-CV-DEPTHFRAME-R3b | Real bench bar-path tracker — dedicated CV effort: motion-correlation bar-circle identification (correlate candidate-circle y with the rep signal) + bottom-occlusion handling, or a trained/optical-flow tracker. Both the wrist proxy and raw HoughCircles fail (R3 spike evidence). | → [#180](https://github.com/atharva6905/spelix/issues/180) | L | — | FR-SCOR-03 | — | `backend/app/cv/{metric_extraction,barbell_detection}.py` |
 | L2-CV-DEPTHFRAME-R6 | Deadlift first-rep lumbar baseline: anchor `identify_standing_baseline_frame`'s first-rep deadlift branch to the rep's OWN `end_frame` (standing lockout) instead of the pre-liftoff setup frame (a hinged pose). Fixture-confirmed: rep 0 `lumbar_flexion_proxy_delta_deg` 0.19° → 69.18°, consistent with reps 1–4 (64–69°); reps 1–4 unchanged. Drops the now-dead `bar_y_series` param. See ADR-DEADLIFT-FIRSTREP-BASELINE. | done | S | — | FR-EXPV-03 | `8acafb4` | `backend/app/cv/metric_extraction.py`, `backend/tests/unit/test_metric_extraction_sagittal.py` |
 | L2-CV-DEPTHFRAME-R5 | Surface per-rep landmark confidence + R2 interpolation fraction in the expert portal so a `None` metric shows *why* (Option B — reuse existing confidence + one new signal, NOT a 40-site None-reason taxonomy). New pure `compute_invalid_frame_mask` (shares R2's gate predicate) → new nullable `RepMetric.interpolation_fraction` column (migration `47c8e446162e`) = `mean(mask[start:end+1])` per rep, computed once in pipeline Step 4/8; serialized into the expert per-rep dict (no schema/endpoint change). Panel 3-state cell: "Not yet computed" (unimplemented) vs "Cannot compute" + categorical confidence + "{N}% interpolated" (FR-CVPL-25 categorical-only) vs value+Flag; per-rep confidence chip in header. Bench → 0.0 (not R2-gated). Real-fixture proof: squat fractions `[0.31,0.08,0.24,0.62,0.04,0.22]` (rep 4 = 62% reconstructed), bench all 0.0. Built via `/team` (cv-engineer + migration + tdd). Auditor 0 CRITICAL, security PASS. Prod E2E verified (expert portal): confidence chips + "Cannot compute"/"Very Low confidence" cells render on a real squat analysis, `GET /api/v1/expert/analyses/{id}` → 200 (column read-path live), 0 console errors. See ADR-R5-CONFIDENCE-INTERP-SURFACING. | done | M | — | FR-EXPV-08, FR-CVPL-25, FR-REPM-04 | PR #176 (merge `f5c409f`; impl T1 `c5b355e` / T2 `5b8bedd` / T4 `dc5b5b8` / T3 `0506025` / migration `47c8e446162e`) | `backend/app/cv/signal_processing.py`, `backend/app/models/rep_metric.py`, `backend/alembic/versions/47c8e446162e_*.py`, `backend/app/services/{pipeline,expert}.py`, `backend/tests/unit/{test_signal_processing,test_expert_service}.py`, `backend/tests/integration/test_pipeline_sagittal_metrics.py`, `frontend/src/components/UnvalidatedMetricsPanel.tsx` (+test) |
 | L2-CV-DEPTHFRAME-R2 | Angle-series validity gate upstream of rep detection (Option A), **squat + deadlift only**: `compute_angle_timeseries` NaN-gates frames whose joint landmarks fall below `_MIN_VIS` 0.30 (zero-filled VIDEO-mode dropout + confident mis-track), linear-interpolates the gaps (`np.interp`, holds endpoints — conservatively under-reads, never fabricates a deeper extremum), then clamps `[0,180]`. De-noises `detect_reps` + the Step-7 confidence `argmin` at the source, complementing R1's metric-path mask. **Bench excluded** (wrists systematically invisible — median vis 0.008; gating cut reps 13→3 / bar_touch 76.4; mirrors R1's bench exclusion → R3/R3b). Real-fixture proof: squat cleaned `hip_angle` `[25.63,180.00]` (was −32.5…192.5), min-at-dropout 52.58° (was ~0° spikes); bench excluded restores 13 reps / bar_touch (−15.39,0.0). Sagittal integration suite caught the over-gating regression pre-merge. No rep dropped; clean clips byte-identical. R5 will flag heavily-interpolated reps. See ADR-ANGLE-SERIES-VALIDITY-GATE. | done | M | — | FR-REPM-01, FR-CVPL-14 | `336e4e8` | `backend/app/cv/signal_processing.py`, `backend/tests/unit/test_signal_processing.py` |
 | L2-CV-DEPTHFRAME-R4 | **(CLOSED — no change)** Re-evaluate MediaPipe `RunningMode.VIDEO` vs `IMAGE`. Local sniff (`scripts/oneoff/r4_running_mode_sniff.py`) falsified the hypothesis: IMAGE is **worse** on squat (fully-dropped 13.8%→45.1%, R2-invalid 47.6%→69.0%) — VIDEO's tracker mitigates the occlusion — and no latency win. Keep VIDEO (ADR-058). Reframed root cause → R4 led to the oblique/3D investigation. See ADR-CV-RUNNING-MODE-NO-CHANGE. | wontfix | S | — | FR-CVPL-01 | — (2026-05-25) | `scripts/oneoff/r4_running_mode_sniff.py` |
-| L2-CV-DEPTHFRAME-OBLIQUE-3D | **(OPEN — PARKED, fully de-risked)** Root cause of squat-bottom loss = **barbell plate occludes torso/hips from a pure-side camera** (not limb self-occlusion / not a 2D-model weakness — RTMPose hits the same wall). Fix = **front-oblique ~45° capture guidance + accurate monocular 3D (MeTRAbs)** via a **serverless-GPU offload** (BlazePose 3D too weak ~10.6°; MeTRAbs validated <1–2% bone-length CV, 100% detection across 7 clips/angles). Cost ≈ free (~$3–6/mo, Modal free credits). Effort ~2–3 wk, dominated by 2D→3D angle rewrite + threshold/scoring recalibration → squat-only path behind a feature flag. **Deferred (competes with mid-May internship apps); build post-internship.** Corpus: `e2e/fixtures/CORPUS.md`. See ADR-CV-OBLIQUE-3D-DIRECTION + `docs/audit/2026-05-25-squat-oblique-3d-investigation.md`. | open | XL | — | FR-SCOR-01, FR-SCOR-02, FR-CVPL-14 | — | `backend/app/cv/{signal_processing,metric_extraction,rep_detection}.py`, `backend/app/services/pipeline.py`, `config/thresholds_v1.json`, new Modal GPU service, capture-guidance frontend |
+| L2-CV-DEPTHFRAME-OBLIQUE-3D | **(PARKED, fully de-risked)** Root cause of squat-bottom loss = **barbell plate occludes torso/hips from a pure-side camera** (not limb self-occlusion / not a 2D-model weakness — RTMPose hits the same wall). Fix = **front-oblique ~45° capture guidance + accurate monocular 3D (MeTRAbs)** via a **serverless-GPU offload** (BlazePose 3D too weak ~10.6°; MeTRAbs validated <1–2% bone-length CV, 100% detection across 7 clips/angles). Cost ≈ free (~$3–6/mo, Modal free credits). Effort ~2–3 wk, dominated by 2D→3D angle rewrite + threshold/scoring recalibration → squat-only path behind a feature flag. **Deferred (competes with mid-May internship apps); build post-internship.** Corpus: `e2e/fixtures/CORPUS.md`. See ADR-CV-OBLIQUE-3D-DIRECTION + `docs/audit/2026-05-25-squat-oblique-3d-investigation.md`. | → [#181](https://github.com/atharva6905/spelix/issues/181) | XL | — | FR-SCOR-01, FR-SCOR-02, FR-CVPL-14 | — | `backend/app/cv/{signal_processing,metric_extraction,rep_detection}.py`, `backend/app/services/pipeline.py`, `config/thresholds_v1.json`, new Modal GPU service, capture-guidance frontend |
 
 ## Completed — L2 Sprint — CV audit Session 2 lifter-side detection + refactor (2026-05-22, session 2)
 
@@ -90,12 +122,12 @@ The 2026-04-27 spelix-auditor sweep against the 8 Phase 3 Must FRs returned 0 CR
 | L2-EXPERT-20 | **Render eval scores as structured UI** — replaced `JSON.stringify` dump with `EvalScoresCard` component showing faithfulness percentage (green/red badge), CoVe verified status, unsupported claims list. Non-technical expert can now interpret eval quality. | done | M | — | FR-EXPV-03 | `225c0d1` | `frontend/src/pages/ExpertAnalysisDetailPage.tsx` |
 | L2-EXPERT-21 | **Update Expert Reviewer Guide doc v2.1** — fixed "other reviewers" → single-reviewer language, documented annotated video + structured eval scores, updated FAQ, kept `generate_expert_guide.cjs` for future updates. | done | S | L2-EXPERT-19, L2-EXPERT-20 | — | `225c0d1` | `Spelix_Expert_Reviewer_Guide.docx`, `generate_expert_guide.cjs` |
 
-## Open — Post-Phase-3-gate cleanup (parked from session 62)
+## Post-Phase-3-gate cleanup (parked from session 62) — migrated to Issues 2026-05-30
 
 | ID | Title | Status | Size | Deps | SRS IDs | Notes |
 |----|-------|--------|------|------|---------|-------|
-| D-068 | **Remove unused `fireEvent` import from `AdminCoachBrainCandidatesPage.test.tsx`** — left dangling by the M-04 revert in session 62. Currently dead but harmless; eslint not configured so no lint warning fires. Drop the import on the next change to that test file. | pending | XS | — | — | Discovered during PR C T4 fixup. Schedule a 1-week wakeup if no other test edits land. |
-| D-069 | **Consolidate `test_distillation_validate.py` test surface** — 2026-04-27 code review noted that the 5 new T2 named tests partially overlap the pre-existing `test_validate_quality_gate_matrix` parametrize. Future maintainers changing a threshold would need to update three test instruments. Pick one form (matrix or named) and migrate. Net-new coverage from T2 (the explicit `pass` path) is preserved either way. | pending | S | — | FR-BRAIN-06 | Schedule for Phase 4 kickoff when the multi-component RAGAS suite ships and `correctness` becomes populated. |
+| D-068 | **Remove unused `fireEvent` import from `AdminCoachBrainCandidatesPage.test.tsx`** — left dangling by the M-04 revert in session 62. Currently dead but harmless; eslint not configured so no lint warning fires. Drop the import on the next change to that test file. | not migrated (drop on next edit) | XS | — | — | Discovered during PR C T4 fixup. |
+| D-069 | **Consolidate `test_distillation_validate.py` test surface** — 2026-04-27 code review noted that the 5 new T2 named tests partially overlap the pre-existing `test_validate_quality_gate_matrix` parametrize. Future maintainers changing a threshold would need to update three test instruments. Pick one form (matrix or named) and migrate. Net-new coverage from T2 (the explicit `pass` path) is preserved either way. | → [#185](https://github.com/atharva6905/spelix/issues/185) | S | — | FR-BRAIN-06 | Schedule for Phase 4 kickoff when the multi-component RAGAS suite ships and `correctness` becomes populated. |
 
 ## Completed — L2 Sprint Day 17 — Commercial-gym quality gate fix (2026-04-24, session 61)
 
@@ -246,7 +278,7 @@ Backend test count: 1641 → 1649 passing (+8 regression guards across 4 PRs), 2
 |---|---|---|---|---|
 | M-04 | Re-embed 24 seed Coach Brain points with FR-BRAIN-03 contextualized prefix (`exercise:{exercise} phase:{phase} type:{entry_type}\n{content}`). Current seeds were embedded with raw content only — explains why `retrieval_source=papers_only_fallback` even with seeds eligible. One-shot script + Cohere re-embed. | done — `a0a86fc` (PR #85). Re-embed ran successfully on prod (24/24 seeds re-embedded with prefix). Prod E2E post-re-embed STILL shows `retrieval_source=papers_only_fallback` on a bench upload — proves the papers_only_fallback symptom has a different root cause than missing prefix. Re-embed left in place (cannot be worse than prior state). Investigation tracked as D-045. | M | FR-BRAIN-03, ADR-BRAIN-02 |
 | M-05 | Bump `BrainCoveService` Haiku 4.5 `max_tokens` from 1024 to ≥2048 OR shorten verification prompt. All 11 candidates from session 42 carry `cove_verified=false` because the verification call hits max_tokens × 3 retries. Not blocking distillation, but Batch 3 reviewers will see "evaluation_failed" CoVe banners on every candidate until fixed. | done — `a0a86fc` (PR #85). Question 256→512, answer 512→2048. TDD-verified (new `test_verify_claim_uses_adequate_max_tokens` asserts both ceilings via `await_args_list` kwarg introspection). Not exercised on prod this session — faithfulness gate rejected the verification E2E analysis, so distillation did not fire. Will be exercised on first subsequent distillation-eligible run. | S | FR-BRAIN-14, ADR-DISTILL-03, ADR-DISTILL-06 |
-| M-06 | When Phase 4 RAGAS aggregate ships `eval_scores.overall` + `eval_scores.correctness`, the Phase 2 faithfulness fallbacks in `_maybe_enqueue_distillation` and `validate_quality` become inert (correct precedence). Add a check at Phase 4 kickoff that overall takes precedence and document the deprecation path for the fallbacks. | pending | S | FR-AICP-08, ADR-PHASE2-EVAL-FALLBACK |
+| M-06 | When Phase 4 RAGAS aggregate ships `eval_scores.overall` + `eval_scores.correctness`, the Phase 2 faithfulness fallbacks in `_maybe_enqueue_distillation` and `validate_quality` become inert (correct precedence). Add a check at Phase 4 kickoff that overall takes precedence and document the deprecation path for the fallbacks. | → [#183](https://github.com/atharva6905/spelix/issues/183) | S | FR-AICP-08, ADR-PHASE2-EVAL-FALLBACK |
 
 ## Completed (Phase 0 Core Build)
 
@@ -448,7 +480,7 @@ Three bugs discovered during E2E verification of Batch 5+6 features. All fixed, 
 
 ---
 
-## Phase 2 — Active (kickoff 2026-04-11, session 14)
+## Phase 2 — RAG layer (kickoff 2026-04-11, session 14) — completed
 
 Authoritative task list: Phase 2 kickoff brief.
 Active agents: `spelix-tdd`, `spelix-auditor`, `spelix-security-reviewer`, `spelix-migration`,
@@ -603,11 +635,11 @@ Phase 2 transition gate passed. All 33 Must requirements implemented, E2E smoke 
 | D-033 | **streaq task timeout regression — `process_analysis` times out on 1080p 59fps full-length clips on 2-vCPU droplet.** `backend/app/workers/streaq_worker.py:144` sets `@worker.task(timeout=300)` for `process_analysis`. The comment claims "drop-in parity with ARQ's WorkerSettings.job_timeout" but ADR-BRAIN-04's Phase-2 update explicitly raised ARQ `job_timeout` from 300 → 900 ("bumped from 300 for ingestion"). Regression surfaced 2026-04-16 session 33 prod-watch: `atharva-bench.mov` (38 MB, 1080×1920 @ 59fps, 23s, 1382 frames) timed out at 5:00 exactly, analysis row `2158536a-8df6-4fa0-8d68-b01129c0aadb` left stranded in `quality_gate_pending`. MediaPipe BlazePose Heavy on 2 vCPUs consistently runs ~4–6 min for a full 1080p clip; `atharva-squat.mov` (33 MB, 20.6s) barely made it at 4:21. Fix: raise `process_analysis` task timeout to 900s (leave `cascade_consent_withdrawal` + `ingest_paper` at 300s — those are short-lived). Also: the stranded `quality_gate_pending` row confirms there is no cleanup path for timed-out analyses — worth a follow-up (don't block this PR on it). See ADR-055. | S | — | NFR-OPER-02 | done | `1a2fb01` (PR #55) |
 | D-034 | **Analysis pipeline OOMs post-MediaPipe on 4GB droplet for full-length 1080p clips.** Surfaced immediately after D-033 fix: `atharva-bench-no-weight.mov` (37 MB, 1080×1920 @ 59fps, 22.8s, 1352 frames) passes quality gate (predicted), then memory climbs to **3.2 GB / 3.8 GB available RAM**, swap thrashes to 1.3 GB, and the worker process exits with **exit code 0** (not cgroup-OOM-killed — `docker inspect` shows `oomKilled=false`). Deterministic: both attempts on analysis `4e19c62b-91c2-4f01-b269-3ac51e05db3f` died at ~7:50 elapsed during the post-quality-gate phase (annotation video encoding + rep detection + Anthropic coaching + artifact upload). Streaq retried per its default `max_tries=3`. Likely mechanism: Python process gets SIGKILL from kernel OOM or hits a caught `MemoryError` that does `sys.exit(0)`; the container's main process dying triggers a restart. Fix paths to investigate: (a) downscale annotation video to 720p before encoding; (b) stream-encode annotation frame-by-frame instead of buffering; (c) release MediaPipe landmarks after rep detection but before annotation; (d) skip annotation for clips >N seconds; (e) resize droplet to 8 GB. Affects any real-user clip filmed at modern phone resolution (≥1080p). Prior D-026 (4 GB resize) covered concurrent-analyses OOM — this is single-analysis OOM, different axis. See ADR-056. | L | — | NFR-OPER-02 | done | `916bd11` (PR #57 — `del frames` + 720p annotation cap) + `6d9f084` (PR #59 — streaming `track_barbell_from_video`). E2E verified 2026-04-16: full 22.8s 1080p bench clip runs to completion with worker RSS rock-steady at 639 MB across 15 min (vs 3.2 GB OOM before). No SIGKILL. Task timed out at 900s — that's a **new** CPU-bound bottleneck (D-035), not memory. |
 | D-035 | **Pipeline timeout on 1080p@59fps clips — root cause was `cv2.HoughCircles` at source resolution inside `track_barbell_from_video`, not pose extraction.** Originally framed as a pose-extraction issue after D-034; telemetry from ADR-058 (session 38 analysis `fc318bc3-3cf9-4f0e-85ee-0f5d61cb77b1`) showed pose is 287 s (5 min) of a 22.8 s clip's budget but **`barbell_tracking` alone was 24.4 min — 83 % of total wall time**. Session 39 worker benchmark measured 1037 ms/frame on the bench clip (HoughCircles with radius range 10-100 on 1080p = 1 s/frame). **Fix (ADR-060)**: `_downscale_for_detection` resizes every frame to 480 px longest dim before HoughCircles, scales centroid back on return. Post-fix bench: **99.6 ms/frame = 10.4× speedup**; stage wall time 1388 s → 133 s; detection rate 100 % preserved. Session 35.5's 720p pose cap (PR #61) stays in place but is not the load-bearing fix. | M | — | NFR-OPER-02, FR-BDET-01, FR-BDET-02 | done | `91b1903` (PR #71) + `3febef7` (PR #73, streaq timeout restored 1800s → 900s). Prod E2E on analysis `01fd3c57-af0d-4c7d-b846-b298260bd7ca` confirmed end-to-end: barbell 118.8s, total pipeline 670s, status=completed, 15/15 stages persisted. Pre/post bench evidence in `backend/bench_barbell.py`; see ADR-060. Unblocks D-036 trigger re-evaluation. |
-| D-036 | **GPU offload for pose extraction (post-private-beta).** BlazePose Heavy on the 2-vCPU droplet costs ~120-150 ms/frame regardless of input resolution (session 35 bench). The fundamental constraint per ADR-058 is that the CPU pipeline cannot scale to clips much beyond ~30 s @ 60 fps without GPU acceleration. Defer evaluation + implementation to **after** L2 private beta launches. **Trigger condition** to lift: (a) demand exceeds the CPU pipeline's capacity (queue depth grows faster than worker can drain), OR (b) clip duration limits become the top user complaint (>3 distinct beta users explicitly request longer clips). **Scope when triggered**: vendor evaluation (Modal vs Replicate vs self-hosted), prototype with `atharva-bench-no-weight.mov`, threshold validation against current MediaPipe Heavy outputs, swap behind a feature flag, ramp 10% → 100%. **Estimated cost**: $0.001-$0.005 per analysis; estimated 50-100x inference speedup. | L | post-beta | NFR-OPER-02 | deferred |
+| D-036 | **GPU offload for pose extraction (post-private-beta).** BlazePose Heavy on the 2-vCPU droplet costs ~120-150 ms/frame regardless of input resolution (session 35 bench). The fundamental constraint per ADR-058 is that the CPU pipeline cannot scale to clips much beyond ~30 s @ 60 fps without GPU acceleration. Defer evaluation + implementation to **after** L2 private beta launches. **Trigger condition** to lift: (a) demand exceeds the CPU pipeline's capacity (queue depth grows faster than worker can drain), OR (b) clip duration limits become the top user complaint (>3 distinct beta users explicitly request longer clips). **Scope when triggered**: vendor evaluation (Modal vs Replicate vs self-hosted), prototype with `atharva-bench-no-weight.mov`, threshold validation against current MediaPipe Heavy outputs, swap behind a feature flag, ramp 10% → 100%. **Estimated cost**: $0.001-$0.005 per analysis; estimated 50-100x inference speedup. | L | post-beta | NFR-OPER-02 | → [#182](https://github.com/atharva6905/spelix/issues/182) |
 
 ---
 
-## Phase 3 — LangGraph Agent Orchestration (seeded 2026-04-13, session 27)
+## Phase 3 — LangGraph Agent Orchestration (seeded 2026-04-13, session 27) — completed (on prod since 2026-05-03)
 
 **Phase 3 is deferred until post-Saturniq (mid-August 2026).** Per STRATEGY.md, feature work freezes after L2 beta launch (May 9, 2026). Phase 3 tasks are seeded here for reference but NOT active.
 
@@ -916,13 +948,13 @@ Single PR #83, merged via `mcp__github__merge_pull_request` with `merge_method="
 
 ### Deferred post-P3-007 follow-ups (new D-### items)
 
-| ID | Title | Size | Notes |
+| Issue | Title | Size | Notes |
 |---|---|---|---|
-| D-### | Full focus trap inside AgentReasoningSidebar | S | Close-button autofocus + Escape + scrim close ship today; Tab-cycling focus trap needs ~15 LOC beyond MVP |
-| D-### | Adaptive-mode reasoner-loop UI polish | M | Iteration counters, tool-call nesting. Prod runs deterministic only (`SPELIX_AGENT_MODE=deterministic`) |
-| D-### | CoVe iteration drill-down pane | M | Surface question / answer / judgment per iteration. Summary currently shows `converged: bool` + count only |
-| D-### | LangSmith run link-out from summary header | S | Admin-only, reveals full LangGraph run in LangSmith UI |
-| D-### | Sanitize `NodeEvent.error` in `serialize_trace_for_storage` | S | spelix-security-reviewer MED. Strip `/tmp/...` and similar infra paths before JSONB write |
+| [#189](https://github.com/atharva6905/spelix/issues/189) | Full focus trap inside AgentReasoningSidebar | S | Close-button autofocus + Escape + scrim close ship today; Tab-cycling focus trap needs ~15 LOC beyond MVP |
+| [#190](https://github.com/atharva6905/spelix/issues/190) | Adaptive-mode reasoner-loop UI polish | M | Iteration counters, tool-call nesting. Prod runs deterministic only (`SPELIX_AGENT_MODE=deterministic`) |
+| [#191](https://github.com/atharva6905/spelix/issues/191) | CoVe iteration drill-down pane | M | Surface question / answer / judgment per iteration. Summary currently shows `converged: bool` + count only |
+| [#192](https://github.com/atharva6905/spelix/issues/192) | LangSmith run link-out from summary header | S | Admin-only, reveals full LangGraph run in LangSmith UI |
+| [#188](https://github.com/atharva6905/spelix/issues/188) | Sanitize `NodeEvent.error` in `serialize_trace_for_storage` | S | spelix-security-reviewer MED. Strip `/tmp/...` and similar infra paths before JSONB write |
 
 ---
 
@@ -1057,9 +1089,9 @@ Landing V1 live on prod via PR #45 (merged as `ae3b4fb`). STRATEGY.md v3 Day 1-2
 
 | ID | Title | Size | Deps | Refs | Status |
 |----|-------|------|------|------|--------|
-| L2-LANDING-V2-01 | Section 5 "Four Dimensions" — 2×2 card grid (Movement Quality / Technique / Path & Balance / Control) with §6.5 verbatim copy | S | — | landing-page-plan §5 | pending |
-| L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) with §6.6 verbatim copy | S | — | landing-page-plan §5 | pending |
-| L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing-page-plan §16.4 | pending |
+| L2-LANDING-V2-01 | Section 5 "Four Dimensions" — 2×2 card grid (Movement Quality / Technique / Path & Balance / Control) | S | — | landing V2 polish | not migrated (revisit when landing V2 resumes) |
+| L2-LANDING-V2-02 | Section 6 "Roadmap" — 3 cards (Progress tracking / Adaptive coaching / Per-athlete memory) | S | — | landing V2 polish | not migrated (revisit when landing V2 resumes) |
+| L2-LANDING-V2-03 | Hero bg real photo — sagittal barbell-lift stock image, ≤250 KB WebP (currently a chartreuse-radial-gradient placeholder) | S | — | landing V2 polish | not migrated (revisit when landing V2 resumes) |
 | L2-LANDING-V2-04 | Admin beta-request approval UI — BetaRequestsPanel in AdminPage with table, status filter, approve/reject buttons, pagination, stats bar. Transactional-email invite flow deferred. | M | L2-LANDING-02 | ADR-050 | done — `e8e82a5` (PR #142, session 64) |
 | L2-LANDING-V2-05 | Beta-terms markdown file — `public/beta-terms.md` polish and legal review (current draft is landing-page-plan §10 verbatim, two paragraphs, GDPR-aligned but not counsel-reviewed) | S | — | — | done — `9b78e39` (PR #143, session 65) |
 
@@ -1112,10 +1144,10 @@ Closed 20 audit findings across 4 PRs, then ran Phase 3 audit and fixed 2 HIGH f
 
 | ID | Title | Status | Reason |
 |---|---|---|---|
-| D-AUDIT-H-11 | deepeval CI suite against golden dataset | deferred | Phase 4 work; `spelix-eval-engineer` agent not yet active |
-| D-AUDIT-M-07 | Pin system apt packages in Dockerfile | deferred | Requires per-mirror version resolution; infra sprint |
-| D-AUDIT-M-10 | Refactor files > 300 lines | deferred | Tech debt / refactoring scope — no feature context |
-| D-AUDIT-L-03 | Enable ufw on droplet | deferred | Pure server config, not code fix — do manually |
+| D-AUDIT-H-11 | deepeval CI suite against golden dataset | → [#184](https://github.com/atharva6905/spelix/issues/184) | Phase 4 work; `spelix-eval-engineer` agent not yet active |
+| D-AUDIT-M-07 | Pin system apt packages in Dockerfile | → [#186](https://github.com/atharva6905/spelix/issues/186) | Requires per-mirror version resolution; infra sprint |
+| D-AUDIT-M-10 | Refactor files > 300 lines | → [#187](https://github.com/atharva6905/spelix/issues/187) | Tech debt / refactoring scope — no feature context |
+| D-AUDIT-L-03 | Enable ufw on droplet | not migrated (manual server op) | Pure server config, not code fix — do manually |
 
 ---
 
