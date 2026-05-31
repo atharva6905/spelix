@@ -288,3 +288,22 @@ trufflehog-report.json
 # Policy: planning/spec/audit docs are local-only; only architecture/reference docs ship.
 docs/internal/
 docs/phase0-audit/
+
+# Root-level career/planning scratch + expert/session captures — local only, never published
+cv-audit-*.md
+spelix-oss-flip-*.md
+r5-expert-*.png
+r5-expert-*.yml
+session*-expert-panel.png
+session*-squat-expert-panel.png
+yt_search_*.jpeg
+# CV pipeline one-off scratch — probe/spike/sniff scripts + their output dirs (not shipped).
+# Tracked oneoff tooling (smoke_cove_*, *_coach_brain_*, sanitize_seed_*) is unaffected.
+backend/scripts/oneoff/*_out/
+backend/scripts/oneoff/*probe*.py
+backend/scripts/oneoff/*spike*.py
+backend/scripts/oneoff/*sniff*.py
+backend/scripts/oneoff/investigate_*.py
+backend/scripts/oneoff/diagnose_r1_regression.py
+backend/scripts/oneoff/render_full_skeleton.py
+backend/scripts/oneoff/verify_depth_frame_corruption.py
