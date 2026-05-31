@@ -141,7 +141,7 @@ Embedding 5-word coaching cues and 300-word scientific chunks with the same mode
 
 Embed-v4 is trained to capture both **content quality and topic similarity** — not just keyword overlap. This quality-awareness partially helps short coaching cues, which pack high information density per token. The model also supports the `input_type` parameter (prepending special tokens to differentiate document vs. query roles), and both collections should use `input_type="search_document"` uniformly for indexing, with `input_type="search_query"` at query time.
 
-However, a raw 3-word cue like "drive knees out" simply lacks the contextual tokens needed for precise vector space positioning. The model cannot infer that this cue addresses knee valgus during squat ascent, activates hip abductors, and is relevant to ACL injury prevention — all context that a matching scientific paper chunk would contain.
+However, a raw 3-word cue like "drive knees out" simply lacks the contextual tokens needed for precise vector space positioning. The model cannot infer that this cue addresses knee valgus during squat ascent, activates hip abductors, and is relevant to ACL load management — all context that a matching scientific paper chunk would contain.
 
 ### Context enrichment is the highest-impact intervention
 
