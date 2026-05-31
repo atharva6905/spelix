@@ -90,11 +90,11 @@ Create them in `.claude/agents/` before proceeding.
 
 ---
 
-## Step 6: Update memory.md
+## Step 6: Update handoff
 
 ```
 phase: [N]
-task: [first task ID for Phase N from backlog.md]
+task: [first task ID for Phase N — open as a GitHub Issue]
 status: ready
 last_modified: [files changed in final Phase N-1 session]
 failing_tests: []

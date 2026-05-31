@@ -93,7 +93,7 @@ X agents dispatched. Monitor with:
    - Reviews each worktree's changes and test output
    - Merges each branch into main
    - Runs `/check` then `/test`
-   - Updates `backlog.md` (mark tasks `done`) and `memory.md`
+   - Updates `backlog.md` (archive `done` rows), closes the GitHub Issues, and updates `.claude/handoff.md`
    - Runs the **Post-Merge Checklist** below
 
 ---
