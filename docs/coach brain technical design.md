@@ -1,6 +1,6 @@
-# Coach Brain: technical design, SRS, and strategy specification
+# Coach Brain: technical design specification
 
-**Coach Brain is architecturally viable as a second Qdrant collection with hybrid search, contextual embedding padding, a LangGraph distillation subgraph, and explicit GDPR Article 9 consent — but its competitive moat rests on accumulated outcome-linked coaching data, not software.** The system requires two separate Qdrant collections (not namespacing), should defer ARQ→streaq migration until post-MVP, and must treat all form analysis data as special-category health data under GDPR. This document provides implementation-ready specifications across all six requested areas, with evidence quality flagged throughout.
+**Coach Brain is architecturally viable as a second Qdrant collection with hybrid search, contextual embedding padding, a standalone LangGraph distillation graph, and explicit GDPR Article 9 consent.** The system requires two separate Qdrant collections (not namespacing), should defer ARQ→streaq migration until post-MVP, and must treat all form analysis data as special-category health data under GDPR. This document provides implementation-ready specifications across all areas, with evidence quality flagged throughout.
 
 ---
 
@@ -514,7 +514,7 @@ From general RAG and expert system patterns, the estimated thresholds for Coach 
 - **20 entries (seed corpus):** Enough for Coach Brain to contribute non-trivially to ~40–60% of common-case queries across all three lifts. This is the "better than nothing" threshold that justifies the infrastructure investment.
 - **50–100 entries:** Coverage extends to most common error patterns with exercise × phase × trigger granularity. The system starts consistently outperforming papers-only RAG for coaching-specific queries. **This is the target for Phase 2 launch.**
 - **500+ entries:** Long-tail coverage of body-type-specific patterns, compensation chains, and multi-cue sequences. The system handles edge cases that static knowledge cannot.
-- **2,000+ entries with outcome data:** Enables confidence in which cues actually work (not just which cues are plausible), because confirmation counts from real analyses provide empirical signal. **This is where Coach Brain becomes a genuine competitive asset.**
+- **2,000+ entries with outcome data:** Enables confidence in which cues actually work (not just which cues are plausible), because confirmation counts from real analyses provide empirical signal. **This is where Coach Brain's confirmation-count signal becomes meaningfully reliable.**
 
 **Evidence quality flag:** These thresholds are analytical estimates based on coverage analysis (3 exercises × ~15 common errors × 3–5 body types = 135–225 unique patterns needed for comprehensive coverage), not empirical measurements from comparable systems. The 50–100 entry target for Phase 2 launch is a pragmatic bet — track retrieval hit rate and source distribution metrics (FR-BRAIN-13) to validate empirically.
 
@@ -529,30 +529,3 @@ From general RAG and expert system patterns, the estimated thresholds for Coach 
 
 **Do not extract from existing analyses** for the seed corpus. At launch there are too few analyses to identify reliable patterns, and the distillation pipeline (Phase 3) is not yet built. Existing analyses will feed the automated distillation pipeline once it is operational.
 
----
-
-## 6. Competitive moat assessment
-
-### Replication timeline for a $5M competitor
-
-A well-funded competitor like Kemtai (which has raised **$5.5M** across two rounds and employs ~15 people) can replicate Coach Brain's software architecture in **3–6 months**. Pose estimation is commoditized via MediaPipe and similar frameworks. The LangGraph pipeline, Qdrant collections, embedding infrastructure, and distillation loop are engineering problems with known solutions and publicly documented patterns.
-
-**What takes 18–36 months to replicate is the coaching knowledge base itself.** This requires: (1) thousands of annotated form analyses with expert assessment, (2) outcome-linked cue effectiveness data (give cue → measure form improvement → iterate), and (3) long-tail coverage of edge cases across body types, mobility profiles, and injury-adjacent patterns. Per data flywheel research, single edge cases add more information than many common examples, and data volume matters less than information coverage. The knowledge base compounds with user interactions — each analysis generates labeled training data that makes coaching cues more precise.
-
-**The competitive window is real but time-bounded.** The advantage shrinks as competitors acquire users and accumulate their own data. A competitor entering a specific niche (e.g., elderly rehab vs. athletic performance) could build strong domain-specific knowledge without needing the incumbent's full dataset.
-
-### IP protection: trade secret primary, patents secondary
-
-**Coaching knowledge is not practically patentable.** Under *Alice Corp. v. CLS Bank International*, claims that apply generic AI/ML techniques to a new domain are not patent-eligible. Coaching cues, heuristic rules, and curated training data are not patentable subject matter. Only novel technical methods — specific form analysis algorithms, unique scoring architectures, novel data processing pipelines — might qualify, and even then, patent disclosure requirements create a "how-to guide" for competitors.
-
-**Trade secret is the primary protection mechanism.** The coaching knowledge base, model weights, system prompts, cue databases, and distillation pipeline parameters all qualify as trade secrets if: not generally known, deriving economic value from secrecy, and subject to reasonable secrecy measures. Trade secrets have no filing cost, no expiration, and no disclosure requirement. The critical limitation: **trade secrets do not protect against independent development or legitimate reverse engineering.**
-
-**Reverse engineering risk is high.** A competitor could use the product as a regular user, systematically catalog every coaching cue for every exercise variation, and reconstruct much of the knowledge base. The *OpenEvidence v. Pathway Medical* case (February 2025) established that prompt injection to extract system prompts may constitute trade secret theft, and the Eleventh Circuit has held that automated scraping of technically accessible data can qualify as "improper means." However, manual cataloging by a human user is likely permitted.
-
-**Recommended IP strategy:** Trade secret protection for the knowledge base and distillation pipeline internals, supported by Terms of Service prohibiting reverse engineering and automated scraping, rate limiting on API responses, and monitoring for systematic querying patterns. Do not expose confidence scores or internal metadata in user-facing outputs.
-
-### Network effects: moderate, segmented, with diminishing returns
-
-Coach Brain exhibits **genuine but bounded across-user network effects.** When a new user presents knee valgus during squats, they benefit from the thousands of knee valgus corrections the system has previously observed — this is real across-user learning that improves the product for all users with similar errors. However, the effects are **segmented by user profile:** coaching data from young competitive powerlifters transfers poorly to elderly rehab patients. The analogy from autonomous vehicle research is instructive — edge-case data from one city does not readily transfer to another.
-
-This means Coach Brain's network effect creates a moat that is **domain-specific rather than universal.** A competitor targeting a different user demographic can build a strong knowledge base in their niche without overcoming the incumbent's full data advantage. The defensibility comes from depth within specific user segments, not breadth across all possible users. The strategic implication: **focus on a specific user segment (e.g., intermediate recreational lifters) and build deep coverage there before expanding**, rather than pursuing breadth across all fitness demographics simultaneously.

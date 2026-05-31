@@ -116,7 +116,7 @@ The system is structured in five development phases (numbered 0–4):
 | **Safety Score**         | Scoring dimension 1: rates movement patterns that pose risk of acute or overuse injury. User-facing label is "Movement Quality" to avoid FDA SaMD classification and FTC substantiation triggers.                                          |
 | **Technique Score**      | Scoring dimension 2: rates body positioning for effective force production. Replaces prior "Muscle Engagement" — pose estimation measures angles and positions, not muscle activation.                                                     |
 | **Path & Balance Score** | Scoring dimension 3: rates bar path efficiency and bilateral balance (deviation, bar-to-body distance, lateral shift, heel rise).                                                                                                          |
-| **Control Score**        | Scoring dimension 4: rates eccentric tempo consistency and rep-to-rep form stability — no consumer competitor currently offers this as a scored dimension.                                                                                 |
+| **Control Score**        | Scoring dimension 4: rates eccentric tempo consistency and rep-to-rep form stability.                                                                                 |
 | **Eccentric Phase**      | The lowering/descent portion of a rep (squat: descent; deadlift: return to floor; bench press: lowering to chest).                                                                                                                         |
 | **Sticking Point**       | The lift phase where bar velocity is lowest and form deviation most likely occurs.                                                                                                                                                         |
 | **RMSE**                 | Root Mean Square Error — accuracy unit (mm or degrees) when comparing landmarks/angles to gold-standard motion capture. Best published monocular squat RMSE: 56.3 mm (Dill et al., 2024).                                                  |
@@ -172,7 +172,7 @@ The following numbered functions summarise the capabilities of Spelix. Each maps
 
 10. AI coaching pipeline — GPT-4o keyframe visual analysis; RAG retrieval over peer-reviewed biomechanics literature (Cohere embed-v4 + BM25 + Cohere Rerank 4.0 + Qdrant); Coach Brain retrieval for distilled coaching knowledge; LangGraph agent with composable tools (observe → prioritise → retrieve → flag deviation → compare history → generate plan → validate); streaming coaching output via SSE.
 
-11. Form scoring — four-dimension composite model: Safety Score (injury risk patterns), Technique Score (body positioning for effective force production, replaces the prior "Muscle Engagement" framing which names something pose estimation cannot measure), Path & Balance Score (bar path efficiency + system balance), and Control Score (eccentric tempo + rep-to-rep consistency). Each dimension 1.0–10.0 producing a weighted Overall Form Rating. Control Score is the first scored dimension of its kind in any consumer fitness product.
+11. Form scoring — four-dimension composite model: Safety Score (injury risk patterns), Technique Score (body positioning for effective force production, replaces the prior "Muscle Engagement" framing which names something pose estimation cannot measure), Path & Balance Score (bar path efficiency + system balance), and Control Score (eccentric tempo + rep-to-rep consistency). Each dimension 1.0–10.0 producing a weighted Overall Form Rating.
 
 12. Results and reporting — results page with annotated video, streaming coaching, citation tooltips, rep metrics table, bar path chart, agent reasoning sidebar; downloadable annotated MP4 and PDF summary report; CSV data export.
 
@@ -394,59 +394,27 @@ This section identifies the primary actors and their associated use cases. A vis
 | **UC-31 Ingest seed corpus**                  | Admin                                      |
 | **UC-32 Run distillation pipeline**           | ARQ Worker (System)                        |
 
-### 2.8 Market Context and Competitive Positioning
+### 2.8 Market Context and Design Rationale
 
-This section summarises findings from market research conducted prior to development. It establishes Spelix's competitive position and the evidence basis for key product decisions.
+This section summarises market and literature research conducted prior to development and the evidence basis it provided for key product and architecture decisions.
 
 #### Market size
 
-The AI fitness coaching market is valued at $7–17 billion in 2025 (range reflects definitional differences across research sources) and is growing at a 14–20% CAGR, projecting $19–49 billion by 2032. The app-based sub-segment is the largest by market share. Connected fitness hardware (Tonal, Tempo) has faced post-pandemic headwinds, while software-only solutions benefit from lower capital requirements and lower consumer price points. The specific niche of AI-assisted barbell form analysis with scientific grounding is currently unserved.
+The AI fitness coaching market is valued at $7-17 billion in 2025 (range reflects definitional differences across research sources) and is growing at a 14-20% CAGR, projecting $19-49 billion by 2032. The app-based sub-segment is the largest by market share. Connected fitness hardware has faced post-pandemic headwinds, while software-only solutions benefit from lower capital requirements and lower consumer price points. The specific niche of AI-assisted barbell form analysis with scientific grounding is currently unserved.
 
-#### Competitive landscape by tier
+#### Research gap that motivates the architecture
 
-| **Tier**                            | **Key players**                               | **Price range**       | **Positioning and limitations**                                                                                                                                                                                                                                                                                                                                                                                             |
-|-------------------------------------|-----------------------------------------------|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Tier 1 — Hardware platforms**     | Tonal, Tempo                                  | $4,295+ + $40–60/mo | Tonal: 17 EM sensors, 500 data points/rep, $535M funded, 175K users, sub-1% churn. Tempo: 3D ToF sensor, ~$300M raised but only $15M 2024 revenue. Neither provides scientific citations. Tempo real-world reviews note surprisingly limited form feedback.                                                                                                                                                              |
-| **Tier 2 — Mobile form-check apps** | CueForm AI, Formcheck.ai, Gymscore, Formax AI | $0–35/mo             | Crowded with early-stage entrants of inconsistent quality. Formcheck.ai (Jan 2025, ~9K users) App Store reviews describe identical clips producing "vastly different answers" — a fundamental reliability failure. CueForm AI ($10/mo) targets SBD but provides no citations. Gymscore claims "95%+ accuracy" (self-reported, unvalidated). None provide scientific citations, expert review, or granular per-rep metrics. |
-| **Tier 3 — B2B rehabilitation**     | Kemtai, Kaia Health, Sency.ai                 | B2B / employer-paid   | Strongest clinical validation in the market. Kemtai: 111 body data points, validated vs Vicon MoCap (2cm average deviation), FDA-listed, CE-marked. Kaia Health: $125M+ raised, 90M+ covered lives, multiple peer-reviewed RCTs in JMIR. Both focus exclusively on physiotherapy rehabilitation — neither targets barbell strength training.                                                                               |
-| **Tier 4 — Bar path trackers**      | Metric VBT, WL Analysis, Bar Path, BarSense   | Free–$13/mo          | Single-purpose apps tracking barbell trajectory, velocity, and power. Answer "where did the bar go?" but not "what did my body do wrong?" Metric VBT (free) has a loyal following with excellent reviews by doing one thing exceptionally well.                                                                                                                                                                             |
+Market and literature research surfaced a consistent gap: existing form-analysis products either track the bar (trajectory and velocity) or score the body, but none combine computer-vision form analysis, retrieval-augmented grounding in peer-reviewed literature, and an expert-validation workflow. A 2024 JMIR study evaluating AI-generated exercise recommendations across 26 clinical populations found only 8% provided any reference source, with overall comprehensiveness scoring 41.2% against ACSM gold-standard guidelines. The only published RAG implementation for fitness coaching identified in this research was a 2024 University of Twente thesis applying GPT-4o with RAG to swimming coaching over a YouTube-video knowledge base - not peer-reviewed literature, and not barbell training. No published work combined CV form analysis with RAG retrieval from scientific literature, and LangGraph-style agentic fitness architectures existed only as developer prototypes without CV integration. This gap - grounded, cited, expert-validated coaching - is the design target the rest of this SRS specifies.
 
-**Nearest competitor: AiKYNETIX**
+#### Design implications
 
-AiKYNETIX ($12.99/month) is the closest competitor to Spelix. It offers barbell trajectory tracking, 3D joint angle analysis, and posture assessment for squats, deadlifts, and bench press, with motion technology validated by the University of Houston Lab. It targets both individual athletes and B2B coaches.
+- Accuracy is the existential risk. Research shows even the best CV form-checking app misses roughly 30% of clinically meaningful faults, and many apps show confirmation bias - flagging errors more in high-BMI users while missing identical deviations in leaner users. Spelix's honest confidence scoring, expert validation layer, and calibrated uncertainty directly address this failure mode.
 
-However, AiKYNETIX lacks all three of Spelix's core differentiators: coaching is not grounded in peer-reviewed literature with citations, there is no RAG retrieval pipeline over a curated research corpus, and there is no expert validation workflow. The gap is the difference between "AI says your knee angle is off" and "AI says your knee angle is off — here is why that matters biomechanically according to [Smith et al., 2021], validated by a kinesiology specialist."
+- Narrow barbell-only scope is the correct constraint. Squats, deadlifts, and bench press are consistently the top three exercises users want form-checked and have the richest biomechanics literature, making RAG retrieval more effective and accuracy optimisation achievable.
 
-**Key finding: no product combines CV analysis, RAG grounding, and expert validation**
+- Determinism is a baseline requirement, not a quality target. A documented failure mode in existing apps is non-deterministic scoring - identical clips producing different results. Spelix must guarantee that the same video input produces the same analysis output.
 
-A 2024 JMIR study evaluated AI-generated exercise recommendations across 26 clinical populations and found only 8% provided any reference source, with overall comprehensiveness scoring 41.2% against ACSM gold-standard guidelines. The only published RAG implementation for fitness coaching is a 2024 University of Twente thesis applying GPT-4o with RAG to swimming coaching using a YouTube video knowledge base — not peer-reviewed literature, and not barbell training. No published research combines CV form analysis with RAG retrieval from scientific literature. LangGraph-based agentic fitness architectures exist only as developer prototypes with no CV integration or production quality. Spelix's planned multi-tool agentic pipeline would be the first commercially deployed agentic fitness coaching system grounded in peer-reviewed exercise science literature found in this research.
-
-#### Competitive comparison
-
-| **Product**          | **Category** | **Price**               | **Citations**           | **Expert review**      | **Per-rep metrics** | **Bar path** | **Compounding knowledge** |
-|----------------------|--------------|-------------------------|-------------------------|------------------------|---------------------|--------------|---------------------------|
-| Tonal                | Hardware     | $4,295 + $60/mo       | No                      | Coach classes          | Yes                 | N/A          | Static ML models          |
-| Tempo                | Hardware     | $245–$3,995 + $39/mo | No                      | Trainer classes        | Limited             | No           | Static ML models          |
-| AiKYNETIX            | App          | $13/mo                 | No                      | No                     | Yes                 | **Yes**      | No                        |
-| Formcheck.ai         | App          | Freemium                | No                      | No                     | Score only          | No           | No                        |
-| CueForm AI           | App          | $10/mo                 | No                      | No                     | Limited             | Limited      | No                        |
-| Gymscore             | App          | TBD                     | No                      | No                     | Per-rep score       | No           | No                        |
-| Kemtai               | B2B/Rehab    | B2B                     | Clinical only           | PT oversight           | Adherence           | No           | No                        |
-| Juggernaut AI        | App          | $35/mo                 | No                      | No                     | None                | No           | No                        |
-| Metric VBT           | Bar tracker  | Free                    | No                      | No                     | Velocity            | **Yes**      | No                        |
-| **Spelix (planned)** | App          | TBD                     | **Yes — peer-reviewed** | **Kinesiology expert** | **Biomechanical**   | **Yes**      | **Coach Brain flywheel**  |
-
-#### Strategic implications for development
-
-- Accuracy is the existential risk. Research shows even the best CV form-checking app misses roughly 30% of clinically meaningful faults, and all apps show confirmation bias — flagging errors more in high-BMI users while missing identical deviations in leaner users. Spelix's honest confidence scoring, expert validation layer, and calibrated uncertainty directly address this failure mode.
-
-- Narrow barbell-only scope is strategically correct. Squats, deadlifts, and bench press are consistently the top three exercises users want form-checked and have the richest biomechanics literature, making RAG retrieval more effective and accuracy optimisation achievable.
-
-- Determinism is a baseline requirement, not a quality target. Formcheck.ai's fundamental failure is non-deterministic scoring — identical clips producing different results. Spelix must guarantee that the same video input produces the same analysis output.
-
-- Users want to know why. Community analysis shows users consistently criticising existing apps for "overconfident recommendations without citing sources." The Cronometer vs MyFitnessPal dynamic — where USDA-verified data drove user preference over user-submitted data — demonstrates that evidence transparency earns fitness community trust.
-
-- The compounding knowledge layer is the primary competitive moat. Foundation models are commodities, biomechanics papers are public, and CV pipelines are replicable. The only defensible asset is a proprietary, validated, compounding knowledge base of coaching intelligence — specific cue→outcome mappings segmented by athlete type, validated across real coaching interactions. A well-funded competitor ($5M) can replicate Coach Brain's software architecture in 3–6 months; replicating the accumulated coaching knowledge base requires 18–36 months of user interactions. No competitor in the landscape has built an explicit, curated, compounding coaching knowledge base — they rely on static ML models or hard-coded rules.
+- Users want to know why. Community analysis shows users consistently criticising existing apps for overconfident recommendations without cited sources. Evidence transparency (the Cronometer vs MyFitnessPal dynamic, where USDA-verified data drove user preference over user-submitted data) earns fitness-community trust - which is why coaching output is citation-grounded.
 
 ### 2.9 Greenfield Declaration
 
