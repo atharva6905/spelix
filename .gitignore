@@ -283,3 +283,8 @@ frontend/.env.production
 # Secret-scan reports — never commit
 gitleaks-report.json
 trufflehog-report.json
+
+# Internal planning + audit docs — kept local, never published (OSS flip, 2026-05-30)
+# Policy: planning/spec/audit docs are local-only; only architecture/reference docs ship.
+docs/internal/
+docs/phase0-audit/
