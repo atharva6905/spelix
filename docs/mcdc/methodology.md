@@ -14,7 +14,7 @@ MC/DC is the appropriate response because the failure mode it detects is exactly
 
 ## Scope
 
-MC/DC coverage is applied to 16 functions across 5 files, covering approximately 82 compound conditions and 90 test vectors. The rest of the codebase is held to 90% branch coverage enforced in CI. MC/DC is reserved for functions where incorrect branching has a direct user-facing consequence — incorrect scoring, incorrect video rejection, missed rep detection, or a missed fallback. Repository, service, and API-layer code does not fall under this criterion because errors there produce API-level failures (HTTP errors, exceptions) that are immediately visible and caught by integration tests.
+MC/DC coverage is applied to 16 functions across 5 files, covering 16 compound decisions with 89 MC/DC test vectors (86 test methods across 7 test files; see `traceability.md`). The rest of the codebase is held to 90% branch coverage enforced in CI. MC/DC is reserved for functions where incorrect branching has a direct user-facing consequence — incorrect scoring, incorrect video rejection, missed rep detection, or a missed fallback. Repository, service, and API-layer code does not fall under this criterion because errors there produce API-level failures (HTTP errors, exceptions) that are immediately visible and caught by integration tests.
 
 The five files under MC/DC:
 

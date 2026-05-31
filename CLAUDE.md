@@ -4,7 +4,7 @@ Science-based barbell form coaching platform. Users upload squat/bench/deadlift 
 
 **Current phase: Post-L2 sprint — private beta live.** Phase 0 complete (93 items). Phase 1 complete (44 items). Phase 2 complete (44 items). Phase 3 complete (LangGraph agent, distillation pipeline, landing page, expert portal, beta flow, streaq migration — all on prod since 2026-05-03). L2 sprint hard gate met. Now in beta ops: real users, expert reviews, Coach Brain growing. Next: internship applications (mid-May 2026), Phase 4 eval infrastructure when needed. SRS v2.1 (north star — set in stone).
 
-Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Task list: `backlog.md`. **Strategy & priorities: `STRATEGY.md`** — L2 beta launch plan, internship timeline, time budgets, stop-loss triggers. Read before suggesting new features or scope changes.
+Authoritative requirements: `@docs/SRS.md`. Phase-specific architecture: `backend/CLAUDE.md` + `frontend/CLAUDE.md`. Decisions: `decisions.md`. Open work: [GitHub Issues](https://github.com/atharva6905/spelix/issues); completed archive: `backlog.md`. Strategy & priorities (launch plan, timelines, time budgets, stop-loss triggers) are kept in a local-only strategy note (not in the public repo) — consult it before suggesting new features or scope changes.
 
 Greenfield build — no migration from WorkoutFormAnalyzer. Alembic starts at migration 001.
 
@@ -217,30 +217,21 @@ After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirement
 
 At the end of any session that didn't complete all planned batches, write a handoff note to `.claude/handoff.md` containing: (1) completed tasks with commit SHAs, (2) remaining tasks with backlog IDs, (3) current test count and any failures, (4) any blockers discovered.
 
-## memory.md Update Protocol
+## Session State Protocol
 
-After every session commit, update memory.md with:
-```
-phase: [current]
-task: [current task ID]
-status: [in_progress | blocked | escalated | done]
-last_modified: [last 5 files modified]
-failing_tests: [list or empty]
-blockers: [list or empty]
-next_action: "[specific next step — exact command or task]"
-session_count: [increment by 1]
-last_session: [today's date]
-```
+Current session state lives in `.claude/handoff.md` (local-only, gitignored). At the end of any session, refresh it with: current phase, completed tasks + commit SHAs, remaining tasks + their GitHub Issue numbers, current test count + any failures, and any blockers. Durable cross-session facts live in the file-based memory at `~/.claude/projects/.../memory/` (see Memory protocol in the system prompt). There is no tracked agent-state file in the repo.
 
 ## decisions.md & backlog.md Update Protocol
 
-`decisions.md` and `backlog.md` live at the **repo root** (not `.claude/`). They are project-owned across sessions and survive every Claude Code session — treat with the same discipline as `memory.md`. **Do NOT batch updates at end-of-session**; run inline with the code changes that triggered them. Session 13 batched and lost track of half the decisions; the cost was ~30 min of reconstruction from git log. You do NOT need user permission to invoke `/adr` or `/backlog` — they are part of normal session hygiene.
+`decisions.md` and `backlog.md` live at the **repo root** (not `.claude/`). They are project-owned across sessions and survive every Claude Code session — treat them with care. **Do NOT batch updates at end-of-session**; run inline with the code changes that triggered them. Session 13 batched and lost track of half the decisions; the cost was ~30 min of reconstruction from git log. You do NOT need user permission to invoke `/adr` or `/backlog` — they are part of normal session hygiene.
 
-**Run `/adr`** when: a library choice is made; a design pattern adopted across >1 file; a constraint is added (file path, env var, runtime dep); a bugfix reveals a systemic design choice; a migration between approaches happens; a test pattern is adopted to prevent a bug class. If you'd write a `backend/CLAUDE.md` gotcha for it, you also need an ADR — gotchas explain symptoms, ADRs explain choices.
+**Open work lives in [GitHub Issues](https://github.com/atharva6905/spelix/issues), not in `backlog.md`.** `backlog.md` is the completed-work archive, grouped by phase (newest first). When an Issue closes, append its entry to the relevant phase section with the merge SHA. New/discovered work → open a GitHub Issue (`mcp__github__create_issue`).
 
-**Run `/backlog`** when: a task is completed (mark `done` + add squash-merge SHA); a new task is discovered mid-session; a task's scope changes (split/merge/blocked/deferred); a batch of work finishes (add `## Completed —` header); a new phase begins (seed from SRS Must filter).
+**Run `/adr`** when: a library choice is made; a design pattern adopted across >1 file; a constraint is added (file path, env var, runtime dep); a bugfix reveals a systemic design choice; a migration between approaches happens; a test pattern is adopted to prevent a bug class. If you'd write a `backend/CLAUDE.md` gotcha for it, you also need an ADR — gotchas explain symptoms, ADRs explain choices. **File new ADRs under the matching domain section in `decisions.md` and append a row to the Decision Index at the top.**
 
-**File ownership**: `decisions.md` is **append-only across phases** — old ADRs are NEVER edited; if a decision is reversed, write a new ADR that supersedes the old one by ID. `backlog.md` rows ARE edited in place (status, commits, scope). Both files commit alongside normal code changes — atomic with the PR that introduces the decision/closes the task, never as a follow-up cleanup PR.
+**Run `/backlog`** when: an Issue closes (append a `done` row under its phase section with the merge SHA); a batch of work finishes (add a `## Completed —` subsection); a new phase begins.
+
+**File ownership**: `decisions.md` is **append-only across phases** — old ADRs are NEVER edited for substance; if a decision is reversed, write a new ADR that supersedes the old one by ID and cross-link both ways. `backlog.md` archive rows are edited in place only to record completion (status, commits). Both files commit alongside normal code changes — atomic with the PR that introduces the decision/closes the task, never as a follow-up cleanup PR.
 
 ## graphify
 

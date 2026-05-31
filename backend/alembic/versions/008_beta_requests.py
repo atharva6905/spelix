@@ -2,11 +2,11 @@
 
 Create `beta_requests` table for the landing-page email capture queue.
 
-Provenance: STRATEGY.md v3 (2026-04-14) §Day 1-2 "Landing V1 live on prod"
-and `landing-page-plan.md` §7 Email Capture Flow. Not tied to a numbered
-SRS FR — this is a growth/ops surface (private-beta queue), not a product
-feature. The API layer and admin approval UI land in the Track A feature
-PR that follows this migration.
+Provenance: the L2-sprint Day 1-2 "Landing V1 live on prod" goal and the
+landing-page email-capture flow design. Not tied to a numbered SRS FR —
+this is a growth/ops surface (private-beta queue), not a product feature.
+The API layer and admin approval UI land in the Track A feature PR that
+follows this migration.
 
 Schema:
 - UUID PK, TEXT email (normalised lowercase+trim by API before insert),

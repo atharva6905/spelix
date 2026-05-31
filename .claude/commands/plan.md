@@ -94,8 +94,8 @@ context, then hand the approved plan to the agent for Phase 3 only.
 
 ## Post-Execute (always)
 
-1. Mark task `done` in backlog.md
-2. Update memory.md: `next_action`, `last_modified`, current test count
+1. Archive the closed Issue's entry in backlog.md (with merge SHA)
+2. Update `.claude/handoff.md`: `next_action`, `last_modified`, current test count
 3. If new architectural decision made: run /adr
 4. If a new gotcha was discovered (a bug that cost >30 min): add to CLAUDE.md Gotchas
 

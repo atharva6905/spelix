@@ -77,7 +77,7 @@ Docker state: [running/stopped]
    git commit -m "wip(scope): escalation — [bug description]"
    ```
 
-2. Update memory.md:
+2. Update `.claude/handoff.md`:
    ```
    status: escalated
    blockers: [bug description — escalation.md written]

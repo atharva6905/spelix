@@ -25,7 +25,7 @@ Spelix uses automated decision-making to generate your coaching feedback, as des
 - **AI coaching.** A large language model receives your scores, joint-angle data, and relevant biomechanics literature, then generates written feedback. The model does not receive your raw video.
 - **Expert review.** Analyses that are flagged (for example, due to low confidence or unusual patterns) may be reviewed by a qualified human reviewer before coaching is finalised.
 
-You have the right to request human review of any automated decision. Contact atharva6905@gmail.com.
+You have the right to request human review of any automated decision. Contact privacy@spelix.app.
 
 The legal basis for processing your exercise data is your explicit consent under GDPR Article 6(1)(b) (performance of the service you requested) and Article 9(2)(a) (explicit consent for special-category health-related data). You provide this consent through the in-app consent flow before your first analysis.
 
@@ -60,7 +60,7 @@ Under GDPR, you have the right to:
 - **Request human review** of any automated coaching decision.
 - **Lodge a complaint** with your local data-protection supervisory authority.
 
-To exercise any right outside the app, email atharva6905@gmail.com.
+To exercise any right outside the app, email privacy@spelix.app.
 
 A Data Protection Impact Assessment (DPIA) has been completed for Spelix in accordance with GDPR Article 35.
 
@@ -90,4 +90,4 @@ We may update these terms from time to time. When we do, we will update the "Las
 
 ## Contact
 
-For questions, data requests, or feedback: **atharva6905@gmail.com**
+For questions, data requests, or feedback: **privacy@spelix.app**

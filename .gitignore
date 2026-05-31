@@ -232,13 +232,13 @@ marimo/_lsp/
 __marimo__/
 .gstack/
 
-# Landing page analysis artefacts (feat/landing-v1 branch, L2 sprint)
-# Screenshots are bulky reference captures of the Framer template and
-# dev-time verification; template-export is a 435 KB Framer HTML export
-# of uncertain licence. Both live on disk for the branch but must not
-# ship on main. See landing-page/landing-page-plan.md §16.10.
-landing-page/screenshots/
-landing-page/template-export/
+# Landing page analysis artefacts (feat/landing-v1 branch, L2 sprint).
+# The whole dir is design-extraction + planning scaffolding that produced
+# the live React landing page in frontend/. It is dead/superseded, not
+# referenced by any build, and derived from a Framer template "of uncertain
+# licence" (screenshots + template-export). Kept on local disk, never shipped.
+# See landing-page/landing-page-plan.md §16.10.
+landing-page/
 
 # MediaPipe model binaries (download at build time)
 backend/models/*.task
@@ -266,3 +266,44 @@ e2e/screenshots/occlusion/
 
 # Word lock files
 ~$*.docx
+
+# ── Private — excluded from the public OSS repo (BSL flip, 2026-05-30) ──
+# Kept on local disk, NOT published. Plan: docs/superpowers/plans/2026-05-30-spelix-oss-flip-bsl.md
+graphify-out/
+Spelix_Expert_Reviewer_Guide.docx
+generate_expert_guide.cjs
+.claude/handoff.md
+e2e/
+docs/superpowers/
+# Internal strategy — internship timeline, time budgets, stop-loss triggers
+STRATEGY.md
+# Frontend env files tracked by accident (VITE_API_URL only — no secrets)
+frontend/.env.development
+frontend/.env.production
+# Secret-scan reports — never commit
+gitleaks-report.json
+trufflehog-report.json
+
+# Internal planning + audit docs — kept local, never published (OSS flip, 2026-05-30)
+# Policy: planning/spec/audit docs are local-only; only architecture/reference docs ship.
+docs/internal/
+docs/phase0-audit/
+
+# Root-level career/planning scratch + expert/session captures — local only, never published
+cv-audit-*.md
+spelix-oss-flip-*.md
+r5-expert-*.png
+r5-expert-*.yml
+session*-expert-panel.png
+session*-squat-expert-panel.png
+yt_search_*.jpeg
+# CV pipeline one-off scratch — probe/spike/sniff scripts + their output dirs (not shipped).
+# Tracked oneoff tooling (smoke_cove_*, *_coach_brain_*, sanitize_seed_*) is unaffected.
+backend/scripts/oneoff/*_out/
+backend/scripts/oneoff/*probe*.py
+backend/scripts/oneoff/*spike*.py
+backend/scripts/oneoff/*sniff*.py
+backend/scripts/oneoff/investigate_*.py
+backend/scripts/oneoff/diagnose_r1_regression.py
+backend/scripts/oneoff/render_full_skeleton.py
+backend/scripts/oneoff/verify_depth_frame_corruption.py
