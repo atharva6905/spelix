@@ -307,3 +307,9 @@ backend/scripts/oneoff/investigate_*.py
 backend/scripts/oneoff/diagnose_r1_regression.py
 backend/scripts/oneoff/render_full_skeleton.py
 backend/scripts/oneoff/verify_depth_frame_corruption.py
+
+# Local-only tooling config — kept on disk, never published (OSS flip, 2026-05-30)
+# .graphifyignore drives the local knowledge-graph build (graphify-out/ is already
+# gitignored); .mcp.json wires local MCP servers and carries machine-specific paths.
+.graphifyignore
+.mcp.json
