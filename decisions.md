@@ -20,6 +20,7 @@
 | ADR-LANGGRAPH-01 | LangGraph as agent orchestration framework (Phase 3) | Foundational / Platform | Accepted |
 | ADR-AGENTSTATE-01 | `AgentState` TypedDict uses `total=True` for pyright-safe reads | Foundational / Platform | Accepted |
 | ADR-CONFIG-01 | Runtime constants centralized in `app/config_constants.py` | Foundational / Platform | Accepted |
+| ADR-HOOKS-01 | Claude Code hooks as script files with smoke-test harness | Foundational / Platform | Accepted |
 | ADR-012 | Phase 0 Confidence — Simple Mean | CV & Scoring | Accepted |
 | ADR-015 | Tier 5 Per-Rep Confidence — 10th Percentile, Not Mean | CV & Scoring | Accepted |
 | ADR-016 | ScoreComponent Protocol for Extensibility | CV & Scoring | Accepted |
@@ -244,6 +245,11 @@ Mode is selected via env `SPELIX_AGENT_MODE=deterministic|adaptive` (default `de
 - Does NOT replace `ThresholdConfig` — coaching/scoring thresholds have a separate versioning flow via `config/thresholds_v1.json` with provenance citations. Don't mix the two.
 
 **Related:** M-11, L-05 audit findings. ADR-018 (ThresholdConfig design) is the orthogonal file for kinesiology tuning. PRs #110 (commit `0a2fe8c`) and #111 (commit `2bed7d1`).
+
+## ADR-HOOKS-01: Claude Code hooks as script files with smoke-test harness
+**Context**: All 9 harness hooks lived as inline `node -e` one-liners in `.claude/settings.json` — undiffable, untestable, and one (the worktree stale-branch warning) was silently dead for months because it read a non-existent `$CC_TOOL_INPUT` env var (hooks receive tool input via stdin JSON only).
+**Decision**: Every hook is a standalone script in `.claude/hooks/*.js` reading stdin JSON, with a uniform exit-code contract (0 = allow, 2 = block) and a smoke-test harness (`node .claude/hooks/smoke-test.mjs`) that pipes fixture JSON and asserts exit codes. Scripts with side effects or slow checks short-circuit under `HOOK_SMOKE=1`. `settings.json` entries are one-line `node .claude/hooks/<name>.js` references.
+**Consequences**: Hooks are reviewable in PRs and regression-tested after every edit. New lifecycle hooks (SessionStart env injection, PreCompact mini-handoff, SessionEnd stamp) became feasible. `.claude/hooks/**` and `settings.json` are Tier 2 under merge governance — the harness can never autonomously modify its own guardrails.
 
 # CV & Scoring
 

@@ -2,6 +2,7 @@
 name: backlog
 description: Add, update, or close items in backlog.md. Run whenever a task is completed, a new task is discovered, or a status changes. The backlog is the single source of truth for "what's left" — keep it accurate so future sessions don't have to reconstruct context from git log.
 argument-hint: "operation, e.g. 'add P2-031: post-deploy smoke check' or 'close B-149c with commit 7bf8361'"
+effort: low
 ---
 
 # Backlog Update — Capture

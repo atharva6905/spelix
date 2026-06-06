@@ -6,85 +6,37 @@
     ]
   },
   "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const f=j.tool_input?.file_path||j.tool_input?.path||'';if(f.endsWith('.py')){const{execSync}=require('child_process');try{execSync('ruff check --fix '+JSON.stringify(f),{stdio:'pipe'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}}catch(e){}})\"",
-            "statusMessage": "Running ruff check --fix..."
-          },
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const f=j.tool_input?.file_path||j.tool_input?.path||'';if(f.endsWith('.py')){const{execSync}=require('child_process');try{execSync('pyright '+JSON.stringify(f),{stdio:'pipe'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}}catch(e){}})\"",
-            "statusMessage": "Running pyright..."
-          },
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const f=j.tool_input?.file_path||j.tool_input?.path||'';if(f.endsWith('.ts')||f.endsWith('.tsx')){const{execSync}=require('child_process');try{execSync('npx tsc --noEmit',{stdio:'pipe',cwd:'frontend'})}catch(e){process.stdout.write(e.stdout?.toString()||'')}}}catch(e){}})\"",
-            "statusMessage": "Running tsc --noEmit..."
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';const cl=c.toLowerCase();const B=[['rm -rf /','wipe root'],['rm -rf .','wipe cwd'],['rm -rf ~','wipe home'],['rm -rf *','wipe glob'],['rm -rf C:','wipe drive'],['rmdir /s /q','windows recursive nuke'],['del /s /q /f','windows force nuke'],['git push --force','force push'],['git push -f ','force push'],['git push origin main','direct push to main'],['git push origin master','direct push to master'],['git reset --hard','hard reset loses work'],['git clean -fd','delete untracked files'],['docker compose down -v','destroy volumes'],['docker system prune -a','prune everything'],['drop table','drop table'],['drop database','drop database'],['truncate ','truncate table'],['alembic downgrade base','wipe all migrations'],['npm publish','publish package'],['supabase db reset','reset database'],['chmod 777','world-writable'],['chmod -r 777','recursive world-writable'],['cat .env','read secrets via bash'],['type .env','read secrets via bash'],['curl|sh','pipe to shell'],['curl |sh','pipe to shell'],['curl | sh','pipe to shell'],['wget|sh','pipe to shell'],['wget |sh','pipe to shell'],['wget | sh','pipe to shell'],['curl|bash','pipe to shell'],['curl | bash','pipe to shell'],['wget|bash','pipe to shell'],['wget | bash','pipe to shell'],['> .env','overwrite env file'],['>> .env','append to env file']];for(const [p,r] of B){if(cl.includes(p)){process.stderr.write('\\n\\u{1F6AB} BLOCKED: '+r+' \\u2014 command: '+c+'\\n');process.exit(2)}}}catch(e){}})\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';const cl=c.toLowerCase();const W=[['rm -r','recursive delete'],['rm -f','force delete'],['rmdir','remove directory'],['git reset','git reset'],['git checkout -- .','discard all changes'],['git stash drop','drop stash'],['alembic downgrade','downgrade migration'],['delete from','SQL delete rows'],['printenv','print all env vars']];for(const [p,r] of W){if(cl.includes(p)){process.stderr.write('\\n\\u{26A0}\\u{FE0F}  CAUTION: '+r+' \\u2014 '+c+'\\n');break}}process.exit(0)}catch(e){}})\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node -e \"let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const j=JSON.parse(d);const c=j.tool_input?.command||'';if(c.includes('git commit')||c.includes('git push')){const{execSync}=require('child_process');try{execSync('(git diff --cached; git diff) | grep -iE \\\\\\\"(sk-|password|secret|supabase_service_role|ANTHROPIC_API_KEY)\\\\\\\"',{stdio:'pipe'});process.stderr.write('\\n\\u{1F6AB} BLOCKED: secrets detected in staged changes\\n');process.exit(2)}catch(e){process.exit(0)}}}catch(e){}})\""
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if echo \"$CC_TOOL_INPUT\" | grep -q 'git worktree add'; then git fetch origin main && git merge-base --is-ancestor origin/main HEAD || echo 'WARNING: not branching from latest main'; fi"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CMD=$(python3 -c \"import json,sys; d=json.load(sys.stdin); print(d.get('tool_input',d).get('command',''))\" 2>/dev/null || true); case \"$CMD\" in *grep*|*rg\\ *|*ripgrep*|*find\\ *|*fd\\ *|*ack\\ *|*ag\\ *)   [ -f graphify-out/graph.json ] &&   echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"graphify: Knowledge graph exists. Read graphify-out/GRAPH_REPORT.md for god nodes and community structure before searching raw files.\"}}'   || true ;; esac"
-          }
+          { "type": "command", "command": "node .claude/hooks/safety-blocklist.js" },
+          { "type": "command", "command": "node .claude/hooks/safety-caution.js" },
+          { "type": "command", "command": "node .claude/hooks/secret-scan.js" },
+          { "type": "command", "command": "node .claude/hooks/worktree-freshness.js" },
+          { "type": "command", "command": "node .claude/hooks/graphify-hint.js" }
         ]
       }
     ],
-    "Stop": [
+    "PostToolUse": [
       {
+        "matcher": "Write|Edit",
         "hooks": [
-          {
-            "type": "command",
-            "command": "cd backend && uv run ruff check . --quiet; cd ../frontend && npx tsc --noEmit --quiet 2>&1 | head -20",
-            "statusMessage": "Running final checks..."
-          }
+          { "type": "command", "command": "node .claude/hooks/post-edit-lint.js", "statusMessage": "Linting edited file..." }
         ]
       }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node .claude/hooks/session-start.js" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "node .claude/hooks/pre-compact.js" } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "node .claude/hooks/session-end.js" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node .claude/hooks/stop-gate.js", "timeout": 180, "statusMessage": "Final checks..." } ] }
     ]
   },
   "enabledPlugins": {

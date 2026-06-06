@@ -1,6 +1,7 @@
 ---
 name: coverage
 description: Coverage-driven test generation to reach threshold
+context: fork
 ---
 Run `cd backend && uv run pytest --cov=app --cov-report=term-missing` and analyze output. Goal: 95% line coverage.
 

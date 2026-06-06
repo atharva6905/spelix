@@ -2,6 +2,7 @@
 name: plan
 description: Structured Explore → Plan → Execute workflow for any task touching 3+ files or requiring architectural decisions. Enforces Plan Mode separation before implementation.
 argument-hint: "task ID or description, e.g. B-093 or 'implement SSE streaming'"
+context: fork
 ---
 
 # Explore → Plan → Execute

@@ -4,7 +4,7 @@ description: >
   Load live environment state at session start, or any time the user asks
   for current project status, environment check, or "where are we".
   Run automatically when starting a new session.
-disable-model-invocation: false
+effort: low
 ---
 
 ## Spelix — Live Environment State
@@ -20,8 +20,7 @@ Database:
 
 Workers:
 - Redis: !`docker compose exec redis redis-cli ping 2>/dev/null || echo "OFFLINE"`
-- ARQ queue depth: !`docker compose exec redis redis-cli llen arq:queue 2>/dev/null`
-- ARQ dead queue: !`docker compose exec redis redis-cli llen arq:queue.dead 2>/dev/null`
+- streaq queue depth: !`docker compose exec redis redis-cli llen streaq:queue 2>/dev/null`
 
 Tests (last run):
 - !`cd backend && cat .pytest_cache/v/cache/lastfailed 2>/dev/null || echo "No failures cached"`
