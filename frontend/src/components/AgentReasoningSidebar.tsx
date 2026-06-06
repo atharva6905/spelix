@@ -43,12 +43,16 @@ interface AgentReasoningSidebarProps {
   isOpen: boolean;
   trace: AgentTracePayload | null;
   onClose: () => void;
+  /** When true and VITE_LANGSMITH_RUN_URL_PREFIX is set, renders an admin-only
+   *  "View in LangSmith" deep-link next to the header (FR-AICP-20 / P3-007). */
+  isAdmin?: boolean;
 }
 
 export function AgentReasoningSidebar({
   isOpen,
   trace,
   onClose,
+  isAdmin = false,
 }: AgentReasoningSidebarProps) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -146,12 +150,27 @@ export function AgentReasoningSidebar({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
-            <h2
-              id="agent-reasoning-sidebar-title"
-              className="text-lg font-semibold text-gray-900"
-            >
-              How AI Reasoned
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2
+                id="agent-reasoning-sidebar-title"
+                className="text-lg font-semibold text-gray-900"
+              >
+                How AI Reasoned
+              </h2>
+              {isAdmin &&
+                (import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string | undefined) &&
+                trace?.langsmith_run_id && (
+                  <a
+                    href={`${import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string}/r/${trace.langsmith_run_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="langsmith-run-link"
+                    className="text-xs text-gray-400 hover:text-indigo-600 hover:underline"
+                  >
+                    View in LangSmith
+                  </a>
+                )}
+            </div>
             <p className="mt-0.5 text-xs text-gray-500">
               A step-by-step look at how your coaching was produced.
             </p>

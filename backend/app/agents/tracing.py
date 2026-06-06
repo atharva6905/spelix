@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -64,11 +65,14 @@ def run_config_for_analysis(
     """Build the ``config`` dict passed to ``graph.ainvoke``.
 
     Populates ``run_name`` (shown in the LangSmith run list), ``tags``
-    (filterable chips), and ``metadata`` (structured fields). When
-    LangSmith is not enabled, the dict is still valid as LangGraph
-    runtime config — the tracing fields are simply ignored.
+    (filterable chips), ``metadata`` (structured fields), and ``run_id``
+    (a fresh UUID4 used as the LangSmith root-run id). When LangSmith is
+    not enabled, the dict is still valid as LangGraph runtime config —
+    the tracing fields are simply ignored.
     """
+    run_id = uuid.uuid4()
     return {
+        "run_id": run_id,
         "run_name": f"coaching_analysis_{analysis_id}",
         "tags": [
             f"analysis_id:{analysis_id}",

@@ -173,6 +173,10 @@ export interface AgentTracePayload {
   converged?: boolean;
   retrieval_source?: AgentRetrievalSource;
   degraded_mode?: boolean;
+  /** FR-AICP-20 / P3-007: LangSmith root-run id. Present only when LangSmith
+   *  tracing was enabled for the run. Used by admin-only "View in LangSmith"
+   *  link in AgentReasoningSidebar. */
+  langsmith_run_id?: string | null;
 }
 
 export interface CoachingResultDetail {

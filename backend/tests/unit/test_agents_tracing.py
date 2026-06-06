@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from app.agents.tracing import (
     langsmith_enabled,
@@ -100,6 +105,134 @@ def test_serialize_sanitized_error_survives_hard_cap():
     assert "<path>" in surviving_error
     # Verify the hard-cap was actually triggered (non-essential fields gone).
     assert "field1" not in result[0]
+
+
+# ---------------------------------------------------------------------------
+# FR-AICP-20 / P3-007: run_id captured in config and surfaced in trace_payload
+# ---------------------------------------------------------------------------
+
+
+def test_run_config_for_analysis_returns_run_id():
+    """run_config_for_analysis must include a uuid.UUID run_id in its returned dict."""
+    cfg = run_config_for_analysis(
+        analysis_id="abc-123",
+        user_id="user-456",
+        mode="deterministic",
+    )
+    assert "run_id" in cfg, "run_id must be present in the config dict"
+    assert isinstance(cfg["run_id"], uuid.UUID), (
+        f"run_id must be a uuid.UUID, got {type(cfg['run_id'])}"
+    )
+
+
+def _make_graph_deps():
+    """Minimal dep stubs for run_coaching_graph tests."""
+    from app.schemas.coaching import CoachingOutput
+
+    output = CoachingOutput(
+        summary="ok",
+        strengths=["good"],
+        correction_plan=["fix"],
+        disclaimer=(
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+        raw_prompt_tokens=10,
+        raw_completion_tokens=5,
+    )
+
+    class _FakeCoveResult:
+        def __init__(self, o):
+            self.output = o
+            self.cove_verified = True
+            self.iterations_run = 1
+            self.trace = [{"iteration": 1, "converged": True}]
+
+    rep_row = SimpleNamespace(rep_index=0, metrics_json={"depth_angle": 90.0})
+    return {
+        "rep_metric_repo": SimpleNamespace(get_by_analysis=AsyncMock(return_value=[rep_row])),
+        "retrieval_svc": SimpleNamespace(
+            hybrid_search=AsyncMock(
+                return_value=[
+                    SimpleNamespace(
+                        collection="papers_rag",
+                        score=0.9,
+                        chunk=SimpleNamespace(
+                            id="p1", text="research", title="t",
+                            authors=[], year=2024, doi=None,
+                        ),
+                    )
+                ]
+            )
+        ),
+        "thresholds": SimpleNamespace(all_for_exercise=lambda e: {}),
+        "analysis_repo": SimpleNamespace(list_recent_by_user=AsyncMock(return_value=[])),
+        "coaching_svc": SimpleNamespace(
+            generate_coaching_streaming=AsyncMock(return_value=output)
+        ),
+        "cove_svc": SimpleNamespace(verify=AsyncMock(return_value=_FakeCoveResult(output))),
+        "fg_svc": SimpleNamespace(
+            evaluate=AsyncMock(
+                return_value=SimpleNamespace(score=0.91, passed=True, unsupported_claims=[])
+            )
+        ),
+        "pubsub_redis": SimpleNamespace(publish=AsyncMock()),
+    }
+
+
+@pytest.mark.asyncio
+async def test_trace_payload_includes_langsmith_run_id_when_enabled(monkeypatch):
+    """trace_payload must contain langsmith_run_id when LangSmith is enabled."""
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "ls-test-key")
+
+    from app.agents.graph import run_coaching_graph
+
+    deps = _make_graph_deps()
+    _, trace_payload, _ = await run_coaching_graph(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        body_stats=None,
+        keyframe_analysis_text=None,
+        mode="deterministic",
+        **deps,
+    )
+
+    assert "langsmith_run_id" in trace_payload, (
+        "trace_payload must include langsmith_run_id when LangSmith is enabled"
+    )
+    # Must be a valid UUID string
+    parsed = uuid.UUID(trace_payload["langsmith_run_id"])
+    assert isinstance(parsed, uuid.UUID)
+
+
+@pytest.mark.asyncio
+async def test_trace_payload_omits_langsmith_run_id_when_disabled(monkeypatch):
+    """trace_payload must NOT contain langsmith_run_id when LangSmith is disabled."""
+    monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
+    monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+
+    from app.agents.graph import run_coaching_graph
+
+    deps = _make_graph_deps()
+    _, trace_payload, _ = await run_coaching_graph(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        body_stats=None,
+        keyframe_analysis_text=None,
+        mode="deterministic",
+        **deps,
+    )
+
+    assert "langsmith_run_id" not in trace_payload, (
+        "trace_payload must NOT include langsmith_run_id when LangSmith is disabled"
+    )
 
 
 def test_langsmith_enabled_reads_env_flag(monkeypatch):

@@ -8,7 +8,7 @@
  *               FR-SCOR-09–10, NFR-USAB-03
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
 import type { CoachingIssue, Citation, RepMetricDetail } from "@/api/analyses";
@@ -20,6 +20,7 @@ import {
   type ConfidenceCategory,
 } from "@/lib/confidence";
 import { API_BASE } from "@/api/config";
+import { supabase } from "@/lib/supabase";
 
 // ---------------------------------------------------------------------------
 // Confidence helpers — never expose raw decimal (FR-SCOR-09–10, NFR-USAB-03)
@@ -621,6 +622,13 @@ export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const { analysis, isLoading, error } = useAnalysisDetail(id ?? "");
   const [isReasoningOpen, setIsReasoningOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setIsAdmin(data.session?.user?.app_metadata?.role === "admin");
+    });
+  }, []);
 
   if (isLoading) {
     return (
@@ -785,6 +793,7 @@ export default function ResultsPage() {
           isOpen={isReasoningOpen}
           trace={analysis.coaching_result?.agent_trace_json ?? null}
           onClose={() => setIsReasoningOpen(false)}
+          isAdmin={isAdmin}
         />
 
         {/* Follow-up chat (FR-RESL-09, FR-AICP-17) */}
