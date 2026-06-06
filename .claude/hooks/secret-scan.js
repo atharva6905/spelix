@@ -12,8 +12,10 @@ process.stdin.on('end', () => {
       execSync('git diff --cached', { encoding: 'utf8', timeout: 15000 }) +
       execSync('git diff', { encoding: 'utf8', timeout: 15000 });
     // Only scan ADDED lines to avoid blocking on removals of old strings.
+    // Patterns require a value assignment — bare words like "secret-scan.js" must not block.
     const added = diff.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).join('\n');
-    if (/(sk-|password|secret|supabase_service_role|anthropic_api_key)/i.test(added)) {
+    const SECRET = /(sk-[a-z0-9_-]{16,}|(password|passwd|secret|api_key|apikey|token)\s*[:=]\s*['"][^'"\s]{8,}|supabase_service_role\s*[:=]|anthropic_api_key\s*[:=]\s*\S)/i;
+    if (SECRET.test(added)) {
       process.stderr.write('\n\u{1F6AB} BLOCKED: secrets detected in staged changes\n');
       process.exit(2);
     }
