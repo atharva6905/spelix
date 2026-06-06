@@ -21,6 +21,8 @@
 | ADR-AGENTSTATE-01 | `AgentState` TypedDict uses `total=True` for pyright-safe reads | Foundational / Platform | Accepted |
 | ADR-CONFIG-01 | Runtime constants centralized in `app/config_constants.py` | Foundational / Platform | Accepted |
 | ADR-HOOKS-01 | Claude Code hooks as script files with smoke-test harness | Foundational / Platform | Accepted |
+| ADR-GOVERNANCE-01 | Risk-tier merge governance (T0–T3) | Foundational / Platform | Accepted |
+| ADR-AUTONOMY-01 | In-session autonomy over headless `claude -p` | Foundational / Platform | Accepted |
 | ADR-012 | Phase 0 Confidence — Simple Mean | CV & Scoring | Accepted |
 | ADR-015 | Tier 5 Per-Rep Confidence — 10th Percentile, Not Mean | CV & Scoring | Accepted |
 | ADR-016 | ScoreComponent Protocol for Extensibility | CV & Scoring | Accepted |
@@ -245,6 +247,16 @@ Mode is selected via env `SPELIX_AGENT_MODE=deterministic|adaptive` (default `de
 - Does NOT replace `ThresholdConfig` — coaching/scoring thresholds have a separate versioning flow via `config/thresholds_v1.json` with provenance citations. Don't mix the two.
 
 **Related:** M-11, L-05 audit findings. ADR-018 (ThresholdConfig design) is the orthogonal file for kinesiology tuning. PRs #110 (commit `0a2fe8c`) and #111 (commit `2bed7d1`).
+
+## ADR-GOVERNANCE-01: Risk-tier merge governance (T0–T3)
+**Context**: Harness v2 introduces merge-on-green autonomy (ship-loop, groom loop). Unbounded agent merges to `main` are unacceptable — main auto-deploys to spelix.app. The blast radius needed explicit, diff-computed bounds.
+**Decision**: Four-tier governance in `.claude/rules/governance.md` (always-on rule). T0 (docs, `.claude/**` non-guardrail, dep patch bumps, test-only) may self-merge behind CI-green + fresh-context reviewer PASS + merge-time re-validation. T1 (features) auto-PRs but human merges. T2 (models/schemas/alembic/auth/user-facing strings/harness config) and T3 (data migrations, RLS, coaching prompts, consent) are human-gated. Tier is computed from the actual diff; mixed tiers escalate; settings.json + hooks + governance.md are T2 by definition (the harness cannot modify its own guardrails).
+**Consequences**: Autonomous merges confined to trivially-rollbackable categories. Validated against 5 historical PRs (PR #193's `.mcp.json` breakage retro-classifies T2 — the incident this prevents) and a seeded bad-diff test where a fresh reviewer caught both the mislabeled tier and a planted JWT regression. Every autonomy skill (ship-loop, groom) cites this file as binding.
+
+## ADR-AUTONOMY-01: In-session autonomy over headless `claude -p`
+**Context**: From 2026-06-15, headless usage (`claude -p`, Agent SDK, GitHub Actions, cloud routines) bills against a separate $200/mo Agent SDK credit on Max 20x, while interactive sessions (incl. subagents, background agents, teams, workflows, /loop) remain plan-covered. Harness v2 needed an autonomy substrate.
+**Decision**: All Spelix autonomy is built on interactive-session primitives: `/goal` + Stop-gate for iterate-until-green, `/ship-loop` and `/groom` skills paced by /loop + ScheduleWakeup, saved Workflow scripts in `.claude/workflows/`, and the Agent tool for fresh-context reviewers. No `claude -p`, no cron-spawned headless processes.
+**Consequences**: Zero marginal cost on Max 20x; loops require an open terminal (laptop-on). Cloud routines on the $200 credit remain an explicitly deferred bolt-on (weekly dep bumps would be the first candidate). If headless pricing changes again, revisit this ADR.
 
 ## ADR-HOOKS-01: Claude Code hooks as script files with smoke-test harness
 **Context**: All 9 harness hooks lived as inline `node -e` one-liners in `.claude/settings.json` — undiffable, untestable, and one (the worktree stale-branch warning) was silently dead for months because it read a non-existent `$CC_TOOL_INPUT` env var (hooks receive tool input via stdin JSON only).
