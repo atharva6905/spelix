@@ -1,7 +1,8 @@
 ---
-name: phase
+name: phase-gate
 description: Run the phase transition gate checklist before beginning a new phase. Verifies all Must requirements for the current phase are implemented, test coverage meets threshold, no CRITICAL audit findings remain, and CLAUDE.md is updated for the new phase. Requires human sign-off before proceeding.
 argument-hint: "target phase number, e.g. 1"
+disable-model-invocation: true
 ---
 
 # Phase Transition Gate

@@ -1,6 +1,7 @@
 ---
-name: bugfix  
+name: bugfix
 description: Autonomous diagnose-fix-verify loop for failing tests
+context: fork
 ---
 You are in autonomous bug-fix mode. For each failure:
 

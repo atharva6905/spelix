@@ -2,6 +2,7 @@
 name: adr
 description: Capture an architecture decision record to decisions.md. Run whenever a non-trivial technical choice is made — library selection, pattern choice, API design decision, constraint adoption, or any decision that would be costly to reverse. This is the compounding memory of the project.
 argument-hint: "decision title, e.g. 'use ARQ over Celery for async jobs'"
+effort: low
 ---
 
 # Architecture Decision Record — Capture

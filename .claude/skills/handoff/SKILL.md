@@ -1,6 +1,7 @@
 ---
 name: handoff
 description: Write a structured handoff note before ending a session
+effort: low
 ---
 Write a handoff file to .claude/handoff.md with these exact sections:
 1. **Completed** — list each task ID with the commit SHA, plus the merged PR number for any checkpoint
