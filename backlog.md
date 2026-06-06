@@ -22,11 +22,10 @@ Migrated 2026-05-30. Open/parked items now live as Issues; the detailed history 
 | D-069 | [#185](https://github.com/atharva6905/spelix/issues/185) | S | consolidate test_distillation_validate.py surface |
 | D-AUDIT-M-07 | [#186](https://github.com/atharva6905/spelix/issues/186) | — | pin apt packages in Dockerfile |
 | D-AUDIT-M-10 | [#187](https://github.com/atharva6905/spelix/issues/187) | — | refactor files > 300 lines |
-| (P3-007) NodeEvent.error sanitize | [#188](https://github.com/atharva6905/spelix/issues/188) | S | strip infra paths before JSONB write (security) |
-| (P3-007) AgentReasoningSidebar focus trap | [#189](https://github.com/atharva6905/spelix/issues/189) | S | full Tab-cycle keyboard trap |
 | (P3-007) adaptive-mode reasoner UI | [#190](https://github.com/atharva6905/spelix/issues/190) | M | iteration counters + tool-call nesting |
 | (P3-007) CoVe iteration drill-down pane | [#191](https://github.com/atharva6905/spelix/issues/191) | M | per-iteration Q/A/judgment |
-| (P3-007) LangSmith run link-out | [#192](https://github.com/atharva6905/spelix/issues/192) | S | admin-only run link |
+
+Closed 2026-06-06 via PR #194 (`1558d32`): #188, #189, #192 — see the small-items batch section below.
 
 **Not migrated** (deliberately): `D-068` (remove an unused `fireEvent` import — drop on next edit to that test),
 `D-AUDIT-L-03` (enable ufw on the droplet — manual server config, not a code change), and the three
@@ -42,6 +41,22 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
+
+## Completed — Post-L2 beta ops — small-items batch #188/#189/#192 (2026-06-06)
+
+PR #194 (merge SHA `1558d32`, merged via `mcp__github__merge_pull_request` `merge_method="merge"`). Closed
+the three S-sized P3-007 follow-up Issues. Review gates: spelix-auditor 0 CRITICAL (its H-01 — imperative-path
+CoVe trace errors unsanitized — fixed in-batch); spelix-security-reviewer HIGHs (URL over-stripping lookbehind,
+UNC pattern) fixed in-batch, M-1/M-2 recorded as ADR-TRACE-LINK-01. Local: backend unit green
+(pre-existing local-Windows MediaPipe crash in `test_pose_extraction.py` excluded; CI Linux covers it),
+775 frontend tests, ruff/pyright/tsc clean. Post-merge manual step: set `VITE_LANGSMITH_RUN_URL_PREFIX`
+in Vercel to enable the admin link.
+
+| ID | Title | Status | Size | Deps | SRS IDs | Commit | Files |
+|----|-------|--------|------|------|---------|--------|-------|
+| #188 | Sanitize `NodeEvent.error` before agent-trace JSONB write: `sanitize_error_message` (Unix/Windows/UNC path regexes with URL-safe lookbehinds) + `sanitize_trace_errors` applied at `serialize_trace_for_storage` (graph path) AND the imperative `cove_iterations` write in the worker (ADR-DISTILL-05). | done | S | — | — (security) | `579a255`, `3ea7ad0` | `backend/app/agents/tracing.py`, `backend/app/workers/analysis_worker.py`, `backend/tests/unit/{test_agents_tracing,test_coaching_worker}.py` |
+| #189 | Full Tab-cycle focus trap in `AgentReasoningSidebar` (hand-rolled drawer; Tab wraps last→first, Shift+Tab first→last; Escape/scrim/autofocus unchanged). | done | S | — | — (a11y) | `fe6ea67` | `frontend/src/components/AgentReasoningSidebar.tsx` (+test) |
+| #192 | Admin-only LangSmith run link-out: backend sets explicit `run_id` UUID in `run_config_for_analysis` and persists `langsmith_run_id` in trace_payload when `langsmith_enabled()`; frontend builds the link from `VITE_LANGSMITH_RUN_URL_PREFIX`, gated on `isAdmin` (wired via `ResultsPage`). See ADR-TRACE-LINK-01. | done | S | — | FR-AICP-20 | `746890b`, `98b400f` | `backend/app/agents/{tracing,graph}.py`, `frontend/src/api/analyses.ts`, `frontend/src/components/AgentReasoningSidebar.tsx`, `frontend/src/pages/ResultsPage.tsx`, `frontend/.env.example` |
 
 ## Completed — L2 Sprint — CV audit R1 dropout-aware depth-frame + aux-metric None-guards (2026-05-23)
 
