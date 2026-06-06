@@ -12,6 +12,7 @@ from app.agents.tracing import (
     langsmith_enabled,
     run_config_for_analysis,
     sanitize_error_message,
+    sanitize_trace_errors,
     serialize_trace_for_storage,
 )
 
@@ -53,6 +54,36 @@ def test_sanitize_error_message_leaves_non_path_unchanged():
         "a/b single segment relative token",
     ]:
         assert sanitize_error_message(msg) == msg, f"unexpectedly mutated: {msg!r}"
+
+
+def test_sanitize_error_message_leaves_urls_unchanged():
+    """URL path components are not filesystem paths — full URLs pass through."""
+    msg = "HTTP 429 from https://api.anthropic.com/v1/messages"
+    assert sanitize_error_message(msg) == msg
+
+
+def test_sanitize_error_message_strips_unc_path():
+    """Windows UNC paths (\\\\server\\share\\...) are replaced with <path>."""
+    result = sanitize_error_message(r"cannot read \\fileserver\share\video.mp4")
+    assert "<path>" in result
+    assert "fileserver" not in result
+
+
+def test_sanitize_trace_errors_sanitizes_error_values():
+    """sanitize_trace_errors replaces paths in string error values, leaves rest intact."""
+    events = [
+        {"iteration": 1, "converged": False, "error": "open /tmp/spelix/x.mp4 failed"},
+        {"iteration": 2, "converged": True, "error": None},
+        {"iteration": 3, "converged": True},
+    ]
+    cleaned = sanitize_trace_errors(events)
+    assert "/tmp/spelix/x.mp4" not in cleaned[0]["error"]
+    assert "<path>" in cleaned[0]["error"]
+    assert cleaned[0]["iteration"] == 1
+    assert cleaned[1] == events[1]
+    assert cleaned[2] == events[2]
+    # Input events must not be mutated.
+    assert "/tmp/spelix/x.mp4" in events[0]["error"]
 
 
 def test_serialize_trace_for_storage_sanitizes_error_before_write():

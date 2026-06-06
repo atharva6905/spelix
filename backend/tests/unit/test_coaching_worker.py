@@ -549,6 +549,45 @@ async def test_cove_verified_stored():
 
 
 @pytest.mark.asyncio
+async def test_cove_trace_errors_sanitized_in_agent_trace_json():
+    """Imperative-path agent_trace_json must not carry raw filesystem paths
+    from CoVe trace error strings (issue #188, ADR-DISTILL-05)."""
+    from unittest.mock import patch as _patch
+
+    from app.services.cove import CoveResult
+
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, output = _setup_worker_test(
+        retrieval_results=contexts,
+        cove_verified=False,
+    )
+    raw_path = "/tmp/spelix/video_xyz.mp4"
+    mock_cove_svc = AsyncMock()
+    mock_cove_svc.verify.return_value = CoveResult(
+        output=output,
+        cove_verified=False,
+        iterations_run=1,
+        trace=[
+            {"iteration": 1, "converged": False, "error": f"failed to open {raw_path}"}
+        ],
+    )
+    with (
+        patches,
+        _patch("app.services.cove.CoveVerificationService", return_value=mock_cove_svc),
+    ):
+        from app.workers.analysis_worker import process_analysis
+
+        await process_analysis(ctx, aid)
+
+    assert len(created) == 1
+    trace = created[0].agent_trace_json
+    assert trace is not None
+    stored_error = trace["cove_iterations"][0]["error"]
+    assert raw_path not in stored_error
+    assert "<path>" in stored_error
+
+
+@pytest.mark.asyncio
 async def test_cove_failure_pipeline_continues():
     """If CoVe raises, pipeline still completes with cove_verified=False."""
     contexts = _make_contexts(5)

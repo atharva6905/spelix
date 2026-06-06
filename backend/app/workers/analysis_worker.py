@@ -488,8 +488,13 @@ async def _run_coaching_imperative(
                 )
                 coaching_output = cove_result.output
                 cove_verified = cove_result.cove_verified
+                from app.agents.tracing import sanitize_trace_errors
+
+                # Sanitize error strings before the JSONB write — the
+                # imperative path does not go through
+                # serialize_trace_for_storage (issue #188, ADR-DISTILL-05).
                 agent_trace = {
-                    "cove_iterations": cove_result.trace,
+                    "cove_iterations": sanitize_trace_errors(cove_result.trace),
                     "converged": cove_result.cove_verified,
                 }
                 logger.info(
