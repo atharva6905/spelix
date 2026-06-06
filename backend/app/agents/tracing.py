@@ -18,9 +18,32 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Compiled once at module load — used by sanitize_error_message.
+# Unix absolute paths: leading / followed by at least two path segments
+# (word-chars, dots, hyphens), e.g. /tmp/spelix/abc.mp4  /app/foo/bar.py
+_UNIX_PATH_RE = re.compile(r"/(?:[\w.\-]+/)+[\w.\-]*")
+# Windows absolute paths: drive letter + colon + backslash or forward-slash
+_WIN_PATH_RE = re.compile(r"[A-Za-z]:[/\\][^\s'\"]+")
+
+
+def sanitize_error_message(message: str) -> str:
+    """Replace filesystem paths in *message* with the literal ``<path>``.
+
+    Applied to every ``NodeEvent.error`` value before the trace is
+    persisted to ``coaching_results.agent_trace_json`` (ADR-DISTILL-05,
+    issue #188).  Non-path text — plain English errors, bare domain names,
+    arithmetic fractions like ``1/2`` — passes through unchanged because
+    the Unix pattern requires a leading ``/`` **plus** at least two
+    ``word/dot/hyphen`` segments.
+    """
+    message = _UNIX_PATH_RE.sub("<path>", message)
+    message = _WIN_PATH_RE.sub("<path>", message)
+    return message
 
 
 def langsmith_enabled() -> bool:
@@ -79,6 +102,12 @@ def serialize_trace_for_storage(
         return len(json.dumps(obj).encode("utf-8"))
 
     result = [dict(ev) for ev in trace]
+    # Sanitize error strings before any size logic — this is the single
+    # choke point before the agent_trace_json JSONB write (issue #188,
+    # ADR-DISTILL-05: never persist raw str(exc) to admin-visible columns).
+    for ev in result:
+        if isinstance(ev.get("error"), str):
+            ev["error"] = sanitize_error_message(ev["error"])
     if _size(result) <= max_bytes:
         return result
 
