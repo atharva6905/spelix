@@ -318,4 +318,44 @@ describe("AgentReasoningSidebar", () => {
       /2\.1s/,
     );
   });
+
+  it("Tab from the last focusable element wraps focus to the first (focus trap)", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    const drawer = screen.getByTestId("agent-reasoning-sidebar");
+    const focusableEnabled = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => !(el as HTMLButtonElement).disabled);
+    // Place focus on the last focusable element.
+    focusableEnabled[focusableEnabled.length - 1].focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: false });
+    expect(focusableEnabled[0]).toHaveFocus();
+  });
+
+  it("Shift+Tab from the first focusable element wraps focus to the last (focus trap)", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    const drawer = screen.getByTestId("agent-reasoning-sidebar");
+    const focusableEnabled = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => !(el as HTMLButtonElement).disabled);
+    // Place focus on the first focusable element.
+    focusableEnabled[0].focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(focusableEnabled[focusableEnabled.length - 1]).toHaveFocus();
+  });
 });
