@@ -10,7 +10,8 @@ env — no per-call wiring is needed. This module adds:
   ``metadata`` so runs are discoverable in the LangSmith UI.
 - ``serialize_trace_for_storage()``: truncates overly-large trace
   payloads before writing to ``coaching_results.agent_trace_json`` so
-  Postgres JSONB queries stay performant. Target: ≤4 KB per entry.
+  Postgres JSONB queries stay performant. Target: ≤8 KB per payload
+  (the ``max_bytes=8192`` default).
 """
 
 from __future__ import annotations
@@ -18,9 +19,60 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Compiled once at module load — used by sanitize_error_message.
+# Unix absolute paths: leading / followed by at least two path segments
+# (word-chars, dots, hyphens), e.g. /tmp/spelix/abc.mp4  /app/foo/bar.py
+# The negative lookbehind keeps URL path components intact — a leading /
+# preceded by a word char, ':' or another '/' (e.g. the /v1/messages in
+# https://api.anthropic.com/v1/messages) is part of a URL, not an fs path.
+_UNIX_PATH_RE = re.compile(r"(?<![\w:/])/(?:[\w.\-]+/)+[\w.\-]*")
+# Windows absolute paths: drive letter + colon + backslash or forward-slash.
+# The lookbehind stops URL schemes from matching as drive letters — the
+# trailing "s" of "https://..." would otherwise match [A-Za-z]:[/].
+_WIN_PATH_RE = re.compile(r"(?<!\w)[A-Za-z]:[/\\][^\s'\"]+")
+# Windows UNC paths: \\server\share\...
+_UNC_PATH_RE = re.compile(r"\\\\[\w.\-]+\\[^\s'\"]+")
+
+
+def sanitize_error_message(message: str) -> str:
+    """Replace filesystem paths in *message* with the literal ``<path>``.
+
+    Applied to every ``NodeEvent.error`` value before the trace is
+    persisted to ``coaching_results.agent_trace_json`` (ADR-DISTILL-05,
+    issue #188).  Non-path text — plain English errors, URLs, bare domain
+    names, arithmetic fractions like ``1/2`` — passes through unchanged
+    because the Unix pattern requires a leading ``/`` **plus** at least
+    two ``word/dot/hyphen`` segments, not preceded by a word char/``:``/``/``.
+
+    Known limitation: path segments containing spaces are only sanitized up
+    to the first space (prod stores artifacts at ``/tmp/spelix/{uuid}.mp4``
+    — no spaces — so this cannot leak on the droplet).
+    """
+    message = _UNIX_PATH_RE.sub("<path>", message)
+    message = _WIN_PATH_RE.sub("<path>", message)
+    message = _UNC_PATH_RE.sub("<path>", message)
+    return message
+
+
+def sanitize_trace_errors(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy of *events* with any string ``error`` values sanitized.
+
+    Shared by both ``agent_trace_json`` write paths: the LangGraph path
+    (via ``serialize_trace_for_storage``) and the imperative Phase 2 path
+    (``cove_iterations`` in the worker). Input dicts are not mutated.
+    """
+    cleaned: list[dict[str, Any]] = []
+    for ev in events:
+        if isinstance(ev, dict) and isinstance(ev.get("error"), str):
+            ev = {**ev, "error": sanitize_error_message(ev["error"])}
+        cleaned.append(ev)
+    return cleaned
 
 
 def langsmith_enabled() -> bool:
@@ -41,11 +93,14 @@ def run_config_for_analysis(
     """Build the ``config`` dict passed to ``graph.ainvoke``.
 
     Populates ``run_name`` (shown in the LangSmith run list), ``tags``
-    (filterable chips), and ``metadata`` (structured fields). When
-    LangSmith is not enabled, the dict is still valid as LangGraph
-    runtime config — the tracing fields are simply ignored.
+    (filterable chips), ``metadata`` (structured fields), and ``run_id``
+    (a fresh UUID4 used as the LangSmith root-run id). When LangSmith is
+    not enabled, the dict is still valid as LangGraph runtime config —
+    the tracing fields are simply ignored.
     """
+    run_id = uuid.uuid4()
     return {
+        "run_id": run_id,
         "run_name": f"coaching_analysis_{analysis_id}",
         "tags": [
             f"analysis_id:{analysis_id}",
@@ -78,7 +133,10 @@ def serialize_trace_for_storage(
     def _size(obj: Any) -> int:
         return len(json.dumps(obj).encode("utf-8"))
 
-    result = [dict(ev) for ev in trace]
+    # Sanitize error strings before any size logic — choke point for the
+    # graph path's agent_trace_json JSONB write (issue #188, ADR-DISTILL-05:
+    # never persist raw str(exc) to admin-visible columns).
+    result = sanitize_trace_errors([dict(ev) for ev in trace])
     if _size(result) <= max_bytes:
         return result
 

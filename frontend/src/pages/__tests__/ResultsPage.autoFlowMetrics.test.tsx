@@ -29,6 +29,24 @@ vi.mock("@xyflow/react", () => ({
 }));
 vi.mock("@xyflow/react/dist/style.css", () => ({}));
 
+// ResultsPage imports supabase directly for the admin check (issue #192) —
+// mock the client so the module doesn't construct against missing env in CI.
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: null },
+      }),
+    },
+    channel: vi.fn().mockReturnValue({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    }),
+    removeChannel: vi.fn(),
+  },
+}));
+
 
 function makeAnalysis(overrides: Partial<AnalysisDetail> = {}): AnalysisDetail {
   return {

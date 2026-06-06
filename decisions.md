@@ -108,6 +108,7 @@
 | ADR-EXPERT-01 | Expert Paper Upload Security Model | Data & Privacy | Accepted |
 | ADR-SECU-05 | JWT role claim lives in `app_metadata`, not `user_metadata` | Data & Privacy | Accepted |
 | ADR-CONSENT-GATE-01 | Mandatory consent gate before upload (Session 64) | Data & Privacy | Accepted |
+| ADR-TRACE-LINK-01 | LangSmith run link-out frontend-gated only; run UUID owner-visible accepted (issue #192) | Data & Privacy | Accepted |
 | ADR-010 | Quality Gates in Worker, Not FastAPI | Infra & Ops | Accepted |
 | ADR-027 | AsyncSession `commit-on-success` in `get_db()` Dependency (Session 13) | Infra & Ops | Accepted |
 | ADR-028 | Pre-Generate UUIDs at Construction Time, Not Via SQLAlchemy `default=` (Sessi... | Infra & Ops | Accepted |
@@ -1353,6 +1354,14 @@ P2-005 is open. The `ingest_paper` task in this scope downloads the PDF and logs
 2. **Backend gate**: `create_analysis` endpoint checks `ConsentRepository.get_latest_by_type(user_id, "health_data_processing")` and returns HTTP 403 `CONSENT_REQUIRED` if absent or `granted=False`. Defense-in-depth — the frontend gate catches this first, the backend prevents API-only bypasses.
 
 **Consequences.** Every existing test that hits `POST /analyses` needs `ConsentRepository` patched (affected: `test_analysis_api.py`, `test_rate_limit.py`, `test_full_flow.py`). The `RequireConsent` component makes one `GET /api/v1/consent` call per mount — acceptable at pre-beta scale. A React context for consent state would reduce API calls but is over-engineering at <50 users.
+
+## ADR-TRACE-LINK-01: LangSmith run link-out is frontend-gated only; run UUID exposure to analysis owner accepted (issue #192)
+
+**Context.** Issue #192 added an admin-only "View in LangSmith" link to the reasoning sidebar. The backend persists `langsmith_run_id` (a fresh UUID4 set as the LangGraph root-run id) in `coaching_results.agent_trace_json` when `langsmith_enabled()`, and `agent_trace_json` is returned to the analysis owner on `GET /api/v1/analyses/{id}`. The link itself is built client-side from `VITE_LANGSMITH_RUN_URL_PREFIX` + run id and rendered only when `app_metadata.role === "admin"`. `spelix-security-reviewer` flagged two conscious-acceptance items (M-1, M-2): the admin gate is client-side only, and a bare run UUID is visible to the analysis owner.
+
+**Decision.** Accept both. (1) The gate is intentionally frontend-only: the link exposes no Spelix server-side resource — the target requires independent LangSmith org authentication, so a tampered client gains nothing beyond a URL it could construct anyway. (2) The bare run UUID in the owner-visible trace payload is not sensitive: LangSmith runs are not retrievable without org membership, and RLS restricts the payload to the analysis owner. The org/project identifiers stay out of the payload by design — the URL prefix lives only in a Vercel env var (`VITE_LANGSMITH_RUN_URL_PREFIX`).
+
+**Consequences.** No server-side role check is added for a purely cosmetic link. If a future feature makes the run id actionable against a Spelix endpoint (e.g. a trace-replay API), that endpoint must enforce the admin role server-side — this ADR does not cover it. The trace payload key `langsmith_run_id` is additive to the documented shape in `backend/CLAUDE.md`.
 
 # Infra & Ops
 

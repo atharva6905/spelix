@@ -5,7 +5,7 @@
  * FR-RESL-07: renders LangGraph agent trace.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentReasoningSidebar } from "@/components/AgentReasoningSidebar";
 import type { AgentTracePayload } from "@/api/analyses";
@@ -317,5 +317,114 @@ describe("AgentReasoningSidebar", () => {
     expect(screen.getByTestId("agent-trace-node-detail")).toHaveTextContent(
       /2\.1s/,
     );
+  });
+
+  it("Tab from the last focusable element wraps focus to the first (focus trap)", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    const drawer = screen.getByTestId("agent-reasoning-sidebar");
+    const focusableEnabled = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => !(el as HTMLButtonElement).disabled);
+    // Place focus on the last focusable element.
+    focusableEnabled[focusableEnabled.length - 1].focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: false });
+    expect(focusableEnabled[0]).toHaveFocus();
+  });
+
+  it("Shift+Tab from the first focusable element wraps focus to the last (focus trap)", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    const drawer = screen.getByTestId("agent-reasoning-sidebar");
+    const focusableEnabled = Array.from(
+      drawer.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((el) => !(el as HTMLButtonElement).disabled);
+    // Place focus on the first focusable element.
+    focusableEnabled[0].focus();
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(focusableEnabled[focusableEnabled.length - 1]).toHaveFocus();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// LangSmith run link — P3-007 / FR-AICP-20
+// ---------------------------------------------------------------------------
+
+describe("AgentReasoningSidebar — LangSmith run link", () => {
+  const PREFIX = "https://smith.langchain.com/o/myorg/projects/p/myproj";
+  const RUN_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("renders the link when isAdmin=true, prefix set, run_id present", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: RUN_ID })}
+        onClose={vi.fn()}
+        isAdmin={true}
+      />,
+    );
+    const link = screen.getByTestId("langsmith-run-link");
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", `${PREFIX}/r/${RUN_ID}`);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("does NOT render the link when isAdmin=false", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: RUN_ID })}
+        onClose={vi.fn()}
+        isAdmin={false}
+      />,
+    );
+    expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the link when langsmith_run_id is missing", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: undefined })}
+        onClose={vi.fn()}
+        isAdmin={true}
+      />,
+    );
+    expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the link when env prefix is unset", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", "");
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: RUN_ID })}
+        onClose={vi.fn()}
+        isAdmin={true}
+      />,
+    );
+    expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
   });
 });

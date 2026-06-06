@@ -43,15 +43,20 @@ interface AgentReasoningSidebarProps {
   isOpen: boolean;
   trace: AgentTracePayload | null;
   onClose: () => void;
+  /** When true and VITE_LANGSMITH_RUN_URL_PREFIX is set, renders an admin-only
+   *  "View in LangSmith" deep-link next to the header (FR-AICP-20 / P3-007). */
+  isAdmin?: boolean;
 }
 
 export function AgentReasoningSidebar({
   isOpen,
   trace,
   onClose,
+  isAdmin = false,
 }: AgentReasoningSidebarProps) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
 
   // Reset selection whenever the trace changes OR drawer closes.
   useEffect(() => {
@@ -61,7 +66,33 @@ export function AgentReasoningSidebar({
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "Tab") {
+        const drawer = drawerRef.current;
+        if (!drawer) return;
+        const focusable = Array.from(
+          drawer.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !(el as HTMLButtonElement).disabled);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (!drawer.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -109,6 +140,7 @@ export function AgentReasoningSidebar({
       />
       {/* Drawer */}
       <div
+        ref={drawerRef}
         data-testid="agent-reasoning-sidebar"
         role="dialog"
         aria-modal="true"
@@ -118,12 +150,27 @@ export function AgentReasoningSidebar({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
           <div>
-            <h2
-              id="agent-reasoning-sidebar-title"
-              className="text-lg font-semibold text-gray-900"
-            >
-              How AI Reasoned
-            </h2>
+            <div className="flex items-center gap-3">
+              <h2
+                id="agent-reasoning-sidebar-title"
+                className="text-lg font-semibold text-gray-900"
+              >
+                How AI Reasoned
+              </h2>
+              {isAdmin &&
+                (import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string | undefined) &&
+                trace?.langsmith_run_id && (
+                  <a
+                    href={`${import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string}/r/${trace.langsmith_run_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="langsmith-run-link"
+                    className="text-xs text-gray-400 hover:text-indigo-600 hover:underline"
+                  >
+                    View in LangSmith
+                  </a>
+                )}
+            </div>
             <p className="mt-0.5 text-xs text-gray-500">
               A step-by-step look at how your coaching was produced.
             </p>

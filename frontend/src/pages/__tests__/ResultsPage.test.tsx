@@ -46,6 +46,23 @@ vi.mock("@xyflow/react", () => ({
 }));
 vi.mock("@xyflow/react/dist/style.css", () => ({}));
 
+// Mock Supabase client — ResultsPage uses it directly for isAdmin detection.
+vi.mock("@/lib/supabase", () => ({
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({
+        data: { session: null },
+      }),
+    },
+    channel: vi.fn().mockReturnValue({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    }),
+    removeChannel: vi.fn(),
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Fixture factories
 // ---------------------------------------------------------------------------

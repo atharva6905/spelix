@@ -425,7 +425,7 @@ async def run_coaching_graph(
     ``coaching_results.agent_trace_json``.
     """
     from app.agents.state import make_initial_state
-    from app.agents.tracing import run_config_for_analysis, serialize_trace_for_storage
+    from app.agents.tracing import langsmith_enabled, run_config_for_analysis, serialize_trace_for_storage
 
     initial = make_initial_state(
         analysis_id=analysis_id,
@@ -491,6 +491,13 @@ async def run_coaching_graph(
         "retrieval_source": final_state.get("retrieval_source"),
         "degraded_mode": bool(final_state.get("degraded_mode")),
     }
+
+    # FR-AICP-20 / P3-007: surface the LangSmith root-run id so the admin
+    # reasoning sidebar can link out directly to the trace.  Only written when
+    # LangSmith is enabled; omitted entirely when disabled so the frontend can
+    # treat absence as "link not available".
+    if langsmith_enabled():
+        trace_payload["langsmith_run_id"] = str(config["run_id"])
 
     return final_state, trace_payload, final_state.get("coaching_output")
 
