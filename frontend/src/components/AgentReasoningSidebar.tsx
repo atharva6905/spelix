@@ -166,7 +166,13 @@ export function AgentReasoningSidebar({
               </h2>
               {isAdmin &&
                 (import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string | undefined) &&
-                trace?.langsmith_run_id && (
+                trace?.langsmith_run_id &&
+                // M-1 security: validate the run ID is a UUID before building
+                // the href to prevent javascript:/data: scheme injection from
+                // a tampered JSONB payload. Only lowercase hex UUIDs pass.
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                  trace.langsmith_run_id,
+                ) && (
                   <a
                     href={`${import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string}/r/${trace.langsmith_run_id}`}
                     target="_blank"

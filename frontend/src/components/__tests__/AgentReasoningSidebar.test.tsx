@@ -607,4 +607,56 @@ describe("AgentReasoningSidebar — LangSmith run link", () => {
     );
     expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
   });
+
+  // M-1 (security): validate langsmith_run_id against UUID pattern before
+  // building the href to prevent javascript: scheme injection.
+  it("does NOT render the link when langsmith_run_id is not a valid UUID (M-1)", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: "javascript:alert(1)" })}
+        onClose={vi.fn()}
+        isAdmin={true}
+      />,
+    );
+    expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
+  });
+
+  it("still renders the link when langsmith_run_id is a valid UUID after M-1 fix", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ langsmith_run_id: RUN_ID })}
+        onClose={vi.fn()}
+        isAdmin={true}
+      />,
+    );
+    const link = screen.getByTestId("langsmith-run-link");
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", `${PREFIX}/r/${RUN_ID}`);
+  });
+
+  it("does NOT render the link for other non-UUID strings (M-1)", () => {
+    vi.stubEnv("VITE_LANGSMITH_RUN_URL_PREFIX", PREFIX);
+    for (const bad of [
+      "javascript:void(0)",
+      "data:text/html,<script>alert(1)</script>",
+      "../../../etc/passwd",
+      "not-a-uuid",
+      "00000000-0000-0000-0000-00000000000Z", // invalid hex char
+    ]) {
+      const { unmount } = render(
+        <AgentReasoningSidebar
+          isOpen={true}
+          trace={makeTrace({ langsmith_run_id: bad })}
+          onClose={vi.fn()}
+          isAdmin={true}
+        />,
+      );
+      expect(screen.queryByTestId("langsmith-run-link")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
 });
