@@ -31,6 +31,15 @@ By submitting a contribution, you agree that your contribution is licensed under
 the same terms as the project (Business Source License 1.1, converting to Apache
 License 2.0 on the Change Date stated in `LICENSE`).
 
+### Harness hook changes
+
+If your change touches anything under `.claude/hooks/`, run the hook smoke-test
+harness and make sure all cases pass before committing:
+
+```bash
+node .claude/hooks/smoke-test.mjs
+```
+
 ## Licensing
 
 All contributions fall under the [LICENSE](./LICENSE). If that does not work for
