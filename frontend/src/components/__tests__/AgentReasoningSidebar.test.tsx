@@ -361,6 +361,186 @@ describe("AgentReasoningSidebar", () => {
 });
 
 // ---------------------------------------------------------------------------
+// FR-AICP-19 / FR-RESL-07: adaptive-mode sidebar polish
+// ---------------------------------------------------------------------------
+
+describe("AgentReasoningSidebar — adaptive mode", () => {
+  function makeAdaptiveTrace(
+    overrides: Partial<AgentTracePayload> = {},
+  ): AgentTracePayload {
+    return {
+      mode: "adaptive",
+      nodes_executed: [
+        {
+          node: "reasoner",
+          started_at: "2026-04-17T10:00:00Z",
+          duration_ms: 300,
+          output_keys: [],
+          error: null,
+          tool_calls_invoked: ["get_rep_metrics", "retrieve_papers"],
+        },
+        {
+          node: "reasoner",
+          started_at: "2026-04-17T10:00:01Z",
+          duration_ms: 200,
+          output_keys: ["coaching_output"],
+          error: null,
+          tool_calls_invoked: ["generate_correction_plan"],
+        },
+        {
+          node: "validate_output",
+          started_at: "2026-04-17T10:00:02Z",
+          duration_ms: 50,
+          output_keys: [],
+          error: null,
+          tool_calls_invoked: null,
+        },
+      ],
+      eval_scores: { faithfulness: 0.9, cove_verified: true },
+      cove_iterations: [],
+      converged: true,
+      retrieval_source: "coach_brain_primary",
+      degraded_mode: false,
+      ...overrides,
+    };
+  }
+
+  it("shows 'Reasoning passes' row in summary dl for adaptive traces", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeAdaptiveTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("reasoning-passes-count")).toBeInTheDocument();
+    // 2 reasoner nodes → count = 2
+    expect(screen.getByTestId("reasoning-passes-count")).toHaveTextContent("2");
+  });
+
+  it("does NOT show 'Reasoning passes' row for deterministic traces", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ mode: "deterministic" })}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("reasoning-passes-count"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows iteration badge when a reasoner node is selected in adaptive mode", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeAdaptiveTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    // Click the first reasoner node (node-0)
+    fireEvent.click(screen.getByTestId("flow-node-node-0"));
+    expect(screen.getByTestId("reasoner-iteration-badge")).toBeInTheDocument();
+    expect(screen.getByTestId("reasoner-iteration-badge")).toHaveTextContent(
+      /pass 1 of 2/i,
+    );
+  });
+
+  it("shows the correct pass number for the second reasoner node", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeAdaptiveTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    // Click the second reasoner node (node-1)
+    fireEvent.click(screen.getByTestId("flow-node-node-1"));
+    expect(screen.getByTestId("reasoner-iteration-badge")).toHaveTextContent(
+      /pass 2 of 2/i,
+    );
+  });
+
+  it("does NOT show iteration badge for non-reasoner nodes in adaptive mode", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeAdaptiveTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    // Click validate_output (node-2, not a reasoner)
+    fireEvent.click(screen.getByTestId("flow-node-node-2"));
+    expect(
+      screen.queryByTestId("reasoner-iteration-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows plain-English tool chip labels for tool_calls_invoked (NFR-USAB-05)", () => {
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeAdaptiveTrace()}
+        onClose={vi.fn()}
+      />,
+    );
+    // Click first reasoner node which called get_rep_metrics + retrieve_papers
+    fireEvent.click(screen.getByTestId("flow-node-node-0"));
+    const toolsSection = screen.getByTestId("node-tool-calls");
+    expect(toolsSection).toBeInTheDocument();
+    // Plain-English labels, not raw snake_case
+    expect(toolsSection).toHaveTextContent("Looked up your rep data");
+    expect(toolsSection).toHaveTextContent("Searched research papers");
+    expect(toolsSection).not.toHaveTextContent(/get_rep_metrics/);
+    expect(toolsSection).not.toHaveTextContent(/retrieve_papers/);
+  });
+
+  it("does NOT show tool section when tool_calls_invoked is null", () => {
+    const trace = makeAdaptiveTrace();
+    // Last reasoner turn with no tools
+    const traceWithNull: AgentTracePayload = {
+      ...trace,
+      nodes_executed: [
+        {
+          node: "reasoner",
+          started_at: "2026-04-17T10:00:00Z",
+          duration_ms: 100,
+          output_keys: [],
+          error: null,
+          tool_calls_invoked: null,
+        },
+      ],
+    };
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={traceWithNull}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("flow-node-node-0"));
+    expect(screen.queryByTestId("node-tool-calls")).not.toBeInTheDocument();
+  });
+
+  it("does NOT show iteration badge for deterministic mode traces (regression)", () => {
+    // Deterministic traces must never show the adaptive-only badge
+    render(
+      <AgentReasoningSidebar
+        isOpen={true}
+        trace={makeTrace({ mode: "deterministic" })}
+        onClose={vi.fn()}
+      />,
+    );
+    // Click any node — no badge should appear
+    fireEvent.click(screen.getByTestId("flow-node-node-0"));
+    expect(
+      screen.queryByTestId("reasoner-iteration-badge"),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // LangSmith run link — P3-007 / FR-AICP-20
 // ---------------------------------------------------------------------------
 

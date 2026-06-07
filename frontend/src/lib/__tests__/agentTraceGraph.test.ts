@@ -128,3 +128,93 @@ describe("buildTraceGraph", () => {
     expect(nodes[0].data.outputKeys).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR-AICP-19 / FR-RESL-07: iterationIndex and toolCallsInvoked fields
+// ---------------------------------------------------------------------------
+
+describe("buildTraceGraph — adaptive-mode fields", () => {
+  function makeAdaptiveTrace(nodeNames: string[]): AgentTracePayload {
+    return {
+      mode: "adaptive",
+      nodes_executed: nodeNames.map((name, i) => ({
+        node: name,
+        started_at: `2026-04-17T10:00:${String(i).padStart(2, "0")}Z`,
+        duration_ms: 10 + i,
+        output_keys: [],
+        error: null,
+        tool_calls_invoked: name === "reasoner" ? ["get_rep_metrics"] : null,
+      })),
+      eval_scores: {},
+      cove_iterations: [],
+      converged: true,
+      retrieval_source: null,
+      degraded_mode: false,
+    };
+  }
+
+  it("assigns iterationIndex=1 to the first reasoner node", () => {
+    const trace = makeAdaptiveTrace(["reasoner", "validate_output"]);
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.iterationIndex).toBe(1);
+  });
+
+  it("assigns iterationIndex=2 to the second reasoner node", () => {
+    const trace = makeAdaptiveTrace(["reasoner", "reasoner", "validate_output"]);
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.iterationIndex).toBe(1);
+    expect(nodes[1].data.iterationIndex).toBe(2);
+  });
+
+  it("does not assign iterationIndex to non-reasoner nodes", () => {
+    const trace = makeAdaptiveTrace(["reasoner", "validate_output"]);
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[1].data.iterationIndex).toBeUndefined();
+  });
+
+  it("propagates toolCallsInvoked from the event to node data", () => {
+    const trace = makeAdaptiveTrace(["reasoner"]);
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.toolCallsInvoked).toEqual(["get_rep_metrics"]);
+  });
+
+  it("sets toolCallsInvoked=null for non-reasoner nodes and reasoner turns with no tools", () => {
+    const trace: AgentTracePayload = {
+      mode: "adaptive",
+      nodes_executed: [
+        {
+          node: "reasoner",
+          started_at: "2026-04-17T10:00:00Z",
+          duration_ms: 10,
+          output_keys: [],
+          error: null,
+          tool_calls_invoked: null,
+        },
+        {
+          node: "validate_output",
+          started_at: "2026-04-17T10:00:01Z",
+          duration_ms: 5,
+          output_keys: [],
+          error: null,
+          tool_calls_invoked: null,
+        },
+      ],
+      eval_scores: {},
+      cove_iterations: [],
+      converged: true,
+      retrieval_source: null,
+      degraded_mode: false,
+    };
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.toolCallsInvoked).toBeNull();
+    expect(nodes[1].data.toolCallsInvoked).toBeNull();
+  });
+
+  it("deterministic-mode nodes have no iterationIndex even if named 'reasoner'", () => {
+    // deterministic traces should never have iterationIndex set
+    const trace = makeTrace(["get_rep_metrics", "retrieve_papers"]);
+    const { nodes } = buildTraceGraph(trace);
+    expect(nodes[0].data.iterationIndex).toBeUndefined();
+    expect(nodes[1].data.iterationIndex).toBeUndefined();
+  });
+});
