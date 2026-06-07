@@ -141,7 +141,10 @@ def serialize_trace_for_storage(
         return result
 
     # Truncate long string fields until it fits.
-    ESSENTIAL = {"node", "duration_ms", "error", "started_at", "output_keys"}
+    # tool_calls_invoked is an optional list of internal tool-name strings —
+    # no PII, no paths. Listed as essential so adaptive-mode reasoner data
+    # survives the hard-cap path (FR-AICP-19 / FR-RESL-07).
+    ESSENTIAL = {"node", "duration_ms", "error", "started_at", "output_keys", "tool_calls_invoked"}
     for ev in result:
         for key in list(ev.keys()):
             if key in ESSENTIAL:
