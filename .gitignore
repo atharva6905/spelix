@@ -313,3 +313,4 @@ backend/scripts/oneoff/verify_depth_frame_corruption.py
 # gitignored); .mcp.json wires local MCP servers and carries machine-specific paths.
 .graphifyignore
 .mcp.json
+.vercel
