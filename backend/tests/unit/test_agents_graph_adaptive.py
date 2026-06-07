@@ -295,3 +295,81 @@ async def test_adaptive_graph_unknown_tool_name_appends_error_message():
         getattr(m, "content", "") for m in messages if hasattr(m, "tool_call_id")
     ]
     assert any("unknown tool" in c for c in tool_message_contents)
+
+
+@pytest.mark.asyncio
+async def test_adaptive_reasoner_hallucinated_tool_excluded_from_trace():
+    """H-1 (security): when the LLM emits a hallucinated tool name alongside a
+    real one, only the real tool name appears in tool_calls_invoked in the
+    NodeEvent trace.  The hallucinated name must never reach agent_trace_json
+    (and therefore never be rendered to users as a chip label).
+
+    FR-AICP-19 / FR-RESL-07 / ADR-REASONING-SIDEBAR-01.
+    """
+    import uuid as _uuid
+    from app.agents.graph import build_adaptive_graph
+    from app.agents.state import make_initial_state
+
+    fake_llm = MagicMock()
+    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
+
+    call_count = {"n": 0}
+    real_tool_id = "tc-real"
+    hallucinated_tool_id = "tc-hallucinated"
+
+    async def _fake_ainvoke(messages):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # LLM emits one real tool and one hallucinated tool in the same turn.
+            return SimpleNamespace(
+                content="",
+                tool_calls=[
+                    {"name": "get_rep_metrics", "id": real_tool_id},
+                    {"name": "retrieve_medical_diagnosis", "id": hallucinated_tool_id},
+                ],
+            )
+        return SimpleNamespace(content="done", tool_calls=[])
+
+    fake_llm.ainvoke = _fake_ainvoke
+    rep_row = SimpleNamespace(rep_index=0, metrics_json={"depth_angle": 90.0})
+
+    deps = {
+        "rep_metric_repo": SimpleNamespace(get_by_analysis=AsyncMock(return_value=[rep_row])),
+        "retrieval_svc": SimpleNamespace(hybrid_search=AsyncMock(return_value=[])),
+        "thresholds": SimpleNamespace(all_for_exercise=lambda e: {}),
+        "analysis_repo": SimpleNamespace(list_recent_by_user=AsyncMock(return_value=[])),
+        "coaching_svc": SimpleNamespace(generate_coaching_streaming=AsyncMock()),
+        "cove_svc": SimpleNamespace(verify=AsyncMock()),
+        "fg_svc": SimpleNamespace(evaluate=AsyncMock()),
+        "pubsub_redis": SimpleNamespace(publish=AsyncMock()),
+        "reasoner_llm": fake_llm,
+    }
+
+    graph = build_adaptive_graph(**deps)
+    initial = make_initial_state(
+        analysis_id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        mode="adaptive",
+    )
+
+    final_state = await graph.ainvoke(initial, {"recursion_limit": 10})
+
+    trace = final_state.get("trace") or []
+    reasoner_events = [ev for ev in trace if ev.get("node") == "reasoner"]
+    assert len(reasoner_events) >= 1, "Expected at least one reasoner NodeEvent"
+
+    first_reasoner = reasoner_events[0]
+    invoked = first_reasoner.get("tool_calls_invoked") or []
+
+    # Real tool must be present.
+    assert "get_rep_metrics" in invoked, (
+        "Real registered tool must appear in tool_calls_invoked"
+    )
+    # Hallucinated tool must be absent — it was never executed.
+    assert "retrieve_medical_diagnosis" not in invoked, (
+        "Hallucinated tool name must NOT appear in tool_calls_invoked; "
+        "only statically-registered tool names may be recorded"
+    )

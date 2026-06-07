@@ -335,13 +335,18 @@ def build_adaptive_graph(
 
         # If the LLM chose tools, invoke them in order, append ToolMessages.
         tool_calls = getattr(response, "tool_calls", None) or []
+        # Pre-build the registered-tool name set for O(1) membership checks.
+        # Only statically-registered names may enter the trace; hallucinated
+        # names from the LLM are rejected here so they never reach
+        # agent_trace_json (and can never be rendered as chip labels to users).
+        # H-1 security finding — FR-AICP-19 / FR-RESL-07.
+        registered_tool_names: frozenset[str] = frozenset(t.name for t in tools_for_llm)
         # Collect tool names for the NodeEvent (FR-AICP-19 / FR-RESL-07).
         # _tool_calls_invoked is a transient key popped by _wrap_trace before
         # being merged into AgentState — it never pollutes the state graph.
         invoked_tool_names: list[str] = []
         for tc in tool_calls:
             tool_name = tc["name"] if isinstance(tc, dict) else tc.name
-            invoked_tool_names.append(tool_name)
             tool_fn = next((t for t in tools_for_llm if t.name == tool_name), None)
             if tool_fn is None:
                 messages.append(
@@ -351,6 +356,11 @@ def build_adaptive_graph(
                     )
                 )
                 continue
+            # Only record names of tools the executor actually ran —
+            # i.e. after the tool_fn is None guard — to prevent LLM-hallucinated
+            # names from reaching agent_trace_json (H-1 security finding).
+            if tool_name in registered_tool_names:
+                invoked_tool_names.append(tool_name)
             try:
                 # ainvoke dispatches to the bound coroutine with JSON args.
                 # Our _NoArgs schema has no fields, so {} is the correct payload.
