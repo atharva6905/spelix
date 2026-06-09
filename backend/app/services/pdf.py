@@ -443,8 +443,9 @@ class PDFService:
             - ``date`` (str) — ISO date string
             - ``exercise_type`` (str)
             - ``exercise_variant`` (str)
-            - ``confidence_score`` (float, 0–1)
-            - ``confidence_label`` (str)
+            - ``confidence_label`` (str) — categorical confidence label
+              (High/Moderate/Low/Very Low); the raw decimal/percentage is
+              never rendered (FR-SCOR-10/FR-RESL-08)
             - ``rep_count`` (int)
             - ``rep_metrics`` (list[dict])
             - ``coaching`` (dict — CoachingOutput as dict)
@@ -457,7 +458,6 @@ class PDFService:
             Fully rendered HTML string ready for WeasyPrint.
         """
         coaching: dict = context.get("coaching") or {}
-        confidence_score: float = float(context.get("confidence_score") or 0.0)
         confidence_label: str = context.get("confidence_label") or "Low"
 
         quality_gate_result = context.get("quality_gate_result")
@@ -476,7 +476,6 @@ class PDFService:
             "user_info": context.get("user_info", ""),
             # Summary card
             "rep_count": str(context.get("rep_count", 0)),
-            "confidence_pct": f"{confidence_score * 100:.0f}",
             "confidence_label": confidence_label,
             "confidence_badge_class": _confidence_badge_class(confidence_label),
             "quality_gate_class": "qg-passed" if qg_passed else "qg-failed",
