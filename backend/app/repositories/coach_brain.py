@@ -99,13 +99,19 @@ class CoachBrainRepository:
         FR-BRAIN-16: SRS specifies status='rejected' but the CHECK constraint
         only allows seed/active/deprecated. Using 'deprecated' with metadata
         to capture the reason.
+
+        Scoped to status='active' only: seed entries are hand-curated with
+        source_analysis_ids=[] and confirmation_count=1 from birth, so an
+        emptiness predicate over all non-deprecated rows would tombstone the
+        entire seed corpus on the first cascade run (ADR-BRAIN-08 regression).
+        Only analysis-derived ('active') entries are cascade targets.
         """
         result = await self._db.execute(
             update(CoachBrainEntry)
             .where(
                 func.cardinality(CoachBrainEntry.source_analysis_ids) == 0,
                 CoachBrainEntry.confirmation_count < 3,
-                CoachBrainEntry.status != "deprecated",
+                CoachBrainEntry.status == "active",
             )
             .values(
                 status="deprecated",

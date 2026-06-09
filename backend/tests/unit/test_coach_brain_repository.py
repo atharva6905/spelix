@@ -307,3 +307,9 @@ async def test_soft_delete_empty_unconfirmed_predicate_uses_cardinality():
     # Guard against the original bug: the array column must never be compared
     # directly against a literal value (the dict/JSON-equality form).
     assert "source_analysis_ids = " not in sql
+    # Seed protection (ADR-BRAIN-08): seeds ship with source_analysis_ids=[]
+    # and confirmation_count=1, so the cascade must target ONLY
+    # analysis-derived entries. A broader guard like status != 'deprecated'
+    # would tombstone the whole seed corpus on the first cascade run.
+    assert "coach_brain_entries.status = 'active'" in sql
+    assert "status != 'deprecated'" not in sql
