@@ -15,4 +15,5 @@ paths:
 - Coaching model: Claude Sonnet 4.6 with prompt caching; keyframes/auto-detect fallback: GPT-4o.
 - CoVe claim extraction is principle-level with inversion + extrapolation guards (ADR-COVE-02/03).
 - Never persist raw `str(exc)` to admin-visible DB columns (ADR-DISTILL-05).
-- Always use the `spelix-coaching-engineer` agent for coaching service / SSE / prompt work.
+- Always use the `spelix-ai-engineer` agent for coaching service / SSE / prompt work.
+  Prompt changes are Tier 3 (governance.md).

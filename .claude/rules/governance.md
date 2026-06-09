@@ -15,8 +15,9 @@ bumps (diff confined to manifest version pins + lockfile, one dependency per PR)
 test-only additions under `tests/**`, CI workflow comment/typo-only fixes.
 Self-merge conditions (ALL required):
 1. CI fully green (including Deploy to Production where applicable)
-2. Fresh-context reviewer subagent verdict PASS (reviewer receives ONLY the diff + this
-   file; never the implementing agent's session — self-review is a hard error)
+2. spelix-governance-reviewer verdict PASS (reviewer receives ONLY the diff + this
+   file + its own agent memory; never the implementing agent's session — self-review
+   is a hard error)
 3. Diff re-validated as Tier 0 at merge time (not just at PR creation)
 4. Merge via `mcp__github__merge_pull_request` with `merge_method: "merge"`
 After any T0 merge that triggers a deploy: verify droplet SHA + container health.

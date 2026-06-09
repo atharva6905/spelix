@@ -10,6 +10,8 @@ disallowed-tools: AskUserQuestion
 Maintenance autonomy. Governance (`.claude/rules/governance.md`) is BINDING.
 Default mode is REPORT-ONLY: no merges unless invoked with `--merge`.
 Never touch Tier 2 paths in any sweep. Max 3 T0 merges per session even with --merge.
+T0 self-merge gate: dispatch `spelix-governance-reviewer` with ONLY the diff +
+governance.md (it brings its own agent memory; never this session's context).
 No agent teams. Pace via /loop + ScheduleWakeup (idle ticks 1200–1800s).
 
 ## Sweeps (run in order; skip any not in --sweeps)
@@ -18,6 +20,8 @@ No agent teams. Pace via /loop + ScheduleWakeup (idle ticks 1200–1800s).
 New/unlabeled issues via mcp__github__list_issues → add labels (bug/feat/docs) and a
 `size/XS|S|M|L|XL` label (from the body's inline `Size:` line when present, else judge),
 link SRS IDs when the issue text matches an FR-*, comment on likely duplicates.
+Feature issues with open design questions or no task checklist → add `needs-design`
+label and comment that `/design <issue#>` is the follow-up.
 
 ### 2. Stale-PR babysitting (ceiling: fix commits to agent branches; NEVER merge T1+)
 Open PRs via mcp__github__list_pull_requests:

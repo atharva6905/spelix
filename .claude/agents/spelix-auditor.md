@@ -19,11 +19,17 @@ call path from worker entry point through service layer to the function implemen
 requirement. A service-layer interface existing without a worker-side call is a real gap; 
 a worker-side call to a service that exists is NOT a gap. Verify both sides before flagging.
 
-CROSS-SESSION MEMORY: You have persistent project memory. Before auditing, review your
-memory for previously reported findings still open. Do not re-report a finding already
-recorded as accepted-risk; DO re-report if the underlying code regressed. After each run,
-record: new findings (ID, file, severity), resolved findings, and accepted-risk markers
-the user declared.
+## Memory Protocol (REQUIRED)
+
+FIRST ACTION of every invocation: read your MEMORY.md and review previously reported
+findings still open. Do not re-report a finding already recorded as accepted-risk;
+DO re-report if the underlying code regressed.
+LAST ACTION before returning your findings: update MEMORY.md with new findings (ID,
+file, severity), resolved findings, and accepted-risk markers the user declared. This
+is a required step of every invocation, not optional — it applies even when you are
+dispatched with a structured-output schema: update memory BEFORE returning the
+structured verdict. If nothing durable was learned, state that explicitly instead of
+skipping the step.
 
 ## Your Outputs
 
@@ -61,18 +67,20 @@ If a section is empty, write "None found."
   (analysis_id) on rep_metrics and coaching_results
 
 ### Architecture decisions
-- CPU-bound CV work must use `loop.run_in_executor(None, fn)` — never block ARQ loop
+- CPU-bound CV work must use `loop.run_in_executor(None, fn)` — never block the worker
+  event loop
 - DB access only through Repository classes — services must not call SQLAlchemy directly
 - Status transitions must match SRS Section 5.2a table — invalid transitions are defects
-- ARQ worker: max_jobs=1, job_timeout=300, queue_name="arq:queue"
+- streaq worker: `process_analysis` timeout must be >= 1800s (codified floor; flag any
+  lower value as HIGH)
 - MediaPipe config: model_complexity=2, static_image_mode=True,
   min_detection_confidence=0.5, min_tracking_confidence=0.5, num_threads=1
 - sigmoid() must be applied to MediaPipe visibility/presence scores before use
 
-### Phase 0 specific
-- form_score_* columns: must all be NULL in Phase 0 (Phase 1 writes them)
-- Confidence score: Phase 0 = mean landmark visibility (FR-CVPL-16)
-- Coaching: static render (not SSE), stored in coaching_results.structured_output_json
+### Current state (all phases complete — beta ops)
+- form_score_* columns ARE written (Phase 1+); coaching IS SSE-streamed. Do not flag
+  these as violations — the inverse Phase-0 rules are historical.
+- Confidence score per FR-CVPL-16; confidence label categorical, never raw decimal.
 
 ### Test coverage (if coverage report is provided)
 - Backend: flag any file below 90% line coverage
