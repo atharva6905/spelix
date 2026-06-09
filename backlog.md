@@ -36,6 +36,7 @@ Closed 2026-06-09: #190 (PR #200, `1843a7d`) and #185 (PR #201, `cd973a5`) — s
 
 The sections below are in reverse-chronological build order. Group by phase:
 
+- **Harness v3** (designed-autopilot: `/design` nested superpowers chain, `/implement` tier-scaled review layer, memory reviewer agents) — see the `Harness v3 "Designed Autopilot"` section.
 - **Harness v2** (gated-autopilot: risk-tier governance, autonomous gates, `/ship-loop` + `/groom` loops) — see the `Harness v2 "Gated Autopilot"` section.
 - **Post-L2 / cv-audit** (private beta ops, CV occlusion fixes R1–R6, sagittal metric sessions 1–7) — see the `L2 Sprint — CV audit` and `cv-audit Session` sections.
 - **L2 Sprint** (landing, expert portal, streaq migration, Phase 3 pull-forward, quality-gate + timeout fixes, pre-beta audit) — see the `L2 Sprint Day N` sections.
@@ -43,6 +44,16 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
+
+## Completed — Harness v3 "Designed Autopilot" (2026-06-09)
+
+Skills upgrade extending harness v2 with the ideation/planning front half and a per-task review layer. Designed via the superpowers brainstorming→writing-plans chain (dogfooding the pattern it codifies); single T2 PR, human-merged. Spec + plan local-only under `docs/internal/`. ADR-HARNESS-01.
+
+| Scope | PR | Merge |
+|-------|----|-------|
+| `/design` (nested superpowers:brainstorming → writing-plans, files groomed issues) + `/implement` (worktree + specialist routing + tier-scaled spec→quality→security review chain) + 4 new agents (`spelix-ai-engineer` merging coaching/rag/langgraph; spec/quality/governance reviewers with `memory: project`) + memory write-discipline bookends + ship-loop/groom rewiring + governance.md T0 gate → `spelix-governance-reviewer` + retired `/plan` `/parallel` `/team` `/phase-gate` `/escalate` | #217 | `f61c827` |
+
+Post-merge validation pending: live `/design` → `/ship-loop` run, reviewer MEMORY.md population, governance-reviewer T0 self-merge.
 
 ## Completed — Post-L2 beta ops — /ship-loop run 2: srs-audit CRITICALs (2026-06-09)
 
