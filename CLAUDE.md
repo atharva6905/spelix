@@ -33,7 +33,7 @@ spelix/
     agents/     # Specialist agent definitions
     hooks/      # Hook scripts (smoke-test: node .claude/hooks/smoke-test.mjs)
     rules/      # Path-scoped + always-on rules (git/deploy, governance, cv, coaching, migrations, frontend)
-    skills/     # Project skills (/plan, /bugfix, /handoff, /phase-gate, ...)
+    skills/     # Project skills (/design, /implement, /ship-loop, /groom, /bugfix, ...)
     handoff.md  # Session-to-session state (local-only)
 ```
 
@@ -72,38 +72,26 @@ Session start: live environment state is injected automatically by the SessionSt
 
 Named specialist agents carry permanent domain knowledge. Main agent auto-delegates when a task matches an agent's description, or invoke explicitly: `"Use the spelix-cv-engineer agent to implement FR-CVPL-08"`.
 
-**Active agents (always):** `spelix-tdd` (TDD-first implementation), `spelix-auditor` (read-only SRS compliance, Haiku), `spelix-security-reviewer` (pre-merge auth/RLS/language), `spelix-migration` (Alembic/schema).
-**Phase 1+:** `spelix-cv-engineer` (all of `backend/app/cv/`), `spelix-coaching-engineer` (coaching, SSE, prompts).
-**Phase 2+:** `spelix-rag-engineer` (Qdrant, Cohere, hybrid retrieval), `spelix-corpus-curator` (ingestion, provenance).
-**Phase 3+:** `spelix-langgraph-engineer` (agent core, distillation, CoVe, review queue, sidebar).
+**Implementers:** `spelix-tdd` (general TDD-first, incl. frontend), `spelix-cv-engineer` (all of `backend/app/cv/`), `spelix-migration` (Alembic/schema), `spelix-ai-engineer` (coaching/RAG/LangGraph/Coach Brain/prompts).
+**Reviewers (read-only, project memory):** `spelix-spec-reviewer` (diff vs task requirements, T1+), `spelix-quality-reviewer` (architecture/tests/gotchas, T2/T3), `spelix-security-reviewer` (JWT/RLS/SaMD/secrets, T2+ pre-PR gate), `spelix-governance-reviewer` (tier validation + T0 self-merge gate), `spelix-auditor` (SRS compliance fan-out, Haiku).
 **Activate at Phase 4:** `spelix-eval-engineer`.
 
 ### Delegation Rules
 
-For ANY task touching 3+ files or with an SRS requirement ID:
-1. Run `/plan` — Explore and plan first, never jump to code
-2. Dispatch execution to the matching specialist agent
-3. Main agent reviews output, runs /check + /test, merges
+For ANY task with open design questions, new user-facing surface, or 3+ files:
+1. `/design <idea|issue#>` — routed ideation → spec → plan → groomed GitHub issues
+2. `/ship-loop <issue#s>` — execution; each issue runs through `/implement`
+   (worktree + routed specialist + tier-scaled review chain)
 
-For tasks in `backend/app/cv/`: always `spelix-cv-engineer`. For Alembic/schema: always `spelix-migration`. For any commit touching auth, user data, or user-facing strings: `spelix-security-reviewer` first.
+For one-off tasks with a known tier: `/implement <task> --tier <T>` directly.
+Specialist routing (cv/migration/ai/tdd) lives in the `/implement` routing table.
+For any commit touching auth, user data, or user-facing strings: `spelix-security-reviewer` PASS first.
 
-### Parallelism — Decision Rules
+### Parallelism
 
-**Decision question: do the workers need to talk to each other to produce correct output?**
-- No → `/parallel` (subagents, max 7, max 3 on droplet) or worktrees (2–4 at a time).
-- Yes → `/team [scenario]` (Agent Teams with shared task list + mailbox).
-
-**When to use `/team` vs `/parallel`**:
-- Backend API + frontend consuming it → `/team` (API contract coordination)
-- Service A produces interface that Service B consumes → `/team`
-- Independent bug fixes, independent test files, docs → `/parallel`
-- If in doubt and batch has 2+ tasks with a Deps arrow → `/team`
-
-**Workflow**: always `/plan` first → create tasks with dependencies → spawn teammates with focused prompts → lead works on independent tasks while team executes → review + merge.
-
-`/team` cost rules: Sonnet for all teammates, max 3 teammates, focused spawn prompts, shut down idle teammates immediately.
-
-**Never parallelise** (any method): `backend/app/models/`, `backend/app/schemas/`, `backend/alembic/`, tasks with Deps arrows.
+Independent tasks → Workflow tool (saved workflows in `.claude/workflows/`) or background agents with `isolation: "worktree"`. `/implement` owns per-task worktree isolation. Agent Teams and the /team and /parallel skills are retired.
+Cross-domain shared interfaces (API shape + consumer) → make the contract an explicit early task; never parallelize across it.
+**Never parallelise**: `backend/app/models/`, `backend/app/schemas/`, `backend/alembic/`, tasks with Deps arrows.
 
 Sub-agents and worktrees commit freely. Main agent asks for confirmation before committing.
 
