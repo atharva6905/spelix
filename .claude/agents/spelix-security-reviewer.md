@@ -4,7 +4,7 @@ description: Use proactively before any commit touching authentication, user dat
 tools: Read, Grep, Glob
 disallowedTools: Write, Edit, Bash, NotebookEdit
 memory: project
-model: sonnet
+model: opus
 color: red
 ---
 
