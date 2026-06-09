@@ -32,6 +32,7 @@ import {
   formatDuration,
   labelForOutputKey,
   labelForRetrievalSource,
+  labelForToolCall,
 } from "@/lib/agentTraceLabels";
 import {
   buildTraceGraph,
@@ -124,6 +125,12 @@ export function AgentReasoningSidebar({
   const selectedData =
     selectedIndex !== null ? graph.nodes[selectedIndex]?.data : null;
 
+  // Count total reasoner passes for the summary row (adaptive mode only).
+  const totalReasonerPasses =
+    trace.mode === "adaptive"
+      ? graph.nodes.filter((n) => n.data.iterationIndex !== undefined).length
+      : 0;
+
   const coveVerified = Boolean(trace.eval_scores?.cove_verified);
   const faithfulness =
     typeof trace.eval_scores?.faithfulness === "number"
@@ -159,7 +166,13 @@ export function AgentReasoningSidebar({
               </h2>
               {isAdmin &&
                 (import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string | undefined) &&
-                trace?.langsmith_run_id && (
+                trace?.langsmith_run_id &&
+                // M-1 security: validate the run ID is a UUID before building
+                // the href to prevent javascript:/data: scheme injection from
+                // a tampered JSONB payload. Only lowercase hex UUIDs pass.
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                  trace.langsmith_run_id,
+                ) && (
                   <a
                     href={`${import.meta.env.VITE_LANGSMITH_RUN_URL_PREFIX as string}/r/${trace.langsmith_run_id}`}
                     target="_blank"
@@ -249,6 +262,19 @@ export function AgentReasoningSidebar({
                 {nodesExecuted.length}
               </dd>
             </div>
+            {trace.mode === "adaptive" && totalReasonerPasses > 0 && (
+              <div>
+                <dt className="font-medium uppercase tracking-wide text-gray-500">
+                  Reasoning passes
+                </dt>
+                <dd
+                  data-testid="reasoning-passes-count"
+                  className="mt-0.5 text-gray-800"
+                >
+                  {totalReasonerPasses}
+                </dd>
+              </div>
+            )}
           </dl>
         </div>
 
@@ -287,9 +313,20 @@ export function AgentReasoningSidebar({
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">
-                  {selectedData.label}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-gray-900">
+                    {selectedData.label}
+                  </h3>
+                  {/* Iteration badge — adaptive reasoner nodes only (FR-AICP-19) */}
+                  {selectedData.iterationIndex !== undefined && (
+                    <span
+                      data-testid="reasoner-iteration-badge"
+                      className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700"
+                    >
+                      Reasoning pass {selectedData.iterationIndex} of {totalReasonerPasses}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 text-xs text-gray-500">
                   Took {formatDuration(selectedData.durationMs)}
                 </p>
@@ -302,6 +339,28 @@ export function AgentReasoningSidebar({
                 ×
               </button>
             </div>
+            {/* Tools used — only when the reasoner turn had tool calls (FR-AICP-19) */}
+            {selectedData.toolCallsInvoked != null &&
+              selectedData.toolCallsInvoked.length > 0 && (
+              <div
+                data-testid="node-tool-calls"
+                className="mt-3"
+              >
+                <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Tools used
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {selectedData.toolCallsInvoked.map((tool, idx) => (
+                    <span
+                      key={`${tool}-${idx}`}
+                      className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-800 ring-1 ring-inset ring-indigo-200"
+                    >
+                      {labelForToolCall(tool)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {selectedData.outputKeys.length > 0 && (
               <div className="mt-3">
                 <div className="text-xs font-medium uppercase tracking-wide text-gray-500">

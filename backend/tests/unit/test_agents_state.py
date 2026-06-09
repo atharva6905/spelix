@@ -55,6 +55,7 @@ def test_node_event_serializes_to_plain_dict():
         "duration_ms": 12.5,
         "output_keys": ["rep_metrics"],
         "error": None,
+        "tool_calls_invoked": None,
     }
 
 

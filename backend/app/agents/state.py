@@ -35,6 +35,15 @@ class NodeEvent(BaseModel):
         default=None,
         description="String representation of exception if the node failed.",
     )
+    tool_calls_invoked: list[str] | None = Field(
+        default=None,
+        description=(
+            "Tool names called during this node's LLM turn (adaptive mode only). "
+            "None for deterministic nodes and non-reasoner adaptive nodes. "
+            "Capped at 10 entries to respect the 8 KB JSONB budget. "
+            "FR-AICP-19 / FR-RESL-07."
+        ),
+    )
 
 
 class AgentState(TypedDict):

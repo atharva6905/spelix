@@ -75,6 +75,17 @@ export function labelForOutputKey(rawKey: string): string {
   return humanizeSnakeCase(rawKey);
 }
 
+/**
+ * Plain-English label for a composable tool name (FR-AICP-19 / NFR-USAB-05).
+ *
+ * Tool names in the adaptive graph share names with deterministic-graph nodes,
+ * so this reuses NODE_LABELS as the authoritative source. Falls back to the
+ * same safe humanizer used by labelForNode — never surfaces raw snake_case.
+ */
+export function labelForToolCall(rawToolName: string): string {
+  return labelForNode(rawToolName);
+}
+
 export function formatDuration(durationMs: number): string {
   if (durationMs < 1000) {
     return `${Math.round(durationMs)}ms`;

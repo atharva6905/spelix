@@ -79,12 +79,23 @@ def _wrap_trace(
             state["trace"] = [*(state.get("trace") or []), event.model_dump()]
             raise
         duration_ms = (time.monotonic() - t0) * 1000.0
+
+        # Pop the transient _tool_calls_invoked key so it is NOT treated as
+        # an output key and is NOT merged into AgentState.  Nodes that do not
+        # set it leave update unchanged; the NodeEvent field stays None.
+        # Capped at 10 entries per ADR-REASONING-SIDEBAR-01 / 8 KB JSONB budget.
+        raw_tool_calls: list[str] | None = update.pop("_tool_calls_invoked", None)
+        tool_calls_invoked: list[str] | None = (
+            raw_tool_calls[:10] if raw_tool_calls is not None else None
+        )
+
         event = NodeEvent(
             node=node_name,
             started_at=started_at,
             duration_ms=duration_ms,
             output_keys=sorted(update.keys()),
             error=None,
+            tool_calls_invoked=tool_calls_invoked,
         )
         # Append the new event to the existing trace list.
         trace = list(state.get("trace") or [])
@@ -324,6 +335,16 @@ def build_adaptive_graph(
 
         # If the LLM chose tools, invoke them in order, append ToolMessages.
         tool_calls = getattr(response, "tool_calls", None) or []
+        # Pre-build the registered-tool name set for O(1) membership checks.
+        # Only statically-registered names may enter the trace; hallucinated
+        # names from the LLM are rejected here so they never reach
+        # agent_trace_json (and can never be rendered as chip labels to users).
+        # H-1 security finding — FR-AICP-19 / FR-RESL-07.
+        registered_tool_names: frozenset[str] = frozenset(t.name for t in tools_for_llm)
+        # Collect tool names for the NodeEvent (FR-AICP-19 / FR-RESL-07).
+        # _tool_calls_invoked is a transient key popped by _wrap_trace before
+        # being merged into AgentState — it never pollutes the state graph.
+        invoked_tool_names: list[str] = []
         for tc in tool_calls:
             tool_name = tc["name"] if isinstance(tc, dict) else tc.name
             tool_fn = next((t for t in tools_for_llm if t.name == tool_name), None)
@@ -335,6 +356,11 @@ def build_adaptive_graph(
                     )
                 )
                 continue
+            # Only record names of tools the executor actually ran —
+            # i.e. after the tool_fn is None guard — to prevent LLM-hallucinated
+            # names from reaching agent_trace_json (H-1 security finding).
+            if tool_name in registered_tool_names:
+                invoked_tool_names.append(tool_name)
             try:
                 # ainvoke dispatches to the bound coroutine with JSON args.
                 # Our _NoArgs schema has no fields, so {} is the correct payload.
@@ -349,10 +375,14 @@ def build_adaptive_graph(
             )
 
         # Merge any state updates produced by tools back into return.
-        return {
+        update: dict[str, Any] = {
             "messages": messages,
             **{k: v for k, v in state_box["state"].items() if k not in state},
         }
+        # Pass tool call names to _wrap_trace via transient key.
+        # None when the LLM issued no tool calls (last turn before exit).
+        update["_tool_calls_invoked"] = invoked_tool_names if invoked_tool_names else None
+        return update
 
     def _router(state: AgentState) -> str:
         """If the last AI message has no tool calls OR we have a coaching_output, proceed to post-gen. Else loop."""

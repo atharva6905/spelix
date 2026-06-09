@@ -7,6 +7,7 @@ import {
   labelForNode,
   labelForOutputKey,
   labelForRetrievalSource,
+  labelForToolCall,
   formatDuration,
 } from "@/lib/agentTraceLabels";
 import type { AgentRetrievalSource } from "@/api/analyses";
@@ -104,6 +105,43 @@ describe("labelForOutputKey", () => {
     ];
     for (const key of knownKeys) {
       expect(labelForOutputKey(key)).not.toContain("_");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-AICP-19 / FR-RESL-07 / NFR-USAB-05: labelForToolCall
+// ---------------------------------------------------------------------------
+
+describe("labelForToolCall", () => {
+  it("maps known tool names to the same plain-English labels as labelForNode", () => {
+    // Tools in adaptive mode share names with deterministic-graph nodes
+    expect(labelForToolCall("get_rep_metrics")).toBe("Looked up your rep data");
+    expect(labelForToolCall("retrieve_papers")).toBe("Searched research papers");
+    expect(labelForToolCall("retrieve_coach_brain")).toBe(
+      "Consulted the expert coaching library",
+    );
+    expect(labelForToolCall("generate_correction_plan")).toBe(
+      "Generated your coaching feedback",
+    );
+  });
+
+  it("falls back to a safe humanization for unknown tool names (NFR-USAB-05)", () => {
+    // Unknown tool names must never leak raw snake_case to the user
+    expect(labelForToolCall("some_future_tool")).toBe("Some future tool");
+  });
+
+  it("never returns a label containing underscores (NFR-USAB-05)", () => {
+    const knownTools = [
+      "get_rep_metrics",
+      "retrieve_papers",
+      "retrieve_coach_brain",
+      "flag_form_deviation",
+      "compare_to_user_history",
+      "generate_correction_plan",
+    ];
+    for (const tool of knownTools) {
+      expect(labelForToolCall(tool)).not.toContain("_");
     }
   });
 });

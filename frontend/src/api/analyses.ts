@@ -150,6 +150,10 @@ export interface AgentNodeEvent {
   duration_ms: number;
   output_keys: string[];
   error: string | null;
+  /** Tool names called during this LLM turn (adaptive reasoner nodes only).
+   *  Null for deterministic-mode events and reasoner turns with no tool calls.
+   *  FR-AICP-19 / FR-RESL-07. */
+  tool_calls_invoked?: string[] | null;
 }
 
 export interface AgentEvalScores {
