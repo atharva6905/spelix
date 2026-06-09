@@ -15,10 +15,9 @@ No agent teams. Pace via /loop + ScheduleWakeup (idle ticks 1200–1800s).
 ## Sweeps (run in order; skip any not in --sweeps)
 
 ### 1. Issue triage (output ceiling: labels + comments only)
-New/unlabeled issues via mcp__github__list_issues → add labels (bug/feat/docs), link SRS
-IDs when the issue text matches an FR-*, comment on likely duplicates. Size: this repo
-tracks size inline in issue bodies (`Size: S/M/L`) — do not invent a `size/*` label
-scheme; if size is missing from the body, propose it in the digest instead.
+New/unlabeled issues via mcp__github__list_issues → add labels (bug/feat/docs) and a
+`size/XS|S|M|L|XL` label (from the body's inline `Size:` line when present, else judge),
+link SRS IDs when the issue text matches an FR-*, comment on likely duplicates.
 
 ### 2. Stale-PR babysitting (ceiling: fix commits to agent branches; NEVER merge T1+)
 Open PRs via mcp__github__list_pull_requests:
