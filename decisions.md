@@ -88,6 +88,7 @@
 | ADR-ADMN-03 | Compensation candidates require `biomechanics_qualified` admin | Coach Brain & Distillation | Accepted |
 | ADR-BRAIN-10 | FR-BRAIN-06 distillation graph has 7 nodes, not 5 (Session 62) | Coach Brain & Distillation | Accepted |
 | ADR-BRAIN-11 | Coach Brain tombstone pattern — `status='deprecated'` + `extra_metadata.rejec... | Coach Brain & Distillation | Accepted |
+| ADR-BRAIN-12 | ARRAY emptiness via `cardinality()==0`; tombstone cascades scope to `status='a... | Coach Brain & Distillation | Accepted |
 | ADR-005 | Phase 0 Coaching — Sync, Not SSE | Coaching & CoVe | Accepted |
 | ADR-019 | SSE Coaching — Redis Pub/Sub Between Worker and FastAPI | Coaching & CoVe | Accepted |
 | ADR-020 | Prompt Caching on Stable Sections (FR-AICP-21) | Coaching & CoVe | Accepted |
@@ -1117,6 +1118,14 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 **Decision.** All Coach Brain entry tombstones use the same pattern: `existing.status = 'deprecated'` + `existing.extra_metadata = {**existing.extra_metadata, 'rejected_reason': '<reason_string>'}`. Reasons are convention-driven free strings: `'source_consent_withdrawn'` (FR-BRAIN-16), `'contradicted_by_<candidate_uuid>'` (FR-BRAIN-17). Used in `backend/app/repositories/coach_brain.py:soft_delete_empty_unconfirmed` and `backend/app/distillation/store.py:store_entry`. No migration. No new column. SRS prose is the bug; the runtime invariant is canonical.
 
 **Consequences.** New tombstone reasons are 1-line additions to either function — no migration, no model change. Consumers querying for "rejected" entries must filter by `status='deprecated'` AND `extra_metadata->>'rejected_reason' = ?` — there is no clean SQL boolean column for this. Adding `'rejected'` to the CHECK or a `rejected_reason` column at any future point requires migrating both call sites and rewriting downstream queries. If a Phase 4 reporting need surfaces and the JSONB query becomes hot, **then** consider promoting `rejected_reason` to a real column behind a feature flag; until that need is concrete, the JSONB convention stays.
+
+## ADR-BRAIN-12: ARRAY emptiness predicates use `func.cardinality() == 0`; tombstone cascades scope to `status='active'` (issue #203)
+
+**Context.** FR-BRAIN-16's consent cascade compared `source_analysis_ids` (`ARRAY(UUID)`) against a Python `{}`, which SQLAlchemy silently compiled to `source_analysis_ids = array[]` — a predicate that never matched, so the tombstone never fired (GDPR Art. 17 gap, issue #203). The fix exposed a second latent bug: the predicate's `status != 'deprecated'` guard also matched seed entries (which ship with `source_analysis_ids=[]`, `confirmation_count=1`), so the first real cascade run would have tombstoned the whole hand-curated seed corpus — the ADR-BRAIN-08 regression. Mocked rowcount-only tests caught neither because the SQL never hit Postgres.
+
+**Decision.** (1) ARRAY-column emptiness is always expressed as `func.cardinality(col) == 0` — never `== {}`, `== []`, or any literal equality, which compile silently to never-matching predicates. (2) Coach Brain tombstone cascades target `status == 'active'` only: seeds have empty `source_analysis_ids` by design and are never cascade targets (deprecation of seeds is an explicit, human action per ADR-BRAIN-08). (3) Tests for repository predicates must assert at the SQL layer or below: either compile the captured statement against the `postgresql` dialect and assert the rendered predicate, or (preferred for new work) a real-Postgres test in the DATABASE_URL-gated `tests/integration/` harness. Rowcount-only mocks are insufficient for predicate correctness.
+
+**Consequences.** The candidate-side cascade does the equivalent emptiness check in Python (`consent_cascade.py` Step 4) — if it is ever converted to a SQL UPDATE, it must follow this convention. Rendered-SQL string assertions are brittle against SQLAlchemy version bumps; when one breaks with no behavior change, migrate the test to the integration harness rather than loosening the assertion.
 
 # Coaching & CoVe
 
