@@ -579,3 +579,91 @@ class TestAccountDeletionCascade:
 
         # DB cascade delete still triggered
         analysis_repo.delete.assert_called_once_with(analysis.id)
+
+
+# ---------------------------------------------------------------------------
+# Storage-client injection + escalated logging (issue #204)
+# ---------------------------------------------------------------------------
+
+
+class TestGetServiceWiresRealStorageClient:
+    """Regression guard for GitHub issue #204 (FR-AUTH-07 / NFR-SECU-08).
+
+    The account-deletion service must be constructed with a StorageService
+    that has a *real* async Supabase client. The pre-fix code built it with a
+    clientless ``StorageService()`` whose ``delete_file`` raises RuntimeError,
+    so Storage artifacts were never purged on account deletion.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_service_builds_storage_with_non_none_client(self):
+        """``_get_service`` must reuse the async-client factory so the
+        AccountService's StorageService has a non-None client (i.e. its
+        ``delete_file`` will actually call Supabase, not raise RuntimeError)."""
+        from unittest.mock import patch
+
+        import app.api.v1.analyses as analyses_mod
+        from app.api.v1.account import _get_service
+
+        # Force the analyses-module client cache to a fake non-None client so
+        # the shared factory returns a StorageService wired to it.
+        fake_client = MagicMock()
+        with patch.object(
+            analyses_mod, "_async_supabase_client_cache", fake_client
+        ), patch.object(
+            analyses_mod, "_async_supabase_client_cache_initialized", True
+        ):
+            service = await _get_service(db=MagicMock())
+
+        assert isinstance(service, AccountService)
+        # The storage service must carry the real client — not None.
+        assert service._storage._client is fake_client
+        # And delete_file must NOT raise the clientless RuntimeError.
+        assert service._storage._client is not None
+
+    @pytest.mark.asyncio
+    async def test_clientless_storage_delete_file_raises_runtime_error(self):
+        """Documents the pre-fix failure mode: a clientless StorageService
+        raises RuntimeError on delete_file, which the old _get_service used."""
+        from app.services.storage import StorageService
+
+        clientless = StorageService()
+        with pytest.raises(RuntimeError):
+            await clientless.delete_file("videos/x/v.mp4")
+
+
+class TestStorageFailureLogsAtError:
+    """Storage-delete failures during account deletion must log at ERROR
+    (not WARNING) with user/analysis identifiers — issue #204."""
+
+    @pytest.mark.asyncio
+    async def test_storage_delete_failure_logs_error_with_ids(self, caplog):
+        import logging
+
+        user_id = uuid.uuid4()
+        analysis = _make_mock_analysis(
+            user_id,
+            video_path="videos/123/video.mp4",
+        )
+
+        analysis_repo = _make_mock_analysis_repo([analysis])
+        profile_repo = _make_mock_profile_repo()
+        storage = _make_mock_storage()
+        storage.delete_file.side_effect = Exception("Storage unavailable")
+
+        service = AccountService(
+            repo=analysis_repo, profile_repo=profile_repo, storage=storage
+        )
+
+        with caplog.at_level(logging.ERROR, logger="app.services.account"):
+            await service.delete_account(user_id)
+
+        error_records = [
+            r for r in caplog.records if r.levelno == logging.ERROR
+        ]
+        assert error_records, "expected an ERROR-level log on storage delete failure"
+        joined = " ".join(r.getMessage() for r in error_records)
+        # Identifiers present (IDs only, no PII beyond IDs).
+        assert str(user_id) in joined
+        assert str(analysis.id) in joined
+        assert "videos/123/video.mp4" in joined

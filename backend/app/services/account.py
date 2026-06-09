@@ -76,10 +76,15 @@ class AccountService:
                     try:
                         await self._storage.delete_file(path)
                     except Exception:
-                        logger.warning(
+                        # Escalated to ERROR (issue #204): a failed Storage
+                        # delete means user artifact bytes may remain after
+                        # account deletion (NFR-SECU-08). Identifiers only —
+                        # no PII beyond IDs.
+                        logger.error(
                             "Failed to delete Storage artifact during account deletion "
-                            "(user_id=%s, path=%s) — continuing.",
+                            "(user_id=%s, analysis_id=%s, path=%s) — continuing.",
                             user_id,
+                            analysis.id,
                             path,
                         )
 
