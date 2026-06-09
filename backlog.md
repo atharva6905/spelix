@@ -36,12 +36,26 @@ Closed 2026-06-09: #190 (PR #200, `1843a7d`) and #185 (PR #201, `cd973a5`) — s
 
 The sections below are in reverse-chronological build order. Group by phase:
 
+- **Harness v2** (gated-autopilot: risk-tier governance, autonomous gates, `/ship-loop` + `/groom` loops) — see the `Harness v2 "Gated Autopilot"` section.
 - **Post-L2 / cv-audit** (private beta ops, CV occlusion fixes R1–R6, sagittal metric sessions 1–7) — see the `L2 Sprint — CV audit` and `cv-audit Session` sections.
 - **L2 Sprint** (landing, expert portal, streaq migration, Phase 3 pull-forward, quality-gate + timeout fixes, pre-beta audit) — see the `L2 Sprint Day N` sections.
 - **Phase 3** (LangGraph agent, distillation pipeline, Coach Brain review queue, reasoning sidebar).
 - **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
+
+## Completed — Harness v2 "Gated Autopilot" (2026-06-06 → 2026-06-09)
+
+Harness v2 build-out: risk-tier merge governance, autonomous gates, and the parked-session maintenance loops (`/ship-loop`, `/groom`). Delivered in four batches plus a follow-up. Spec + plan are local-only under `docs/internal/` (gitignored).
+
+| Batch | Scope | PR | Merge |
+|-------|-------|----|-------|
+| 1 | Foundation refit (governance scaffolding, agent/rules restructure) | #195 | `cbbf0f3` |
+| 2 | Governance + gates (`rules/governance.md` risk tiers, autonomous-merge gates) | #196 | `964b3a4` |
+| 3 | `/ship-loop` parked-session shipping loop | #197 | `250b90e` |
+| — | Batch 3 supervised run 1 (queue #198/#190/#185) | #199 / #200 / #201 | see `/ship-loop run 1` section below |
+| 4 | `/groom` maintenance loop + workflows | #208 | `dafd350` |
+| — | Follow-up: agent model presets + `size/*` issue labels | #209 | `e1f220d` |
 
 ## Completed — Post-L2 beta ops — /ship-loop run 1 (2026-06-06)
 
