@@ -26,6 +26,7 @@ Migrated 2026-05-30. Open/parked items now live as Issues; the detailed history 
 | (P3-007) CoVe iteration drill-down pane | [#191](https://github.com/atharva6905/spelix/issues/191) | M | per-iteration Q/A/judgment |
 
 Closed 2026-06-06 via PR #194 (`1558d32`): #188, #189, #192 — see the small-items batch section below.
+Closed 2026-06-09: #190 (PR #200, `1843a7d`) and #185 (PR #201, `cd973a5`) — see the /ship-loop run 1 section below.
 
 **Not migrated** (deliberately): `D-068` (remove an unused `fireEvent` import — drop on next edit to that test),
 `D-AUDIT-L-03` (enable ufw on the droplet — manual server config, not a code change), and the three
@@ -41,6 +42,16 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
+
+## Completed — Post-L2 beta ops — /ship-loop run 1 (2026-06-06)
+
+First supervised `/ship-loop` run (harness v2, Task 14). Queue: #198, #190, #185.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #198 | Document `.claude/hooks` smoke-test requirement in CONTRIBUTING.md ("Harness hook changes" subsection: `node .claude/hooks/smoke-test.mjs` must pass before committing hook changes). Synthetic T0 validation task. PR #199; fresh-context reviewer T0 PASS; self-merged. Content later deliberately reverted via PR #202 (`d9cbe83`) — validation evidence kept, section removed. | done | XS | T0→T0 | `440c783` | `CONTRIBUTING.md` |
+| #190 | Adaptive-mode reasoner UI polish (P3-007): iteration counters + tool-call nesting in `AgentReasoningSidebar`. Ship-loop correctly self-escalated T1→T2 (user-facing strings); PR #200 merged after human line-by-line review (H-1/M-1 fixes solid; UI dormant on prod while adaptive mode off). | done | M | T1→T2 | `1843a7d` | `frontend/src/components/AgentReasoningSidebar.tsx` (+tests) |
+| #185 | Consolidate `test_distillation_validate.py` surface (D-069). T1 `needs-human`; adjudication added matrix row `(0.90, None, "review")` + M-02 traceability marker (fixup `1341ff8`); PR #201 merged. | done | S | T1→T1 | `cd973a5` | `backend/tests/unit/test_distillation_validate.py` |
 
 ## Completed — Post-L2 beta ops — small-items batch #188/#189/#192 (2026-06-06)
 
