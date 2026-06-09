@@ -103,7 +103,7 @@ class CoachBrainRepository:
         result = await self._db.execute(
             update(CoachBrainEntry)
             .where(
-                CoachBrainEntry.source_analysis_ids == {},
+                func.cardinality(CoachBrainEntry.source_analysis_ids) == 0,
                 CoachBrainEntry.confirmation_count < 3,
                 CoachBrainEntry.status != "deprecated",
             )

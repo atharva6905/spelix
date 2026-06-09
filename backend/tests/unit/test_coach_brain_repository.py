@@ -268,3 +268,42 @@ async def test_soft_delete_empty_unconfirmed_returns_rowcount():
     result = await repo.soft_delete_empty_unconfirmed()
 
     assert result == 3
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_empty_unconfirmed_predicate_uses_cardinality():
+    """FR-BRAIN-16 (issue #203): the empty-array predicate must use
+    cardinality(source_analysis_ids) = 0, NOT a dict/JSON equality.
+
+    ``source_analysis_ids`` is ``ARRAY(UUID)``. Comparing it against a Python
+    ``{}`` renders SQL that never matches the array-emptied rows produced by
+    ``array_remove`` during a GDPR consent-withdrawal cascade, so the tombstone
+    silently never fires. This test compiles the statement actually passed to
+    ``db.execute`` against the postgresql dialect and inspects the rendered SQL
+    — exactly the layer the original rowcount-only mock could not see.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    execute_result = MagicMock()
+    execute_result.rowcount = 0
+    db = AsyncMock()
+    db.execute.return_value = execute_result
+
+    repo = CoachBrainRepository(db)
+    await repo.soft_delete_empty_unconfirmed()
+
+    assert db.execute.await_count == 1
+    stmt = db.execute.await_args.args[0]
+
+    sql = str(
+        stmt.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    ).lower()
+
+    # The intended empty-array predicate.
+    assert "cardinality(coach_brain_entries.source_analysis_ids) = 0" in sql
+    # Guard against the original bug: the array column must never be compared
+    # directly against a literal value (the dict/JSON-equality form).
+    assert "source_analysis_ids = " not in sql
