@@ -175,11 +175,23 @@ class TestRenderHtml:
         html = pdf_service.render_html(ctx)
         assert "5" in html
 
-    def test_render_html_contains_confidence_score(self, pdf_service: PDFService):
+    def test_render_html_confidence_is_categorical_only(
+        self, pdf_service: PDFService
+    ):
+        """FR-SCOR-10/FR-RESL-08: the PDF summary card shows the categorical
+        confidence label ONLY — never a raw decimal/percentage."""
         ctx = _make_context(confidence_score=0.87, confidence_label="Moderate")
         html = pdf_service.render_html(ctx)
-        assert "87" in html
+
+        # 1. The categorical label is present.
         assert "Moderate" in html
+
+        # 2. No raw confidence percentage is rendered. 0.87 -> "87%" is the
+        #    violation; assert neither the percent string nor a leftover
+        #    template placeholder survives.
+        assert "87%" not in html
+        assert "confidence_pct" not in html
+        assert "${confidence_pct}" not in html
 
     def test_render_html_contains_coaching_summary(self, pdf_service: PDFService):
         ctx = _make_context()
