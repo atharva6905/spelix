@@ -9,35 +9,69 @@ from app.distillation.validate import validate_quality
 from app.schemas.coaching import CoachingOutput
 
 
+# ---------------------------------------------------------------------------
+# Parametrized gate matrix — the single instrument for decision-routing logic
+# (FR-BRAIN-06). Add a row here when thresholds change; do not add named tests
+# for the same assertion.
+#
+# Columns: overall, correctness (None = key absent), expected decision
+#
+# Row IDs document the scenario so failures are self-describing.
+#
+# M-02 regression guards (security-review finding, Session 60): the pass path
+# and its sub-gate routing are load-bearing — Phase 2 prod only populates
+# faithfulness, so a silent regression in the Phase 4 overall/correctness path
+# would not surface until Phase 4. The pass-band and sub-gate rows below ARE
+# the M-02 guards; do not remove them without an equivalent replacement.
+# ---------------------------------------------------------------------------
+
 @pytest.mark.parametrize(
     ("overall", "correctness", "expected"),
     [
-        (0.9, 0.85, "pass"),
-        (0.85, 0.8, "pass"),           # boundary
-        (0.85, 0.79, "review"),        # correctness just below gate
-        (0.7, 0.7, "review"),
-        (0.6, 0.6, "review"),          # boundary
-        (0.59, 0.6, "reject"),
-        (0.3, 0.9, "reject"),
+        # --- pass band (overall >= 0.85 AND correctness >= 0.8) ---
+        pytest.param(0.9,  0.85, "pass",   id="pass-both-above-thresholds"),
+        pytest.param(0.85, 0.8,  "pass",   id="pass-both-at-exact-boundary"),
+        # --- review: correctness sub-gate fails while overall is in pass band ---
+        pytest.param(0.85, 0.79, "review", id="review-correctness-just-below-gate"),
+        pytest.param(0.90, 0.75, "review", id="review-high-overall-correctness-below-gate"),
+        pytest.param(0.90, None, "review", id="review-pass-band-overall-correctness-key-absent"),
+        # --- review: overall in review band (0.6 <= overall < 0.85), correctness varies ---
+        pytest.param(0.7,  0.7,  "review", id="review-both-mid-band"),
+        pytest.param(0.70, 0.85, "review", id="review-low-overall-high-correctness"),
+        pytest.param(0.6,  0.6,  "review", id="review-both-at-lower-boundary"),
+        # --- reject: overall below 0.6 floor ---
+        pytest.param(0.59, 0.6,  "reject", id="reject-overall-just-below-floor"),
+        pytest.param(0.3,  0.9,  "reject", id="reject-overall-well-below-floor-correctness-high"),
+        # --- reject: overall present and below floor, correctness key absent ---
+        pytest.param(0.40, None, "reject", id="reject-overall-below-floor-no-correctness-key"),
     ],
 )
 @pytest.mark.asyncio
 async def test_validate_quality_gate_matrix(
-    overall: float, correctness: float, expected: str
+    overall: float, correctness: float | None, expected: str
 ) -> None:
+    scores: dict = {"overall": overall}
+    if correctness is not None:
+        scores["correctness"] = correctness
     state = make_initial_distillation_state(
         analysis_id=uuid.uuid4(),
         exercise_type="squat",
         coaching_output=_stub_coaching_output(),
         retrieved_papers_contexts=[],
-        eval_scores={"overall": overall, "correctness": correctness},
+        eval_scores=scores,
     )
     update = await validate_quality(state)
     assert update["validation_decision"] == expected
 
 
+# ---------------------------------------------------------------------------
+# Edge-case tests — these test structural anomalies in eval_scores that the
+# matrix cannot express as simple (overall, correctness) rows.
+# ---------------------------------------------------------------------------
+
 @pytest.mark.asyncio
 async def test_validate_quality_missing_scores_rejects() -> None:
+    """Empty eval_scores dict — no keys at all — must reject."""
     state = make_initial_distillation_state(
         analysis_id=uuid.uuid4(),
         exercise_type="squat",
@@ -83,7 +117,11 @@ async def test_validate_quality_faithfulness_below_floor_rejects() -> None:
     assert update["validation_decision"] == "reject"
 
 
-def _stub_coaching_output():
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _stub_coaching_output() -> CoachingOutput:
     return CoachingOutput(
         summary="s",
         strengths=["Consistent tempo"],
@@ -103,61 +141,3 @@ def _stub_coaching_output():
     )
 
 
-def _state(eval_scores: dict) -> dict:
-    return make_initial_distillation_state(
-        analysis_id=uuid.uuid4(),
-        exercise_type="squat",
-        coaching_output=_stub_coaching_output(),
-        retrieved_papers_contexts=[],
-        eval_scores=eval_scores,
-    )
-
-
-@pytest.mark.asyncio
-async def test_validate_quality_pass_when_overall_and_correctness_above_thresholds() -> None:
-    """M-02: regression guard for the `pass` path. SRS FR-BRAIN-06 says
-    overall >= 0.85 AND correctness >= 0.8 must yield 'pass'. Phase 2 only
-    populates faithfulness; this test exercises the full Phase 4 path so a
-    silent regression cannot ship."""
-    state = _state({"overall": 0.90, "correctness": 0.85})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "pass"
-
-
-@pytest.mark.asyncio
-async def test_validate_quality_review_when_correctness_below_threshold() -> None:
-    """M-02: companion. overall above the pass floor but correctness below
-    the sub-gate must route to review (not pass)."""
-    state = _state({"overall": 0.90, "correctness": 0.75})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "review"
-
-
-@pytest.mark.asyncio
-async def test_validate_quality_review_when_overall_between_floors() -> None:
-    """M-02: review-band check (0.6 <= overall < 0.85)."""
-    state = _state({"overall": 0.70, "correctness": 0.85})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "review"
-
-
-@pytest.mark.asyncio
-async def test_validate_quality_reject_when_overall_below_review_floor() -> None:
-    """M-02: reject-band check."""
-    state = _state({"overall": 0.40})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "reject"
-
-
-@pytest.mark.asyncio
-async def test_validate_quality_phase2_fallback_uses_faithfulness_for_overall() -> None:
-    """M-02: Phase 2 fallback — overall is None, faithfulness is the
-    overall-style score; correctness is missing so the pass sub-gate cannot
-    fire, but review/reject still work."""
-    state = _state({"faithfulness": 0.70})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "review"
-
-    state = _state({"faithfulness": 0.40})
-    out = await validate_quality(state)
-    assert out["validation_decision"] == "reject"
