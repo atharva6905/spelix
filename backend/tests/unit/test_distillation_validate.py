@@ -17,6 +17,12 @@ from app.schemas.coaching import CoachingOutput
 # Columns: overall, correctness (None = key absent), expected decision
 #
 # Row IDs document the scenario so failures are self-describing.
+#
+# M-02 regression guards (security-review finding, Session 60): the pass path
+# and its sub-gate routing are load-bearing — Phase 2 prod only populates
+# faithfulness, so a silent regression in the Phase 4 overall/correctness path
+# would not surface until Phase 4. The pass-band and sub-gate rows below ARE
+# the M-02 guards; do not remove them without an equivalent replacement.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -28,6 +34,7 @@ from app.schemas.coaching import CoachingOutput
         # --- review: correctness sub-gate fails while overall is in pass band ---
         pytest.param(0.85, 0.79, "review", id="review-correctness-just-below-gate"),
         pytest.param(0.90, 0.75, "review", id="review-high-overall-correctness-below-gate"),
+        pytest.param(0.90, None, "review", id="review-pass-band-overall-correctness-key-absent"),
         # --- review: overall in review band (0.6 <= overall < 0.85), correctness varies ---
         pytest.param(0.7,  0.7,  "review", id="review-both-mid-band"),
         pytest.param(0.70, 0.85, "review", id="review-low-overall-high-correctness"),
