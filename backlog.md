@@ -44,6 +44,16 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 2: srs-audit CRITICALs (2026-06-09)
+
+Second `/ship-loop` run. Queue: #203, #204, #205 (the three CRITICALs from the 2026-06-09 `srs-audit` workflow). All three implemented in parallel by spelix-tdd worktree agents; T2 items passed `spelix-security-reviewer` pre-PR; human merged all three.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #203 | FR-BRAIN-16 cascade tombstone predicate compared ARRAY(UUID) vs `{}` — never fired. Fixed via `func.cardinality(...) == 0`. `/code-review` then caught a CRITICAL second-order bug: the working predicate would have tombstoned the entire seed corpus (seeds ship `source_analysis_ids=[]`, `confirmation_count=1`); scoped to `status='active'`. ADR-BRAIN-12 added; follow-up #216 (real-Postgres integration test). PR #213. | done | S | T1→T1 | `8969ec9` | `backend/app/repositories/coach_brain.py`, tests, `decisions.md` |
+| #204 | FR-AUTH-07 account deletion never purged Storage — `AccountService` got a clientless `StorageService`. Rewired through `_make_storage_service()` factory; storage-delete failures now log ERROR with IDs. Security review PASS (MEDIUM follow-up: user-supplied filename in logged path; note: manual Storage sweep may be needed for beta-era deletions). PR #215. | done | S | T2→T2 | `9ff71f6` | `backend/app/api/v1/account.py`, `backend/app/services/account.py`, tests |
+| #205 | FR-SCOR-10/FR-RESL-08 PDF summary card showed raw confidence % — removed `confidence_pct`; categorical `confidence_label` badge only. Test rewritten to assert categorical-only. Security review PASS. PR #214. | done | XS | T2→T2 | `2727da0` | `backend/app/services/pdf.py`, `reports/templates/analysis_report.html`, tests |
+
 ## Completed — Harness v2 "Gated Autopilot" (2026-06-06 → 2026-06-09)
 
 Harness v2 build-out: risk-tier merge governance, autonomous gates, and the parked-session maintenance loops (`/ship-loop`, `/groom`). Delivered in four batches plus a follow-up. Spec + plan are local-only under `docs/internal/` (gitignored).
