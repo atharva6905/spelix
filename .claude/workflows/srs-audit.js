@@ -16,7 +16,7 @@ const SECTIONS = ['CV pipeline (FR-CVPL, FR-SCOR)', 'Coaching (FR-AICP, FR-COACH
   'RAG & Coach Brain (FR-RAGK, FR-BRAIN)', 'Upload/auth/profiles (FR-VUPL, FR-AUTH, FR-PROF)',
   'Reports & UI (FR-REPM, FR-UIUX)']
 const all = await parallel(SECTIONS.map((s) => () =>
-  agent(`Audit implemented code against docs/SRS.md section scope: ${s}. Trace full call paths before marking anything CRITICAL/MISSING (false-positive protocol). Report findings only.`,
+  agent(`Audit implemented code against docs/SRS.md section scope: ${s}. FIRST read your MEMORY.md and consult prior findings for this section. Trace full call paths before marking anything CRITICAL/MISSING (false-positive protocol). Update your MEMORY.md with new/resolved findings BEFORE returning the structured verdict, then report findings.`,
     { label: `audit:${s.split(' ')[0]}`, phase: 'Audit', agentType: 'spelix-auditor', schema: FINDINGS })))
 const findings = all.filter(Boolean).flatMap((r) => r.findings)
 const seen = new Set(); const deduped = []
