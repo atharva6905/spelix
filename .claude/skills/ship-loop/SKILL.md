@@ -21,30 +21,33 @@ Continuous delivery over a task queue, fully in-session. Governance:
 
 ## Per-task cycle
 1. Read the issue. Classify PROVISIONAL tier from description (governance.md table).
-2. `EnterWorktree` → branch `<type>/issue-<N>-<slug>`.
-3. Implement via the matching specialist agent (spelix-tdd default; spelix-cv-engineer for
-   backend/app/cv/**; spelix-migration for alembic/models — note: migration tasks are T2,
-   implement + PR + `needs-human` label only). TDD gate: failing test first.
-4. Local checks: ruff + pyright + scoped pytest + (if frontend touched) tsc + vitest.
-   Exclude tests/unit/test_pose_extraction.py locally (Windows crash; CI is the gate).
-5. Push branch; PR via mcp__github__create_pull_request. PR body: issue link, tier
-   classification + justification, test evidence.
-6. RE-CLASSIFY tier from the ACTUAL diff (mcp__github__get_pull_request_files). Mixed →
-   highest. Record both classifications in the PR body.
-7. Watch CI via mcp__github__get_pull_request_status (or `gh pr checks <N> --watch` in
+2. Run `/implement <issue#> --tier <provisional>` — it owns preflight, EnterWorktree,
+   specialist dispatch (routing table lives there), the tier-scaled review chain
+   (spec → quality → security per tier), local checks, and 3-strike escalation.
+   Consume its report: `{branch, commits, checks, review_verdicts, status}`.
+   `status: blocked` → count as blocked, NEXT task. (Migration tasks are T2:
+   implement + PR + `needs-human` label only.)
+3. Push branch; PR via mcp__github__create_pull_request. PR body: issue link, tier
+   classification + justification, review verdicts from /implement, test evidence.
+4. RE-CLASSIFY tier from the ACTUAL diff (mcp__github__get_pull_request_files). Mixed →
+   highest. Record both classifications in the PR body. If actual tier > provisional:
+   re-enter the /implement review chain at the higher rigor (run only the gates not
+   yet passed) before continuing.
+5. Watch CI via mcp__github__get_pull_request_status (or `gh pr checks <N> --watch` in
    background). Poll with ScheduleWakeup ~270s if watching manually.
-8. CI red → /bugfix loop on the branch (max 3 iterations) → still red → label `blocked`,
+6. CI red → /bugfix loop on the branch (max 3 iterations) → still red → label `blocked`,
    comment root-cause summary on PR, count as blocked, NEXT task.
-9. CI green:
-   - **T0**: spawn a FRESH reviewer subagent (Agent tool, no shared context) with ONLY the
-     diff + governance.md; prompt it to verify tier + adversarially review. PASS → merge
-     via mcp__github__merge_pull_request (merge_method: "merge") → if deploy triggered,
-     verify droplet SHA + container health (ssh spelix-droplet) → if user-facing, run
-     Playwright E2E per .claude/rules/git-github.md. FAIL → demote to T1 handling.
+7. CI green:
+   - **T0**: dispatch `spelix-governance-reviewer` with ONLY the diff + governance.md
+     (it brings its own agent memory; NEVER this session's context or the implementer's
+     reasoning). PASS → merge via mcp__github__merge_pull_request (merge_method:
+     "merge") → if deploy triggered, verify droplet SHA + container health
+     (ssh spelix-droplet) → if user-facing, run Playwright E2E per
+     .claude/rules/git-github.md. FAIL → demote to T1 handling.
    - **T1+**: run /code-review; post findings as PR comment
      (mcp__github__add_issue_comment); label `needs-human`; NEXT task.
-10. `git checkout main && git pull`. Update backlog.md (if issue closed) and
-    .claude/handoff.md inline. Next task.
+8. `git checkout main && git pull`. Update backlog.md (if issue closed) and
+   .claude/handoff.md inline. Next task.
 
 ## End of run
 Summary table: | Issue | Tier (prov→actual) | PR | CI | Outcome (merged/needs-human/blocked) |.
