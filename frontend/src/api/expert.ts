@@ -115,6 +115,7 @@ export interface PaperUploadMetadata {
     | "L2_rct"
     | "L3_observational"
     | "L4_guideline";
+  sex_applicability?: "male" | "female" | "both";
   filename: string;
   file_size_bytes: number;
 }

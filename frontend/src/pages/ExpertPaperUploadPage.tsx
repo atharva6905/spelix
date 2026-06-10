@@ -39,6 +39,12 @@ const QUALITY_TIER_OPTIONS = [
   { value: "L4_guideline", label: "L4 — Clinical Guideline / Expert Consensus" },
 ] as const;
 
+const SEX_APPLICABILITY_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "both", label: "Both" },
+] as const;
+
 const STUDY_DESIGN_OPTIONS = [
   { value: "rct", label: "Randomized Controlled Trial (RCT)" },
   { value: "observational", label: "Observational" },
@@ -60,6 +66,7 @@ interface FormState {
   exercise_tags: string[];
   quality_tier: string;
   study_design: string;
+  sex_applicability: string;
 }
 
 const INITIAL_FORM: FormState = {
@@ -70,6 +77,7 @@ const INITIAL_FORM: FormState = {
   exercise_tags: [],
   quality_tier: "",
   study_design: "",
+  sex_applicability: "both",
 };
 
 // ---------------------------------------------------------------------------
@@ -193,6 +201,7 @@ export default function ExpertPaperUploadPage() {
           | "L3_observational"
           | "L4_guideline"
           | undefined,
+        sex_applicability: form.sex_applicability as "male" | "female" | "both",
         filename: selectedFile.name,
         file_size_bytes: selectedFile.size,
       });
@@ -382,6 +391,24 @@ export default function ExpertPaperUploadPage() {
                 >
                   <option value="">Select study design...</option>
                   {STUDY_DESIGN_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Applicable population — FR-EXPV-05 ext. (issue #223) */}
+              <div>
+                <label htmlFor="sex_applicability" className="mb-1 block text-sm font-medium text-gray-700">
+                  Applicable population <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="sex_applicability"
+                  value={form.sex_applicability}
+                  onChange={(e) => setForm((f) => ({ ...f, sex_applicability: e.target.value }))}
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+                >
+                  {SEX_APPLICABILITY_OPTIONS.map(({ value, label }) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
