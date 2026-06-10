@@ -14,6 +14,9 @@ Continuous delivery over a task queue, fully in-session. Governance:
 - `--max N`: task cap for this run (default 5).
 
 ## Hard guards (check before starting)
+- Isolation check FIRST (superpowers:using-git-worktrees Step 0, nested via /implement
+  Step 0): if the session starts inside a leftover worktree, `ExitWorktree`
+  (action: "keep") back to the main checkout before anything else.
 - Working tree clean, on `main`, up to date (`git pull`).
 - HARD STOP after 2 consecutive blocked tasks — something systemic is wrong; write
   blockers to .claude/handoff.md and end the loop with a summary.
@@ -38,7 +41,9 @@ Continuous delivery over a task queue, fully in-session. Governance:
 6. CI red → /bugfix loop on the branch (max 3 iterations) → still red → label `blocked`,
    comment root-cause summary on PR, count as blocked, NEXT task. If the session has
    already left the task worktree, re-enter it with `EnterWorktree` (`path:` the
-   existing worktree) before /bugfix; exit again afterwards.
+   existing worktree — re-entry of an EXISTING worktree: pass path:,
+   never create a second worktree for the same task; /implement Step 0 detection
+   rules apply) before /bugfix; exit again afterwards.
 7. CI green:
    - **T0**: dispatch `spelix-governance-reviewer` with ONLY the diff + governance.md
      (it brings its own agent memory; NEVER this session's context or the implementer's
@@ -68,7 +73,9 @@ Continuous delivery over a task queue, fully in-session. Governance:
         verification per .claude/rules/git-github.md (wait for Deploy to
         Production; droplet SHA + container health; Playwright E2E if user-facing).
      4. Fix-first → SendMessage to the SAME implementer instance in the worktree
-        (re-enter via EnterWorktree path: if needed); re-run only the review gates
+        (re-enter via EnterWorktree path: if needed — re-entry of an EXISTING
+        worktree: pass path:, never create a second worktree for the same task;
+        /implement Step 0 detection rules apply); re-run only the review gates
         invalidated by the fix; push; re-watch CI; re-present the gate.
      5. Defer → label `needs-human`, record the open questions as a PR comment.
      6. Whatever the outcome, proceed to step 8 cleanup — per-outcome worktree
