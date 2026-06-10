@@ -93,6 +93,24 @@ class RagDocumentRepository:
         await self._db.refresh(doc)
         return doc
 
+    async def get_live_by_doi(self, doi: str) -> RagDocument | None:
+        """First live row holding this (normalized) DOI.
+
+        Live = any review_status except 'reviewed_rejected' (re-upload after
+        rejection is allowed) and 'uploading' (orphaned attempts must not lock
+        a DOI). Mirrors the uq_rag_documents_doi_live partial index predicate.
+        """
+        stmt = (
+            select(RagDocument)
+            .where(
+                RagDocument.doi == doi,
+                RagDocument.review_status.notin_(("reviewed_rejected", "uploading")),
+            )
+            .limit(1)
+        )
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def update_chunk_count(
         self, doc_id: uuid.UUID, *, chunk_count: int
     ) -> None:

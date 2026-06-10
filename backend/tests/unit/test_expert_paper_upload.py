@@ -72,6 +72,7 @@ class TestRequestPaperUpload:
             return doc
 
         repo_instance.create = AsyncMock(side_effect=fake_create)
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
 
         expires = datetime.now(timezone.utc) + timedelta(hours=1)
         storage_instance = MockStorage.return_value
@@ -131,6 +132,7 @@ class TestRequestPaperUpload:
             doc.id = uuid4()
             return doc
         repo_instance.create = AsyncMock(side_effect=fake_create)
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
         storage_instance = MockStorage.return_value
         storage_instance.generate_signed_upload_url = AsyncMock(
             return_value=SignedPaperUpload(url="https://x/u", expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
@@ -142,3 +144,228 @@ class TestRequestPaperUpload:
         assert resp.status_code == 201, resp.text
         storage_path = resp.json()["storage_path"]
         assert storage_path.endswith("Squat_biomechanics_study.pdf")
+
+
+class TestUploadDoiEnforcement:
+    """FR-EXPV-02 / FR-RAGK-05: DOI is the enforced unique business key."""
+
+    @staticmethod
+    def _wire_storage(MockStorage, mock_service_role_client):
+        from app.services.paper_storage import SignedPaperUpload
+
+        storage_instance = MockStorage.return_value
+        storage_instance.generate_signed_upload_url = AsyncMock(
+            return_value=SignedPaperUpload(
+                url="https://x.supabase.co/upload/tok",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+        mock_service_role_client.return_value = MagicMock()
+        return storage_instance
+
+    def test_upload_missing_doi_returns_422(self, client):
+        body = {k: v for k, v in VALID_BODY.items() if k != "doi"}
+        resp = client.post("/api/v1/expert/papers", json=body)
+        assert resp.status_code == 422
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_upload_malformed_doi_returns_422_invalid_doi(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        self._wire_storage(MockStorage, mock_service_role_client)
+        repo_instance = MockRepo.return_value
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
+        repo_instance.create = AsyncMock()
+
+        resp = client.post(
+            "/api/v1/expert/papers", json={**VALID_BODY, "doi": "not-a-doi"}
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["error"]["code"] == "INVALID_DOI"
+        repo_instance.create.assert_not_awaited()
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_upload_duplicate_doi_returns_409(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        from app.models.rag_document import RagDocument
+
+        self._wire_storage(MockStorage, mock_service_role_client)
+        existing = RagDocument(id=uuid4(), title="Existing Paper")
+        repo_instance = MockRepo.return_value
+        repo_instance.get_live_by_doi = AsyncMock(return_value=existing)
+        repo_instance.create = AsyncMock()
+
+        resp = client.post("/api/v1/expert/papers", json=VALID_BODY)
+
+        assert resp.status_code == 409, resp.text
+        err = resp.json()["detail"]["error"]
+        assert err["code"] == "DUPLICATE_DOI"
+        assert "Existing Paper" in err["message"]
+        repo_instance.create.assert_not_awaited()
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_upload_doi_stored_normalized(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        self._wire_storage(MockStorage, mock_service_role_client)
+        repo_instance = MockRepo.return_value
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
+
+        async def fake_create(doc):
+            return doc
+
+        repo_instance.create = AsyncMock(side_effect=fake_create)
+
+        body = {**VALID_BODY, "doi": "https://doi.org/10.1519/JSC.0B013E31818546BB"}
+        resp = client.post("/api/v1/expert/papers", json=body)
+
+        assert resp.status_code == 201, resp.text
+        create_args = repo_instance.create.await_args
+        assert create_args is not None
+        doc_arg = create_args[0][0]
+        assert doc_arg.doi == "10.1519/jsc.0b013e31818546bb"
+        repo_instance.get_live_by_doi.assert_awaited_once_with(
+            "10.1519/jsc.0b013e31818546bb"
+        )
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_upload_rejected_doi_does_not_block(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        """A reviewed_rejected row is not 'live' — get_live_by_doi returns None
+        and re-upload of the same DOI proceeds (FR-EXPV-02 re-upload path)."""
+        self._wire_storage(MockStorage, mock_service_role_client)
+        repo_instance = MockRepo.return_value
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
+
+        async def fake_create(doc):
+            return doc
+
+        repo_instance.create = AsyncMock(side_effect=fake_create)
+
+        resp = client.post("/api/v1/expert/papers", json=VALID_BODY)
+
+        assert resp.status_code == 201, resp.text
+        assert repo_instance.create.await_count == 1
+
+
+class TestCompletePaperUploadDoiRace:
+    """Concurrent-race close-out (issue #218): the partial unique index
+    uq_rag_documents_doi_live fires on the uploading->pending UPDATE."""
+
+    @staticmethod
+    def _make_uploading_doc(doc_id, storage_path):
+        from app.models.rag_document import RagDocument
+
+        return RagDocument(
+            id=doc_id,
+            title="t",
+            document_type="research_paper",
+            exercise_tags=[],
+            authors=[],
+            doi="10.1234/race",
+            review_status="uploading",
+            storage_path=storage_path,
+            extra_metadata={},
+            ingested_at=datetime.now(timezone.utc),
+        )
+
+    @patch("app.api.v1.expert.get_streaq_worker")
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_complete_integrity_error_returns_409_and_cleans_up(
+        self, MockRepo, MockStorage, mock_svc, MockWorker, expert_app, client
+    ):
+        from sqlalchemy.exc import IntegrityError
+
+        _, mock_db = expert_app
+        doc_id = uuid4()
+        path = f"papers/{doc_id}/paper.pdf"
+
+        order: list[str] = []
+        mock_db.rollback = AsyncMock(side_effect=lambda: order.append("rollback"))
+        mock_db.commit = AsyncMock(side_effect=lambda: order.append("commit"))
+
+        repo_instance = MockRepo.return_value
+        repo_instance.get_by_id = AsyncMock(
+            return_value=self._make_uploading_doc(doc_id, path)
+        )
+        repo_instance.update_review_status = AsyncMock(
+            side_effect=IntegrityError(
+                "UPDATE rag_documents",
+                {},
+                Exception(
+                    "duplicate key value violates unique constraint"
+                    " uq_rag_documents_doi_live"
+                ),
+            )
+        )
+        repo_instance.delete = AsyncMock(
+            side_effect=lambda _id: order.append("repo_delete")
+        )
+
+        storage_instance = MockStorage.return_value
+        storage_instance.download_head_bytes = AsyncMock(return_value=b"%PDF-1.4")
+        storage_instance.delete_object = AsyncMock(
+            side_effect=lambda _p: order.append("storage_delete")
+        )
+
+        mock_svc.return_value = MagicMock()
+        MockWorker.return_value = MagicMock()
+
+        resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["error"]["code"] == "DUPLICATE_DOI"
+        storage_instance.delete_object.assert_awaited_once_with(path)
+        repo_instance.delete.assert_awaited_once_with(doc_id)
+        # rollback discards the poisoned txn BEFORE cleanup; commit persists
+        # the cleanup BEFORE raising (get_db rolls back on HTTPException).
+        assert order == ["rollback", "storage_delete", "repo_delete", "commit"]
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_invalid_pdf_cleanup_commits_before_raise(
+        self, MockRepo, MockStorage, mock_svc, expert_app, client
+    ):
+        """Regression (issue #218 drive-by): get_db ROLLS BACK on HTTPException,
+        so the INVALID_PDF row cleanup must be explicitly committed or the
+        orphan 'uploading' row survives."""
+        _, mock_db = expert_app
+        doc_id = uuid4()
+        path = f"papers/{doc_id}/paper.pdf"
+
+        order: list[str] = []
+        mock_db.commit = AsyncMock(side_effect=lambda: order.append("commit"))
+
+        repo_instance = MockRepo.return_value
+        repo_instance.get_by_id = AsyncMock(
+            return_value=self._make_uploading_doc(doc_id, path)
+        )
+        repo_instance.delete = AsyncMock(
+            side_effect=lambda _id: order.append("repo_delete")
+        )
+
+        storage_instance = MockStorage.return_value
+        storage_instance.download_head_bytes = AsyncMock(return_value=b"<html>xx")
+        storage_instance.delete_object = AsyncMock()
+
+        mock_svc.return_value = MagicMock()
+
+        resp = client.post(f"/api/v1/expert/papers/{doc_id}/complete")
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["error"]["code"] == "INVALID_PDF"
+        assert order == ["repo_delete", "commit"]

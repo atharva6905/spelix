@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, get_expert_reviewer_user
@@ -49,6 +50,7 @@ from app.services.threshold_flag import (
     InvalidThresholdKey,
     ThresholdFlagService,
 )
+from app.utils.doi import DoiValidationError, normalize_doi
 from app.utils.pdf_upload import PDF_MAGIC_BYTES, FilenameValidationError, sanitize_pdf_filename
 
 logger = logging.getLogger(__name__)
@@ -256,6 +258,33 @@ async def request_paper_upload(
             detail={"error": {"code": "INVALID_FILENAME", "message": str(err), "detail": None}},
         ) from err
 
+    # FR-EXPV-02 / FR-RAGK-05 (issue #218): DOI is the enforced unique
+    # business key. Normalize before the dedup pre-check so the stored value
+    # matches the uq_rag_documents_doi_live partial index's expectations.
+    try:
+        normalized_doi = normalize_doi(body.doi)
+    except DoiValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"code": "INVALID_DOI", "message": str(err), "detail": None}},
+        ) from err
+
+    existing = await rag_repo.get_live_by_doi(normalized_doi)
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "DUPLICATE_DOI",
+                    "message": f"A paper with this DOI already exists: {existing.title}",
+                    "detail": {
+                        "existing_paper_id": str(existing.id),
+                        "existing_title": existing.title,
+                    },
+                }
+            },
+        )
+
     paper_id = uuid4()
     storage_path = f"papers/{paper_id}/{safe_name}"
 
@@ -266,7 +295,7 @@ async def request_paper_upload(
         exercise_tags=body.exercise_tags,
         authors=body.authors,
         year=body.year,
-        doi=body.doi,
+        doi=normalized_doi,
         study_design=body.study_design,
         population=body.population,
         measurement_method=body.measurement_method,
@@ -303,6 +332,10 @@ async def complete_paper_upload(
     paper_id: UUID,
     user: CurrentUser = Depends(get_expert_reviewer_user),
     rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
+    # FastAPI dependency caching gives the SAME session that _get_rag_repo
+    # wraps — needed for explicit rollback/commit around the DOI race
+    # close-out and INVALID_PDF cleanup (get_db rolls back on HTTPException).
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Phase 3 of expert PDF upload (ADR-EXPERT-01).
 
@@ -364,6 +397,10 @@ async def complete_paper_upload(
     if not head.startswith(PDF_MAGIC_BYTES):
         await storage.delete_object(storage_path)
         await rag_repo.delete(paper_id)
+        # get_db ROLLS BACK on HTTPException — without this explicit commit
+        # the row delete is undone and the orphan 'uploading' row survives
+        # (pre-existing bug, fixed as issue #218 drive-by).
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
@@ -393,10 +430,32 @@ async def complete_paper_upload(
 
     # System-initiated transition (uploading → pending). reviewer_id stays
     # NULL until an actual human reviews the paper via the review queue.
-    updated = await rag_repo.update_review_status(
-        paper_id,
-        review_status="pending",
-    )
+    try:
+        updated = await rag_repo.update_review_status(
+            paper_id,
+            review_status="pending",
+        )
+    except IntegrityError:
+        # Lost a concurrent-upload race: another row with this DOI went live
+        # between the request_paper_upload pre-check and this flip. The
+        # uq_rag_documents_doi_live partial unique index fires on the
+        # uploading->pending UPDATE. Discard the poisoned transaction, clean
+        # up, and persist the cleanup explicitly — get_db ROLLS BACK on
+        # HTTPException, so without the commit the orphan row would survive.
+        await db.rollback()
+        await storage.delete_object(storage_path)
+        await rag_repo.delete(paper_id)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "DUPLICATE_DOI",
+                    "message": "A paper with this DOI already exists.",
+                    "detail": None,
+                }
+            },
+        ) from None
     # update_review_status is typed Optional (returns None if the row vanished
     # between the earlier get_by_id and now). A concurrent delete on an
     # 'uploading' row is not expected, but narrow for the type-checker.

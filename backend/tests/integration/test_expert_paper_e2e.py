@@ -24,6 +24,8 @@ VALID_METADATA = {
     "document_type": "research_paper",
     "exercise_tags": ["squat"],
     "authors": ["Doe J"],
+    # DOI required since issue #218 (FR-EXPV-02 dedup key).
+    "doi": "10.1234/int-test-2026",
     "filename": "int_test.pdf",
     "file_size_bytes": 1000,
 }
@@ -33,7 +35,9 @@ class _InMemoryRagRepo:
     """Dict-backed RagDocumentRepository stand-in for the end-to-end walk."""
 
     def __init__(self) -> None:
-        self._rows: dict[UUID, object] = {}
+        from typing import Any
+
+        self._rows: dict[UUID, Any] = {}
 
     async def create(self, doc):
         self._rows[doc.id] = doc
@@ -41,6 +45,16 @@ class _InMemoryRagRepo:
 
     async def get_by_id(self, doc_id):
         return self._rows.get(doc_id)
+
+    async def get_live_by_doi(self, doi):
+        # Mirrors the uq_rag_documents_doi_live partial index predicate.
+        for row in self._rows.values():
+            if row.doi == doi and row.review_status not in (
+                "reviewed_rejected",
+                "uploading",
+            ):
+                return row
+        return None
 
     async def update_review_status(self, doc_id, *, review_status, reviewer_id=None):
         self._rows[doc_id].review_status = review_status
@@ -51,6 +65,21 @@ class _InMemoryRagRepo:
     async def delete(self, doc_id):
         self._rows.pop(doc_id, None)
         return True
+
+
+def _override_mock_db(app: FastAPI) -> AsyncMock:
+    """complete_paper_upload now takes db=Depends(get_db) for explicit
+    rollback/commit (issue #218) — give it an AsyncMock session so no real
+    DB connection is attempted."""
+    from app.db import get_db
+
+    mock_db = AsyncMock()
+
+    async def _mock_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = _mock_db
+    return mock_db
 
 
 @patch("app.api.v1.expert.get_streaq_worker")
@@ -72,6 +101,7 @@ def test_full_upload_flow_phase1_through_phase3(MockStorage, mock_svc, MockWorke
         "role": "expert_reviewer",
     }
     app.dependency_overrides[_get_rag_repo] = lambda: repo
+    _override_mock_db(app)
 
     storage = MockStorage.return_value
     storage.generate_signed_upload_url = AsyncMock(
@@ -130,6 +160,7 @@ def test_invalid_pdf_bytes_rejected_and_row_deleted(MockStorage, mock_svc):
         "role": "expert_reviewer",
     }
     app.dependency_overrides[_get_rag_repo] = lambda: repo
+    _override_mock_db(app)
 
     storage = MockStorage.return_value
     storage.generate_signed_upload_url = AsyncMock(

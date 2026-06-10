@@ -124,7 +124,9 @@ class RagDocumentUploadRequest(BaseModel):
     exercise_tags: list[str] = Field(default_factory=list)
     authors: list[str] = Field(default_factory=list)
     year: int | None = Field(default=None, ge=1900, le=2100)
-    doi: str | None = Field(default=None, max_length=200)
+    # Required: DOI is the enforced unique business key for expert-uploaded
+    # papers (FR-EXPV-02, issue #218). Normalized server-side via normalize_doi.
+    doi: str = Field(..., min_length=1, max_length=200)
     study_design: StudyDesignLiteral | None = None
     population: str | None = Field(default=None, max_length=500)
     measurement_method: str | None = Field(default=None, max_length=500)
