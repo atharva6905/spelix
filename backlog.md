@@ -5,8 +5,8 @@
 > provenance (each row carries its merge SHA). Newest phases are summarized first in the Contents below.
 
 **Project status:** Post-L2, private beta live on `spelix.app`. Phase 0/1/2/3 + the L2 sprint are complete;
-the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2301 backend unit tests,
-765 frontend tests, 27 migrations** (alembic head `47c8e446162e`). See `decisions.md` for the ADR log.
+the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2311 backend unit tests,
+769 frontend tests, 28 migrations** (alembic head `cf685bd7e8f8`). See `decisions.md` for the ADR log.
 
 ## Open work (→ GitHub Issues)
 
@@ -45,6 +45,16 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 3: DOI dedup for expert papers (2026-06-10)
+
+First live `/design` → `/ship-loop` run on the harness v3 chain (brainstorm → spec → plan → groomed issues #218/#219/#220 → execution). DOI becomes the enforced unique business key for expert-uploaded papers (expert-partner report: same paper, different titles; unintentional duplicate uploads). UUID PK unchanged — enforcement via partial unique index `uq_rag_documents_doi_live` on live rows (`review_status NOT IN ('reviewed_rejected','uploading')`); race close-out at the uploading→pending flip. Migration 028 (`cf685bd7e8f8`) applied + verified pre-merge. Follow-ups filed on merge: #229 (review_paper IntegrityError), #230 (seed script doi column), #231 (complete ownership check), #232 (DoiLink extraction).
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #218 | FR-EXPV-02/FR-RAGK-05 DOI dedup — migration 028 (backfill-normalize + partial unique index), `normalize_doi` util (`^10\.\d{4,9}/\S+$`, 422 INVALID_DOI), required `doi` in `RagDocumentUploadRequest`, 409 DUPLICATE_DOI pre-check + complete-time IntegrityError race close-out (rollback → cleanup → explicit commit → 409), drive-by INVALID_PDF orphan-row commit fix. Spec/quality/security reviews PASS (1 spec fix iteration). PR #227. | done | M | T2→T2 | `8dd7c61` | `backend/alembic/versions/cf685bd7e8f8_*.py`, `backend/app/utils/doi.py`, `backend/app/api/v1/expert.py`, `backend/app/repositories/rag_document.py`, `backend/app/schemas/rag_document.py`, tests |
+| #220 | FR-EXPV-02/FR-RAGK-08 DOI column in expert "My Papers" + admin corpus tables — doi.org link cells (noopener noreferrer), em-dash null fallback, colSpan bump. Spec/security reviews PASS. PR #228. | done | XS | T2→T2 | `345c2621` | `frontend/src/pages/ExpertPortalPage.tsx`, `frontend/src/pages/AdminPage.tsx`, tests |
+| #219 | FR-EXPV-02/05 upload page — required DOI field + inline duplicate error. Deliberately held until #218 deployed (wire contract + gen-types). | pending | S | T2 | — | `frontend/src/pages/ExpertPaperUploadPage.tsx`, `frontend/src/api/expert.ts` |
+
 ## Completed — Harness v3 "Designed Autopilot" (2026-06-09)
 
 Skills upgrade extending harness v2 with the ideation/planning front half and a per-task review layer. Designed via the superpowers brainstorming→writing-plans chain (dogfooding the pattern it codifies); single T2 PR, human-merged. Spec + plan local-only under `docs/internal/`. ADR-HARNESS-01.
@@ -53,7 +63,7 @@ Skills upgrade extending harness v2 with the ideation/planning front half and a 
 |-------|----|-------|
 | `/design` (nested superpowers:brainstorming → writing-plans, files groomed issues) + `/implement` (worktree + specialist routing + tier-scaled spec→quality→security review chain) + 4 new agents (`spelix-ai-engineer` merging coaching/rag/langgraph; spec/quality/governance reviewers with `memory: project`) + memory write-discipline bookends + ship-loop/groom rewiring + governance.md T0 gate → `spelix-governance-reviewer` + retired `/plan` `/parallel` `/team` `/phase-gate` `/escalate` | #217 | `f61c827` |
 
-Post-merge validation pending: live `/design` → `/ship-loop` run, reviewer MEMORY.md population, governance-reviewer T0 self-merge.
+Post-merge validation: live `/design` → `/ship-loop` run completed 2026-06-10 (DOI dedup, run 3 above) — design chain, tier-scaled review chains (spec fix-iteration loop exercised on #218), and reviewer MEMORY.md population all worked; spec/quality reviewers self-persist, security reviewer (read-only by design) reports facts for the main agent to persist. Governance-reviewer T0 self-merge still unexercised.
 
 ## Completed — Post-L2 beta ops — /ship-loop run 2: srs-audit CRITICALs (2026-06-09)
 

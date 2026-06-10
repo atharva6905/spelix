@@ -24,6 +24,7 @@
 | ADR-GOVERNANCE-01 | Risk-tier merge governance (T0–T3) | Foundational / Platform | Accepted |
 | ADR-AUTONOMY-01 | In-session autonomy over headless `claude -p` | Foundational / Platform | Accepted |
 | ADR-HARNESS-01 | Harness v3 — nested superpowers chains, /implement review layer, memory reviewers | Foundational / Platform | Accepted |
+| ADR-TXN-01 | get_db rolls back on HTTPException — cleanup-then-raise needs explicit commit | Foundational / Platform | Accepted |
 | ADR-012 | Phase 0 Confidence — Simple Mean | CV & Scoring | Accepted |
 | ADR-015 | Tier 5 Per-Rep Confidence — 10th Percentile, Not Mean | CV & Scoring | Accepted |
 | ADR-016 | ScoreComponent Protocol for Extensibility | CV & Scoring | Accepted |
@@ -70,6 +71,7 @@
 | ADR-039 | Seed Corpus Uses AI-Synthesized Paper Text, Not Verbatim PDFs (Session 25) | RAG & Retrieval | Accepted |
 | ADR-046 | Qdrant Payload Indexes Are Idempotent on Existing Collections (Session 27) | RAG & Retrieval | Accepted |
 | ADR-EXPERT-02 | Docling for expert-uploaded PDF text extraction (Session 63) | RAG & Retrieval | Accepted |
+| ADR-EXPERT-04 | DOI as papers business key — partial unique index on live rows, UUID PK retained | RAG & Retrieval | Accepted |
 | ADR-BRAIN-01 | Separate Qdrant Collection for Coach Brain (Session 14) | Coach Brain & Distillation | Accepted |
 | ADR-BRAIN-02 | Contextual Padding Before Embedding Short Cues (Session 14) | Coach Brain & Distillation | Accepted |
 | ADR-BRAIN-03 | Hybrid Dense + Sparse + Server-Side RRF for Coach Brain (Session 14) | Coach Brain & Distillation | Accepted |
@@ -853,6 +855,11 @@ Conclusion: **no current building block reliably yields a bench bar path.** A ge
 
 **Related.** Supersedes the root-cause attribution in ADR-DEPTHFRAME-DROPOUT-GATE (R1). Builds on R2/R5 (the honest-None surface). Backlog `L2-CV-DEPTHFRAME-OBLIQUE-3D` (open, parked). Investigation + reproduction: `docs/audit/2026-05-25-squat-oblique-3d-investigation.md`.
 
+## ADR-TXN-01: get_db rolls back on HTTPException — cleanup-then-raise paths need an explicit commit
+**Context**: `get_db` (backend/app/db.py) commits on success and rolls back on ANY exception, including HTTPException. Endpoint code that deletes rows as *cleanup* and then raises an error response silently loses the cleanup — discovered in issue #218 as a pre-existing bug in `complete_paper_upload`'s INVALID_PDF branch, where the orphan `'uploading'` row survived its own deletion.
+**Decision**: Any cleanup that must persist before raising follows the sequence: (`await db.rollback()` first if the transaction is poisoned, e.g. after IntegrityError) → side-effect deletes (storage, rows) → `await db.commit()` → `raise HTTPException`. The endpoint takes `db: AsyncSession = Depends(get_db)` explicitly — FastAPI per-request dependency caching guarantees it is the SAME session the repositories wrap. Pattern lives at `expert.py::complete_paper_upload` (two sites); tests assert the exact ordering (`["rollback", "storage_delete", "repo_delete", "commit"]`).
+**Consequences**: Cleanup is durable even though the response is an error. Gotcha: the explicit commit makes the cleanup non-atomic with the failed operation — a crash between deletes and commit leaves partial state (acceptable where orphans are inert, as with index-excluded `'uploading'` rows). If a third call site appears, extract a `commit_then_raise` helper in `app/db.py` rather than copy-pasting (flagged in PR #227 review).
+
 # RAG & Retrieval
 
 ## ADR-P2-001: Qdrant Cloud Free Tier for Phase 2 (Session 14)
@@ -1253,6 +1260,11 @@ The 2026-04-27 spelix-auditor sweep flagged the SRS-vs-runtime divergence (audit
 - Documented in `backend/CLAUDE.md` under a new "SQLAlchemy async relationship loading" gotcha (to-add as part of session 60 CLAUDE.md hygiene).
 
 **Related:** PR #113 (commit `82cfa80`). FR-AICP-17 (follow-up chat). Also ADR-ROOTCAUSE-01 (fix at the source, not the symptom).
+
+## ADR-EXPERT-04: DOI as the papers business key — partial unique index on live rows, UUID PK retained
+**Context**: The expert partner reported papers can share a DOI under different titles, and duplicates get uploaded unintentionally (issue #218, FR-EXPV-02). A literal PK swap to DOI was rejected: storage paths (`papers/{uuid}/…`), Qdrant point-ID derivation, and reviewer references hang off the UUID, and correcting a DOI typo must not rewrite row identity.
+**Decision**: `rag_documents.id` (UUID) stays the PK; DOI is the enforced *business key* via partial unique index `uq_rag_documents_doi_live` (migration `cf685bd7e8f8`): `ON rag_documents(doi) WHERE doi IS NOT NULL AND review_status NOT IN ('reviewed_rejected','uploading')`. Rejected papers stay re-uploadable; orphaned upload attempts never lock a DOI; uniqueness fires at the `uploading→pending` flip (the concurrent-race close-out — `IntegrityError` → cleanup → 409 `DUPLICATE_DOI`). DOIs are normalized once at the API boundary (`app/utils/doi.py::normalize_doi`: trim, strip `doi.org`/`doi:` prefixes, lowercase, shape `^10\.\d{4,9}/\S+$`); the index assumes pre-normalized values.
+**Consequences**: Dedup is race-proof without table locks, and the pre-check (`get_live_by_doi`) can give a friendly 409 with the existing title. Gotchas: (1) every writer must normalize — non-API writers bypass the guarantee (seed script gap → issue #230); (2) the index predicate is duplicated as a Python literal in `get_live_by_doi` — adding a `review_status` value requires updating both (flagged in PR #227 review); (3) any *other* transition INTO index scope (e.g. rejected→approved re-review) can now raise IntegrityError and needs handling (issue #229).
 
 # Data & Privacy
 
