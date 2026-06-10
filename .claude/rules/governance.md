@@ -29,8 +29,9 @@ Agent: branch → implement (TDD) → PR → run /code-review → post findings 
 comment → present the in-session APPROVAL GATE (PR gist + AskUserQuestion, per
 /ship-loop). Merge ONLY on an explicit in-session human approval, recorded as a PR
 comment before merging. No human response, headless/autonomous context (incl.
-/groom), or human defers → label `needs-human` and STOP. Never merge without a
-recorded approval.
+/groom), or human defers → label `needs-human` and STOP; human skips → leave the
+PR open; human closes → close without merging. Never merge without a recorded
+approval.
 
 ## Tier 2 — human-gated
 Paths/categories: `backend/app/models/**`, `backend/app/schemas/**`, `backend/alembic/**`,

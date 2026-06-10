@@ -71,21 +71,24 @@ Continuous delivery over a task queue, fully in-session. Governance:
         (re-enter via EnterWorktree path: if needed); re-run only the review gates
         invalidated by the fix; push; re-watch CI; re-present the gate.
      5. Defer → label `needs-human`, record the open questions as a PR comment.
-     6. Whatever the outcome, proceed to step 8 cleanup (merged → remove,
-        defer/skip/blocked → keep, closed → remove with discard_changes only
-        after the human confirms in the gate).
+     6. Whatever the outcome, proceed to step 8 cleanup — per-outcome worktree
+        rules live there.
      The gate is for INTERACTIVE sessions: if the human does not respond or the
      session is autonomous/headless, fall back to label `needs-human` + NEXT task.
 8. Cleanup — runs for EVERY outcome before the next task:
    - Merged: `ExitWorktree` (action: "remove") — deletes the worktree and its local
      branch (the work is on main). If the tool refuses citing unmerged changes,
      STOP and reconcile — never pass discard_changes blind.
-   - Deferred (needs-human) or blocked: `ExitWorktree` (action: "keep") — worktree
-     and branch survive for later fixes; record the worktree path in handoff.
+   - Deferred (needs-human), skipped (PR left open), or blocked: `ExitWorktree`
+     (action: "keep") — worktree and branch survive for later fixes; record the
+     worktree path in handoff.
+   - Closed/abandoned: `ExitWorktree` (action: "remove", discard_changes: true) —
+     permitted here ONLY because the human chose "Close PR & abandon" at the gate;
+     this is the sole sanctioned use of discard_changes.
    - Back in the main checkout (ExitWorktree restores it, already on main):
      `git pull --ff-only`, then `git worktree prune`.
    - Update backlog.md (if issue closed) and .claude/handoff.md inline. Next task.
 
 ## End of run
-Summary table: | Issue | Tier (prov→actual) | PR | CI | Outcome (merged/needs-human/blocked) |.
+Summary table: | Issue | Tier (prov→actual) | PR | CI | Outcome (merged/needs-human/blocked/skipped/closed) |.
 Update .claude/handoff.md with the table and any blockers.
