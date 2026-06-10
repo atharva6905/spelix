@@ -25,6 +25,8 @@ def _make_doc(
     year=2024,
     doi="10.1234/test",
     quality_tier="L2_rct",
+    exercise_tags=None,
+    sex_applicability="both",
 ):
     pid = paper_id or str(uuid4())
     return SimpleNamespace(
@@ -37,6 +39,8 @@ def _make_doc(
         review_status=review_status,
         storage_path=storage_path or f"papers/{pid}/doc.pdf",
         chunk_count=0,
+        exercise_tags=exercise_tags if exercise_tags is not None else ["squat"],
+        sex_applicability=sex_applicability,
     )
 
 
@@ -86,7 +90,7 @@ async def test_ingest_paper_extraction_failed():
 @pytest.mark.asyncio
 async def test_ingest_paper_happy_path():
     paper_id = str(uuid4())
-    doc = _make_doc(paper_id=paper_id)
+    doc = _make_doc(paper_id=paper_id, exercise_tags=["squat"], sex_applicability="both")
 
     storage = AsyncMock()
     storage.download_bytes = AsyncMock(return_value=b"%PDF-1.4 content")
@@ -137,6 +141,12 @@ async def test_ingest_paper_happy_path():
     assert result["chunk_count"] == 7
     storage.download_bytes.assert_awaited_once_with(doc.storage_path)
     mock_svc.ingest_document.assert_awaited_once()
+
+    # Issue #222: exercise_tags + sex_applicability propagate from the doc row
+    # into the DocumentMetadata the task builds.
+    passed_metadata = mock_svc.ingest_document.await_args.kwargs["metadata"]
+    assert passed_metadata.exercise_tags == ["squat"]
+    assert passed_metadata.sex_applicability == "both"
 
 
 def test_ingest_paper_registered_in_streaq_worker():
