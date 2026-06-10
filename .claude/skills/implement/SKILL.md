@@ -12,6 +12,27 @@ to the CALLER (ship-loop or the user) — never to this skill.
 
 Governance (`.claude/rules/governance.md`) is BINDING.
 
+## Step 0 — Isolation detection (nested sub-skill)
+
+**REQUIRED SUB-SKILL:** invoke `superpowers:using-git-worktrees` via the Skill tool
+BEFORE any git command in this skill. Spelix overrides (take precedence over the
+skill's defaults):
+
+1. The native worktree tool is `EnterWorktree`/`ExitWorktree`. NEVER `git worktree add`
+   (the skill's Step 1b git fallback is forbidden here — if EnterWorktree itself fails,
+   that is a blocker to report, not a reason to fall back).
+2. The skill's Step 0 detection decides the entry path:
+   - Already inside a linked worktree whose branch matches THIS task → skip creation,
+     go directly to Step 2 (dispatch).
+   - Already inside a linked worktree for a DIFFERENT task (stale/leftover) →
+     `ExitWorktree` (action: "keep") back to the main checkout FIRST. Never run
+     preflight git commands from inside a foreign worktree.
+   - In the main checkout → proceed to Step 1 preflight as written.
+3. Skip the skill's Step 3 (project setup) and Step 4 (baseline test run) — Spelix
+   worktrees share refs/venvs and CI is the baseline gate. Run setup only on import
+   failure.
+4. The skill's consent question is waived — isolation is mandated by this harness.
+
 ## Step 1 — Preflight
 
 1. `git fetch origin && git checkout main && git pull --ff-only`
