@@ -100,7 +100,7 @@ export interface PaperUploadMetadata {
   exercise_tags?: string[];
   authors?: string[];
   year?: number;
-  doi?: string;
+  doi: string;
   study_design?:
     | "rct"
     | "observational"

@@ -100,6 +100,7 @@ describe("requestPaperUploadUrl", () => {
 
     const res = await requestPaperUploadUrl({
       title: "t",
+      doi: "10.1000/abc123",
       filename: "x.pdf",
       file_size_bytes: 1000,
     });

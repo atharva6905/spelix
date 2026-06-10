@@ -100,6 +100,10 @@ describe("ExpertPaperUploadPage — file upload", () => {
     await act(async () => {
       fireEvent.change(titleInput, { target: { value: "Paper T" } });
     });
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: "10.1000/abc123" } });
+    });
     const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
     const file = new File([new Uint8Array(1024)], "x.pdf", {
       type: "application/pdf",
@@ -132,6 +136,10 @@ describe("ExpertPaperUploadPage — file upload", () => {
     await act(async () => {
       fireEvent.change(titleInput, { target: { value: "X" } });
     });
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: "10.1000/xyz" } });
+    });
     const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
     await act(async () => {
       fireEvent.change(fileInput, {
@@ -156,5 +164,209 @@ describe("ExpertPaperUploadPage — file upload", () => {
     expect(
       screen.getByRole("button", { name: /upload/i }),
     ).toBeDisabled();
+  });
+});
+
+describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
+  beforeEach(() => {
+    mockRequestUrl.mockReset();
+    mockCompleteUpload.mockReset();
+    mockUploadFile.mockReset();
+  });
+
+  /** Fill title + PDF file (leaves DOI alone unless provided) */
+  async function fillForm(doi?: string) {
+    const titleInput = screen.getByLabelText(/title/i);
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Paper T" } });
+    });
+    if (doi !== undefined) {
+      const doiInput = screen.getByLabelText(/doi/i);
+      await act(async () => {
+        fireEvent.change(doiInput, { target: { value: doi } });
+      });
+    }
+    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
+    const file = new File([new Uint8Array(1024)], "x.pdf", {
+      type: "application/pdf",
+    });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+  }
+
+  it("disables submit until DOI is filled", async () => {
+    renderPage();
+    await waitForForm();
+    await fillForm(); // title + file set, DOI empty
+    expect(screen.getByRole("button", { name: /upload/i })).toBeDisabled();
+
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: "10.1000/abc123" } });
+    });
+    expect(screen.getByRole("button", { name: /upload/i })).toBeEnabled();
+  });
+
+  it("caps DOI input at 200 characters", async () => {
+    renderPage();
+    await waitForForm();
+    const doiInput = screen.getByLabelText(/doi/i) as HTMLInputElement;
+    expect(doiInput).toHaveAttribute("maxLength", "200");
+  });
+
+  it("shows inline DOI error when submit fires with empty DOI", async () => {
+    renderPage();
+    await waitForForm();
+    await fillForm(); // title + file set, DOI empty
+
+    // Bypass the disabled button — fire submit on the form element directly
+    const formEl = document.querySelector("form");
+    expect(formEl).not.toBeNull();
+    await act(async () => {
+      fireEvent.submit(formEl!);
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("DOI is required.");
+    const doiInput = screen.getByLabelText(/doi/i) as HTMLInputElement;
+    expect(doiInput.closest("div")).toContainElement(alert);
+
+    // Form stays idle/editable, no request fired
+    expect(doiInput).not.toBeDisabled();
+    expect(screen.getByLabelText(/title/i)).not.toBeDisabled();
+    expect(mockRequestUrl).not.toHaveBeenCalled();
+  });
+
+  it("shows required marker on the DOI label", async () => {
+    renderPage();
+    await waitForForm();
+    const doiLabel = document.querySelector('label[for="doi"]');
+    expect(doiLabel).not.toBeNull();
+    expect(doiLabel!.textContent).toMatch(/\*/);
+  });
+
+  it("renders inline DOI error on 409 DUPLICATE_DOI and returns form to editable state", async () => {
+    mockRequestUrl.mockRejectedValue({
+      status: 409,
+      error: {
+        code: "DUPLICATE_DOI",
+        message: "A paper with this DOI already exists: Existing Paper",
+      },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm("10.1000/dup");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      /A paper with this DOI already exists: Existing Paper/,
+    );
+
+    // Error rendered adjacent to the DOI input (same field container)
+    const doiInput = screen.getByLabelText(/doi/i) as HTMLInputElement;
+    expect(doiInput.closest("div")).toContainElement(alert);
+
+    // Form back to editable state with values preserved
+    expect(doiInput).not.toBeDisabled();
+    expect(screen.getByLabelText(/title/i)).not.toBeDisabled();
+    expect(doiInput.value).toBe("10.1000/dup");
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe(
+      "Paper T",
+    );
+    expect(mockUploadFile).not.toHaveBeenCalled();
+  });
+
+  it("renders inline DOI error on 422 INVALID_DOI", async () => {
+    mockRequestUrl.mockRejectedValue({
+      status: 422,
+      error: {
+        code: "INVALID_DOI",
+        message: "DOI must match the 10.xxxx/suffix format.",
+      },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm("not-a-doi");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/DOI must match the 10\.xxxx\/suffix format\./);
+    expect(screen.getByLabelText(/doi/i)).not.toBeDisabled();
+  });
+
+  it("clears a stale DOI error when a resubmit succeeds", async () => {
+    mockRequestUrl.mockRejectedValueOnce({
+      status: 409,
+      error: {
+        code: "DUPLICATE_DOI",
+        message: "A paper with this DOI already exists: Existing Paper",
+      },
+    });
+    mockRequestUrl.mockResolvedValueOnce({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm("10.1000/dup");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+    await screen.findByRole("alert");
+
+    // Edit a non-DOI field, then resubmit the same DOI — now succeeds
+    const titleInput = screen.getByLabelText(/title/i);
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Paper T v2" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/uploaded and queued/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the DOI error when the DOI value changes", async () => {
+    mockRequestUrl.mockRejectedValue({
+      status: 409,
+      error: {
+        code: "DUPLICATE_DOI",
+        message: "A paper with this DOI already exists: Existing Paper",
+      },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm("10.1000/dup");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+    await screen.findByRole("alert");
+
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: "10.1000/dup2" } });
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

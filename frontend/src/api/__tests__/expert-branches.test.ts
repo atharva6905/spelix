@@ -168,7 +168,7 @@ describe("requestPaperUploadUrl", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(resp), { status: 200, headers: { "Content-Type": "application/json" } }),
     );
-    const result = await requestPaperUploadUrl({ title: "Test paper", filename: "test.pdf", file_size_bytes: 1024 });
+    const result = await requestPaperUploadUrl({ title: "Test paper", doi: "10.1000/test", filename: "test.pdf", file_size_bytes: 1024 });
     expect(result.id).toBe("p1");
   });
 });
