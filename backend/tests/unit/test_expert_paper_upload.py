@@ -207,6 +207,8 @@ class TestUploadDoiEnforcement:
         err = resp.json()["detail"]["error"]
         assert err["code"] == "DUPLICATE_DOI"
         assert "Existing Paper" in err["message"]
+        assert err["detail"]["existing_paper_id"] == str(existing.id)
+        assert err["detail"]["existing_title"] == "Existing Paper"
         repo_instance.create.assert_not_awaited()
 
     @patch("app.api.v1.expert.get_service_role_client")
