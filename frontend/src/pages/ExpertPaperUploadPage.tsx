@@ -88,6 +88,7 @@ export default function ExpertPaperUploadPage() {
     "idle" | "requesting" | "uploading" | "completing" | "success" | "error"
   >("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [doiError, setDoiError] = useState<string | null>(null);
 
   // Role check — FR-EXPV-01
   useEffect(() => {
@@ -171,7 +172,7 @@ export default function ExpertPaperUploadPage() {
         exercise_tags: form.exercise_tags,
         authors,
         year: yearNum,
-        doi: form.doi.trim() || undefined,
+        doi: form.doi.trim(),
         study_design: (form.study_design || undefined) as
           | "rct"
           | "observational"
@@ -198,6 +199,15 @@ export default function ExpertPaperUploadPage() {
 
       setUploadPhase("success");
     } catch (err) {
+      const apiErr = err as { status?: number; error?: { code?: string; message?: string } };
+      if (
+        (apiErr.status === 409 && apiErr.error?.code === "DUPLICATE_DOI") ||
+        (apiErr.status === 422 && apiErr.error?.code === "INVALID_DOI")
+      ) {
+        setDoiError(apiErr.error?.message ?? "A paper with this DOI already exists.");
+        setUploadPhase("idle");
+        return;
+      }
       setUploadError(err instanceof Error ? err.message : "Upload failed");
       setUploadPhase("error");
     }
@@ -294,17 +304,23 @@ export default function ExpertPaperUploadPage() {
               {/* DOI */}
               <div>
                 <label htmlFor="doi" className="mb-1 block text-sm font-medium text-gray-700">
-                  DOI
+                  DOI <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="doi"
                   type="text"
                   value={form.doi}
-                  onChange={(e) => setForm((f) => ({ ...f, doi: e.target.value }))}
+                  onChange={(e) => {
+                    setDoiError(null);
+                    setForm((f) => ({ ...f, doi: e.target.value }));
+                  }}
                   placeholder="10.xxxx/xxxxx"
                   disabled={uploadPhase !== "idle"}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
+                {doiError && (
+                  <p role="alert" className="mt-1 text-sm text-red-600">{doiError}</p>
+                )}
               </div>
 
               {/* Exercise tags */}
@@ -438,7 +454,7 @@ export default function ExpertPaperUploadPage() {
                   <>
                     <button
                       type="submit"
-                      disabled={!selectedFile || !form.title.trim() || uploadPhase !== "idle"}
+                      disabled={!selectedFile || !form.title.trim() || !form.doi.trim() || uploadPhase !== "idle"}
                       className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                     >
                       {uploadPhase === "requesting"
