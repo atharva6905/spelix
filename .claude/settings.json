@@ -10,11 +10,11 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/safety-blocklist.js" },
-          { "type": "command", "command": "node .claude/hooks/safety-caution.js" },
-          { "type": "command", "command": "node .claude/hooks/secret-scan.js" },
-          { "type": "command", "command": "node .claude/hooks/worktree-freshness.js" },
-          { "type": "command", "command": "node .claude/hooks/graphify-hint.js" }
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety-blocklist.js\"" },
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/safety-caution.js\"" },
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.js\"" },
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/worktree-freshness.js\"" },
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/graphify-hint.js\"" }
         ]
       }
     ],
@@ -22,21 +22,21 @@
       {
         "matcher": "Write|Edit",
         "hooks": [
-          { "type": "command", "command": "node .claude/hooks/post-edit-lint.js", "statusMessage": "Linting edited file..." }
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-lint.js\"", "statusMessage": "Linting edited file..." }
         ]
       }
     ],
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "node .claude/hooks/session-start.js" } ] }
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.js\"" } ] }
     ],
     "PreCompact": [
-      { "hooks": [ { "type": "command", "command": "node .claude/hooks/pre-compact.js" } ] }
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-compact.js\"" } ] }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "node .claude/hooks/session-end.js" } ] }
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-end.js\"" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node .claude/hooks/stop-gate.js", "timeout": 180, "statusMessage": "Final checks..." } ] }
+      { "hooks": [ { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-gate.js\"", "timeout": 180, "statusMessage": "Final checks..." } ] }
     ]
   },
   "enabledPlugins": {
