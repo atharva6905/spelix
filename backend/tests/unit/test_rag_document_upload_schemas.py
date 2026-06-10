@@ -7,11 +7,15 @@ from app.schemas.rag_document import (
     RagDocumentUploadResponse,
 )
 
+# DOI became required in issue #218 (FR-EXPV-02 dedup key).
+VALID_DOI = "10.1519/jsc.0b013e31818546bb"
+
 
 class TestRagDocumentUploadRequest:
     def test_minimal_valid_body(self):
         req = RagDocumentUploadRequest(
             title="Test",
+            doi=VALID_DOI,
             filename="paper.pdf",
             file_size_bytes=100,
         )
@@ -20,17 +24,26 @@ class TestRagDocumentUploadRequest:
         assert req.exercise_tags == []
         assert req.authors == []
 
-    def test_rejects_size_over_50mib(self):
+    def test_rejects_missing_doi(self):
+        """DOI is the enforced unique business key (FR-EXPV-02, issue #218)."""
         with pytest.raises(ValidationError):
             RagDocumentUploadRequest(
                 title="Test",
+                filename="paper.pdf",
+                file_size_bytes=100,
+            )
+
+    def test_rejects_size_over_50mib(self):
+        with pytest.raises(ValidationError):
+            RagDocumentUploadRequest(
+                title="Test", doi=VALID_DOI,
                 filename="p.pdf", file_size_bytes=52_428_801,
             )
 
     def test_rejects_size_zero(self):
         with pytest.raises(ValidationError):
             RagDocumentUploadRequest(
-                title="Test",
+                title="Test", doi=VALID_DOI,
                 filename="p.pdf", file_size_bytes=0,
             )
 
@@ -38,14 +51,14 @@ class TestRagDocumentUploadRequest:
         """Filename must be at least 5 chars (x.pdf is the minimum)."""
         with pytest.raises(ValidationError):
             RagDocumentUploadRequest(
-                title="Test",
+                title="Test", doi=VALID_DOI,
                 filename="x.pd", file_size_bytes=100,
             )
 
     def test_accepts_all_study_designs(self):
         for design in ["rct", "observational", "systematic_review", "narrative_review"]:
             req = RagDocumentUploadRequest(
-                title="t",
+                title="t", doi=VALID_DOI,
                 filename="p.pdf", file_size_bytes=100, study_design=design,
             )
             assert req.study_design == design
@@ -53,7 +66,7 @@ class TestRagDocumentUploadRequest:
     def test_rejects_invalid_document_type(self):
         with pytest.raises(ValidationError):
             RagDocumentUploadRequest(
-                title="t", document_type="invalid_kind",
+                title="t", document_type="invalid_kind", doi=VALID_DOI,
                 filename="p.pdf", file_size_bytes=100,
             )
 
