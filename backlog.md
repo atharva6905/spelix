@@ -6,7 +6,7 @@
 
 **Project status:** Post-L2, private beta live on `spelix.app`. Phase 0/1/2/3 + the L2 sprint are complete;
 the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2311 backend unit tests,
-769 frontend tests, 28 migrations** (alembic head `cf685bd7e8f8`). See `decisions.md` for the ADR log.
+803 frontend tests, 28 migrations** (alembic head `cf685bd7e8f8`). See `decisions.md` for the ADR log.
 
 ## Open work (→ GitHub Issues)
 
@@ -53,7 +53,7 @@ First live `/design` → `/ship-loop` run on the harness v3 chain (brainstorm �
 |----|-------|--------|------|--------------------|--------|-------|
 | #218 | FR-EXPV-02/FR-RAGK-05 DOI dedup — migration 028 (backfill-normalize + partial unique index), `normalize_doi` util (`^10\.\d{4,9}/\S+$`, 422 INVALID_DOI), required `doi` in `RagDocumentUploadRequest`, 409 DUPLICATE_DOI pre-check + complete-time IntegrityError race close-out (rollback → cleanup → explicit commit → 409), drive-by INVALID_PDF orphan-row commit fix. Spec/quality/security reviews PASS (1 spec fix iteration). PR #227. | done | M | T2→T2 | `8dd7c61` | `backend/alembic/versions/cf685bd7e8f8_*.py`, `backend/app/utils/doi.py`, `backend/app/api/v1/expert.py`, `backend/app/repositories/rag_document.py`, `backend/app/schemas/rag_document.py`, tests |
 | #220 | FR-EXPV-02/FR-RAGK-08 DOI column in expert "My Papers" + admin corpus tables — doi.org link cells (noopener noreferrer), em-dash null fallback, colSpan bump. Spec/security reviews PASS. PR #228. | done | XS | T2→T2 | `345c2621` | `frontend/src/pages/ExpertPortalPage.tsx`, `frontend/src/pages/AdminPage.tsx`, tests |
-| #219 | FR-EXPV-02/05 upload page — required DOI field + inline duplicate error. Deliberately held until #218 deployed (wire contract + gen-types). | pending | S | T2 | — | `frontend/src/pages/ExpertPaperUploadPage.tsx`, `frontend/src/api/expert.ts` |
+| #219 | FR-EXPV-02/05 upload page — required DOI field (label asterisk, submit gate, in-handler guard, maxLength 200) + inline 409 DUPLICATE_DOI / 422 INVALID_DOI error (`role="alert"`, phase back to idle, values preserved, clear-on-change + clear-on-submit). Spec/quality/security PASS (1 quality fix + human-approved hardening, both security re-verified). PR #233 (3 commits). /code-review follow-ups filed: #234 (DOI-less doc types — product), #235 (typed ExpertApiError + recoverable error phase), #236 (upload page hygiene). Prod E2E: live-DOI collision → inline error with existing title, form editable, single 409 on the wire. | done | S | T2→T2 | `713b620` | `frontend/src/pages/ExpertPaperUploadPage.tsx`, `frontend/src/api/expert.ts`, tests |
 
 ## Completed — Harness v3 "Designed Autopilot" (2026-06-09)
 
