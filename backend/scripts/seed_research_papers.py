@@ -957,6 +957,8 @@ async def main(dry_run: bool = False) -> None:
                 doi=paper.doi,
                 quality_tier=paper.quality_tier,
                 review_status="reviewed_approved",
+                exercise_tags=paper.exercise_tags,
+                sex_applicability="both",
             )
 
             result = await ingestion_svc.ingest_document(
