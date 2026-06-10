@@ -95,3 +95,14 @@ Post it as an issue comment (`mcp__github__add_issue_comment`), mirror to
 3. Report to caller: `{branch, commits, checks, review_verdicts, status}`.
 
 Never `git push` to main, never merge, never create the PR from inside this skill.
+
+## Step 6 — Exit the worktree
+
+The session must never end a task still parked inside the task worktree.
+
+- **Called by /ship-loop**: leave the worktree ACTIVE and return the Step 5 report —
+  ship-loop owns push/PR/CI/merge and the eventual ExitWorktree in its cleanup step.
+- **Standalone invocation**: after reporting, call `ExitWorktree` with
+  `action: "keep"` (branch + worktree survive for the caller to push/PR). Tell the
+  user the worktree path, the branch name, and that refs are shared — `git push -u
+  origin <branch>` works from the main checkout.
