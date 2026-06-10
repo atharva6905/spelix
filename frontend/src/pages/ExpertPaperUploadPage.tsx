@@ -146,6 +146,11 @@ export default function ExpertPaperUploadPage() {
       return;
     }
 
+    if (!form.doi.trim()) {
+      setDoiError("DOI is required.");
+      return;
+    }
+
     const authors = form.authors
       .split(",")
       .map((a) => a.trim())
@@ -310,6 +315,7 @@ export default function ExpertPaperUploadPage() {
                 <input
                   id="doi"
                   type="text"
+                  maxLength={200}
                   value={form.doi}
                   onChange={(e) => {
                     setDoiError(null);

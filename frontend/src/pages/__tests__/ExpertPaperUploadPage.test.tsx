@@ -208,6 +208,36 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
     expect(screen.getByRole("button", { name: /upload/i })).toBeEnabled();
   });
 
+  it("caps DOI input at 200 characters", async () => {
+    renderPage();
+    await waitForForm();
+    const doiInput = screen.getByLabelText(/doi/i) as HTMLInputElement;
+    expect(doiInput).toHaveAttribute("maxLength", "200");
+  });
+
+  it("shows inline DOI error when submit fires with empty DOI", async () => {
+    renderPage();
+    await waitForForm();
+    await fillForm(); // title + file set, DOI empty
+
+    // Bypass the disabled button — fire submit on the form element directly
+    const formEl = document.querySelector("form");
+    expect(formEl).not.toBeNull();
+    await act(async () => {
+      fireEvent.submit(formEl!);
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("DOI is required.");
+    const doiInput = screen.getByLabelText(/doi/i) as HTMLInputElement;
+    expect(doiInput.closest("div")).toContainElement(alert);
+
+    // Form stays idle/editable, no request fired
+    expect(doiInput).not.toBeDisabled();
+    expect(screen.getByLabelText(/title/i)).not.toBeDisabled();
+    expect(mockRequestUrl).not.toHaveBeenCalled();
+  });
+
   it("shows required marker on the DOI label", async () => {
     renderPage();
     await waitForForm();
