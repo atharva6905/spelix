@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 ExperienceLevel = Literal["beginner", "intermediate", "advanced"]
+SexLiteral = Literal["male", "female", "prefer_not_to_say"]
 
 
 class ProfileUpdate(BaseModel):
@@ -33,6 +34,9 @@ class ProfileUpdate(BaseModel):
     femur_length_cm: Optional[float] = Field(
         default=None, gt=0, description="Femur length in centimetres (optional)"
     )
+    sex: Optional[SexLiteral] = Field(
+        default=None, description="Sex (optional) — used to match coaching evidence"
+    )
 
 
 class ProfileResponse(BaseModel):
@@ -46,6 +50,7 @@ class ProfileResponse(BaseModel):
     experience_level: Optional[str]
     arm_span_cm: Optional[float]
     femur_length_cm: Optional[float]
+    sex: Optional[str]
     created_at: datetime
     updated_at: datetime
 

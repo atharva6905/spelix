@@ -46,6 +46,8 @@ StudyDesignLiteral = Literal[
     "other",
 ]
 
+SexApplicabilityLiteral = Literal["male", "female", "both"]
+
 
 class RagDocumentResponse(BaseModel):
     """Full RAG document response for admin corpus view (FR-RAGK-08)."""
@@ -69,6 +71,7 @@ class RagDocumentResponse(BaseModel):
     reviewer_id: uuid.UUID | None
     reviewed_at: datetime | None
     storage_path: str | None
+    sex_applicability: str
     created_at: datetime
     updated_at: datetime
 
@@ -86,6 +89,7 @@ class RagDocumentUpload(BaseModel):
     population: str | None = None
     measurement_method: str | None = None
     document_type: DocumentTypeLiteral = "research_paper"
+    sex_applicability: SexApplicabilityLiteral = "both"
 
 
 class RagDocumentReviewAction(BaseModel):
@@ -131,6 +135,7 @@ class RagDocumentUploadRequest(BaseModel):
     population: str | None = Field(default=None, max_length=500)
     measurement_method: str | None = Field(default=None, max_length=500)
     quality_tier: QualityTierLiteral | None = None
+    sex_applicability: SexApplicabilityLiteral = "both"
 
     filename: str = Field(..., min_length=5, max_length=255)
     file_size_bytes: int = Field(..., gt=0, le=52_428_800)
