@@ -47,17 +47,48 @@ Continuous delivery over a task queue, fully in-session. Governance:
      (ssh spelix-droplet) → if user-facing, run Playwright E2E per
      .claude/rules/git-github.md. FAIL → demote to T1 handling.
    - **T1+**: run /code-review; post findings as PR comment
-     (mcp__github__add_issue_comment); label `needs-human`; NEXT task.
+     (mcp__github__add_issue_comment). Then run the APPROVAL GATE:
+     1. Present the PR gist in plain text: what changed and why (issue link), tier
+        prov→actual, per-file diff summary (mcp__github__get_pull_request_files),
+        review-chain verdicts, /code-review findings (open vs fixed), CI status,
+        deploy implications (user-facing? E2E needed per git-github.md?), and an
+        explicit "needs your judgment" list. For T2 the gist MUST include the
+        verbatim spelix-security-reviewer verdict and call out every sensitive-path
+        file touched — this presentation IS the explicit human diff review.
+        T3 additionally requires /code-review ultra BEFORE the gate (governance).
+     2. AskUserQuestion (single question, options depend on state):
+        - No open blockers: "Approve & merge" / "Fix something first" /
+          "Defer (label needs-human)" / "Skip to next task (leave PR open)".
+        - Open blockers (unresolved findings, failed optional checks, tier
+          escalation mid-flight): "Fix in this PR" / "Merge anyway (override —
+          recorded)" / "Defer (label needs-human)" / "Close PR & abandon".
+     3. Approve/override → comment "Merged on explicit in-session human approval"
+        (override: include what was overridden) on the PR → merge via
+        mcp__github__merge_pull_request (merge_method: "merge") → post-merge
+        verification per .claude/rules/git-github.md (wait for Deploy to
+        Production; droplet SHA + container health; Playwright E2E if user-facing).
+     4. Fix-first → SendMessage to the SAME implementer instance in the worktree
+        (re-enter via EnterWorktree path: if needed); re-run only the review gates
+        invalidated by the fix; push; re-watch CI; re-present the gate.
+     5. Defer → label `needs-human`, record the open questions as a PR comment.
+     6. Whatever the outcome, proceed to step 8 cleanup — per-outcome worktree
+        rules live there.
+     The gate is for INTERACTIVE sessions: if the human does not respond or the
+     session is autonomous/headless, fall back to label `needs-human` + NEXT task.
 8. Cleanup — runs for EVERY outcome before the next task:
    - Merged: `ExitWorktree` (action: "remove") — deletes the worktree and its local
      branch (the work is on main). If the tool refuses citing unmerged changes,
      STOP and reconcile — never pass discard_changes blind.
-   - Deferred (needs-human) or blocked: `ExitWorktree` (action: "keep") — worktree
-     and branch survive for later fixes; record the worktree path in handoff.
+   - Deferred (needs-human), skipped (PR left open), or blocked: `ExitWorktree`
+     (action: "keep") — worktree and branch survive for later fixes; record the
+     worktree path in handoff.
+   - Closed/abandoned: `ExitWorktree` (action: "remove", discard_changes: true) —
+     permitted here ONLY because the human chose "Close PR & abandon" at the gate;
+     this is the sole sanctioned use of discard_changes.
    - Back in the main checkout (ExitWorktree restores it, already on main):
      `git pull --ff-only`, then `git worktree prune`.
    - Update backlog.md (if issue closed) and .claude/handoff.md inline. Next task.
 
 ## End of run
-Summary table: | Issue | Tier (prov→actual) | PR | CI | Outcome (merged/needs-human/blocked) |.
+Summary table: | Issue | Tier (prov→actual) | PR | CI | Outcome (merged/needs-human/blocked/skipped/closed) |.
 Update .claude/handoff.md with the table and any blockers.
