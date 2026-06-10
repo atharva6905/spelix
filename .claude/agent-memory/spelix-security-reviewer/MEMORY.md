@@ -2,6 +2,9 @@
 
 (Persisted by the main agent on 2026-06-10 — the reviewer ran read-only and asked for these to be recorded.)
 
+- [Hooks guardrail integrity](hooks_guardrail_integrity.md) — which hooks BLOCK vs warn, the worktree-skip invariant, and the post-edit-lint JSON.stringify shell-quoting caveat (#237 → PASS)
+- [Issue #239 T1/T2 approval gate](harness_governance_t1_t2_approval_gate.md) — control-weakening analysis: recorded-approval precondition in both files, all non-approve paths fail-safe → PASS
+
 ## Reviewed: issue #218 / PR #227 (DOI dedup, 2026-06-10) → PASS
 - **Accepted risk**: `POST /expert/papers` 409 DUPLICATE_DOI leaks the existing paper's title + UUID to any expert/admin. Acceptable at single-partner private-beta scale; RE-FLAG if the expert role ever opens to multiple untrusted partners or the corpus becomes tenant-scoped.
 - Reference: all `/expert/*` authz = `get_expert_reviewer_user` (`app/api/deps.py` ~221) — admits role ∈ {expert_reviewer, admin} from JWT `app_metadata.role` (service-role-write-only). JWT chain: ES256/RS256 JWKS + HS256 fallback, issuer check, guarded UUID parse.
@@ -18,3 +21,10 @@
 - DOI href-injection analysis: `https://doi.org/${doi}` is SAFE — scheme+host hardcoded literal, user input lands in path only; `javascript:` payloads become inert path text; React escapes text children. Re-escalate to CRITICAL only if a future PR removes the hardcoded prefix or drops `rel="noopener noreferrer"` (both cells have it: ExpertPortalPage.tsx ~298, AdminPage.tsx ~705).
 - Standing HIGH (defense-in-depth, non-blocking): no DOI *schema-level* format validator on `rag_documents.doi` writers outside the expert API path — #218 validates at the API boundary (`normalize_doi`, 422 INVALID_DOI), but seed scripts/direct SQL bypass it. Resolves when seed script writes `normalize_doi(...)` to the column (follow-up flagged on PR #227).
 - Role gates: ExpertPortalPage.tsx ~L407 (expert_reviewer/admin), AdminPage.tsx ~L1212 (admin only) — client-side checks; server-side scoping is authoritative. Display-only additions of fields already present in the rendered API response model introduce no new cross-tenant exposure.
+
+## Reviewed: issue #221 (sex-aware coaching CONTRACT task, T2 models/schemas/alembic+SRS, 2026-06-10) → PASS
+- Scope: migration `9fffb59ba45f` (down_rev cf685bd7e8f8) adds `rag_documents.sex_applicability` VARCHAR(30) NOT NULL DEFAULT 'both' + CHECK IN ('male','female','both'); `user_profiles.sex` VARCHAR(30) NULLABLE + CHECK IN ('male','female','prefer_not_to_say'). Plus Pydantic `SexLiteral`/`SexApplicabilityLiteral`, schema fields on profile/rag_document, `ChunkPayload.exercise`+`.sex_applicability`, SRS amendments FR-RAGK-05/EXPV-05/PROF-03/AICP-05/AICP-09/AICP-12. No endpoints/RLS/logging changed in this diff.
+- SaMD/FTC: CLEAN. All new wording = "sex applicability"/"lifter sex"/"coaching evidence"/"Movement Quality". No injury/diagnose/treat/prevent/clinical in any new Field desc or SRS amendment. Profile `sex` desc = "Sex (optional) — used to match coaching evidence". (Pre-existing FR-AICP-03 "risk level"/FR-AICP-04 "dangerous patterns" are NOT in this diff and are internal-spec, not user-facing.)
+- Migration safety: CLEAN. No DDL FK to auth.users. CHECK can't lock out rows: rag_documents backfilled by server_default='both'; user_profiles.sex nullable so existing NULL rows pass IN-list CHECK (Postgres CHECK passes on NULL). No destructive ops. CHECK SQL = static literals, no injection. Model CheckConstraint names match DDL.
+- Sensitive PII (`user_profiles.sex`): posture preserved — optional+nullable+'prefer_not_to_say' opt-out, no new log/serialize sink, RLS untouched (rides existing user_profiles auth.uid()=user_id, migration 002); ProfileResponse owner-only.
+- DOWNSTREAM WATCH for the IMPL issue (not blocking contract): (1) analysis_worker.py body-stats COACHING_FIELDS/getattr loop — ensure `sex` not leaked into agent_trace_json/LangSmith/admin-or-expert-visible columns; (2) new endpoints surfacing sex_applicability joined to user `sex` must not cross-tenant-leak; (3) ChunkPayload.sex_applicability → Qdrant payload is corpus metadata, not user PII — fine.
