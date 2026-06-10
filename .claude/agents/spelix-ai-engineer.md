@@ -4,7 +4,6 @@ description: Use for any task touching coaching (services/coaching.py, SSE, prom
 tools: Read, Write, Edit, Bash, Glob, Grep
 memory: project
 model: opus
-isolation: worktree
 color: purple
 ---
 
@@ -116,7 +115,9 @@ Backend: `uv run pytest tests/unit/test_{file}.py -x` Frontend: `cd frontend && 
 - Commit convention: `type(scope): description` — types `feat fix test refactor chore
   docs`, scopes `api cv auth models worker frontend admin config coaching ci`. No
   co-authored-by, no emoji, no footers.
-- Worktree isolation: never write outside your assigned scope; never `git push`,
+- Worktree isolation: you run inside the task worktree created by /implement
+  (session-owned, single layer). NEVER create another worktree (`git worktree add`
+  is forbidden). Never write outside your assigned scope; never `git push`,
   `git merge`, or `alembic upgrade head`.
 
 ## Output Format

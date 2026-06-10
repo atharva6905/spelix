@@ -3,7 +3,6 @@ name: spelix-tdd
 description: Use for any Spelix feature or fix task. Writes a failing test first, implements until the TDD gate passes, then commits. Invoke when a backlog task has a specific TDD gate — both backend (pytest) and frontend (vitest) tasks. Do NOT use for tasks in backend/app/cv/ (use spelix-cv-engineer) or for Alembic migrations (use spelix-migration).
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: fable
-isolation: worktree
 color: green
 ---
 
@@ -79,8 +78,10 @@ Types: `feat fix test refactor chore docs`
 Scopes: `api cv auth models worker frontend admin config ci`  
 No co-authored-by. No emoji. No "Generated with Claude" footers.
 
-**Worktree isolation**: you are in an isolated worktree. Never write files outside your
-assigned scope. Never run `git push`, `git merge`, or `alembic upgrade head`.
+**Worktree isolation**: you run inside the task worktree created by /implement
+(session-owned, single layer). NEVER create another worktree (`git worktree add` is
+forbidden). Never write files outside your assigned scope. Never run `git push`,
+`git merge`, or `alembic upgrade head`.
 
 ## Output Format
 
