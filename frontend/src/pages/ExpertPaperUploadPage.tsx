@@ -163,6 +163,7 @@ export default function ExpertPaperUploadPage() {
 
     setUploadPhase("requesting");
     setUploadError(null);
+    setDoiError(null);
     setUploadProgress(0);
 
     try {

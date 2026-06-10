@@ -272,6 +272,50 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
     expect(screen.getByLabelText(/doi/i)).not.toBeDisabled();
   });
 
+  it("clears a stale DOI error when a resubmit succeeds", async () => {
+    mockRequestUrl.mockRejectedValueOnce({
+      status: 409,
+      error: {
+        code: "DUPLICATE_DOI",
+        message: "A paper with this DOI already exists: Existing Paper",
+      },
+    });
+    mockRequestUrl.mockResolvedValueOnce({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm("10.1000/dup");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+    await screen.findByRole("alert");
+
+    // Edit a non-DOI field, then resubmit the same DOI — now succeeds
+    const titleInput = screen.getByLabelText(/title/i);
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Paper T v2" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/uploaded and queued/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("clears the DOI error when the DOI value changes", async () => {
     mockRequestUrl.mockRejectedValue({
       status: 409,
