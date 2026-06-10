@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 
 // ---------------------------------------------------------------------------
@@ -51,16 +51,46 @@ vi.mock("@/api/expert", () => ({
       annotation_count: 0,
     },
   ]),
+  listExpertPapers: vi.fn().mockResolvedValue([]),
+  reviewPaper: vi.fn(),
 }));
 
 // Import after mocks
 import ExpertPortalPage from "@/pages/ExpertPortalPage";
 import { supabase } from "@/lib/supabase";
-import { getExpertQueue } from "@/api/expert";
+import {
+  getExpertQueue,
+  listExpertPapers,
+  type RagDocumentResponse,
+} from "@/api/expert";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Full RagDocumentResponse fixture for the My Papers tab (FR-EXPV-02). */
+function makePaper(overrides: Partial<RagDocumentResponse> = {}): RagDocumentResponse {
+  return {
+    id: "bbbbbbbb-1111-2222-3333-444444444444",
+    title: "Squat Depth Study",
+    source_url: null,
+    document_type: "research_paper",
+    exercise_tags: ["squat"],
+    chunk_count: 4,
+    authors: ["Smith J"],
+    year: 2023,
+    doi: null,
+    study_design: "rct",
+    quality_tier: "L2",
+    quality_score: null,
+    review_status: "pending",
+    reviewer_id: null,
+    reviewed_at: null,
+    created_at: "2026-04-20T10:00:00Z",
+    updated_at: "2026-04-20T10:00:00Z",
+    ...overrides,
+  };
+}
 
 function renderExpertPortalPage() {
   return render(
@@ -110,6 +140,9 @@ describe("ExpertPortalPage", () => {
         annotation_count: 0,
       },
     ]);
+
+    // Default papers response
+    vi.mocked(listExpertPapers).mockResolvedValue([]);
   });
 
   it("renders queue heading for authorized expert reviewer", async () => {
@@ -173,5 +206,49 @@ describe("ExpertPortalPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Access Denied")).toBeInTheDocument();
     });
+  });
+
+  // --- My Papers tab — DOI column (FR-EXPV-02, FR-RAGK-08) ---
+
+  it("renders a DOI column linking to doi.org", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([
+      makePaper({ doi: "10.1234/squat" }),
+    ]);
+
+    renderExpertPortalPage();
+    await waitFor(() => {
+      expect(screen.getByText("Expert Reviewer Portal")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "My Papers" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Squat Depth Study")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("DOI")).toBeInTheDocument();
+    const doiLink = screen.getByRole("link", { name: "10.1234/squat" });
+    expect(doiLink).toHaveAttribute("href", "https://doi.org/10.1234/squat");
+  });
+
+  it("renders an em dash for papers without a DOI", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper({ doi: null })]);
+
+    renderExpertPortalPage();
+    await waitFor(() => {
+      expect(screen.getByText("Expert Reviewer Portal")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "My Papers" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Squat Depth Study")).toBeInTheDocument();
+    });
+
+    // Fixture has non-empty authors, a tier, and pending status (Action shows
+    // a button), so the only em dash in the row is the DOI cell.
+    const row = screen.getByText("Squat Depth Study").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText("—")).toBeInTheDocument();
   });
 });

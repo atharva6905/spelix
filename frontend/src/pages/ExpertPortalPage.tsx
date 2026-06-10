@@ -263,6 +263,7 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
             <tr className="border-b border-gray-200 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
               <th className="pb-3 pr-4">Title</th>
               <th className="pb-3 pr-4">Authors</th>
+              <th className="pb-3 pr-4">DOI</th>
               <th className="pb-3 pr-4">Tags</th>
               <th className="pb-3 pr-4">Tier</th>
               <th className="pb-3 pr-4">Status</th>
@@ -288,6 +289,20 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
                   </td>
                   <td className="max-w-[150px] truncate py-3 pr-4 text-gray-600">
                     {paper.authors.length > 0 ? paper.authors.join(", ") : "—"}
+                  </td>
+                  <td className="max-w-[160px] truncate py-3 pr-4">
+                    {paper.doi ? (
+                      <a
+                        href={`https://doi.org/${paper.doi}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-indigo-600 hover:underline"
+                      >
+                        {paper.doi}
+                      </a>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="py-3 pr-4">
                     <div className="flex flex-wrap gap-1">

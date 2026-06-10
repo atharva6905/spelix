@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 // ---------------------------------------------------------------------------
@@ -186,6 +186,48 @@ describe("AdminPage — panels branch coverage", () => {
     ]);
     renderPage();
     await waitFor(() => expect(screen.getByText("reviewed rejected")).toBeInTheDocument());
+  });
+
+  it("renders a DOI column linking to doi.org in the corpus table", async () => {
+    mocks.listRagDocuments.mockResolvedValue([
+      {
+        id: "doc-005",
+        title: "Linked Paper",
+        document_type: "research_paper",
+        quality_tier: "tier_1",
+        review_status: "pending",
+        chunk_count: 2,
+        year: 2024,
+        doi: "10.1234/squat",
+      },
+    ]);
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Linked Paper")).toBeInTheDocument());
+    expect(screen.getByText("DOI")).toBeInTheDocument();
+    const doiLink = screen.getByRole("link", { name: "10.1234/squat" });
+    expect(doiLink).toHaveAttribute("href", "https://doi.org/10.1234/squat");
+  });
+
+  it("renders an em dash for corpus documents without a DOI", async () => {
+    mocks.listRagDocuments.mockResolvedValue([
+      {
+        id: "doc-006",
+        title: "Unlinked Paper",
+        document_type: "research_paper",
+        quality_tier: "tier_1",
+        review_status: "pending",
+        chunk_count: 2,
+        year: 2024,
+        doi: null,
+      },
+    ]);
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Unlinked Paper")).toBeInTheDocument());
+    // Quality tier and year are populated, so the only em dash in the row is
+    // the DOI cell.
+    const row = screen.getByText("Unlinked Paper").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText("—")).toBeInTheDocument();
   });
 
   it("renders empty state for RAG corpus panel", async () => {

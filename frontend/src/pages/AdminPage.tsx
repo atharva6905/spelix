@@ -684,6 +684,7 @@ function RagCorpusPanel() {
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Chunks</th>
                 <th className="px-3 py-2">Year</th>
+                <th className="px-3 py-2">DOI</th>
                 <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
@@ -697,6 +698,20 @@ function RagCorpusPanel() {
                   <td className="px-3 py-2">{d.chunk_count}</td>
                   <td className="px-3 py-2">{d.year ?? "—"}</td>
                   <td className="px-3 py-2">
+                    {d.doi ? (
+                      <a
+                        href={`https://doi.org/${d.doi}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-indigo-600 hover:underline"
+                      >
+                        {d.doi}
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
                     <div className="flex gap-2">
                       <button onClick={() => handleDelete(d.id)} className="text-xs text-red-600 hover:underline">Delete</button>
                       {d.review_status === "reviewed_approved" && (
@@ -707,7 +722,7 @@ function RagCorpusPanel() {
                 </tr>
               ))}
               {docs.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-4 text-center text-gray-400">No documents found</td></tr>
+                <tr><td colSpan={8} className="px-3 py-4 text-center text-gray-400">No documents found</td></tr>
               )}
             </tbody>
           </table>
