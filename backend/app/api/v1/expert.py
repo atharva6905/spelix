@@ -300,6 +300,7 @@ async def request_paper_upload(
         population=body.population,
         measurement_method=body.measurement_method,
         quality_tier=body.quality_tier,
+        sex_applicability=body.sex_applicability,
         review_status="uploading",
         storage_path=storage_path,
         extra_metadata={"uploaded_by": str(user["id"])},
