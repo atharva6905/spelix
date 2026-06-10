@@ -130,3 +130,154 @@ class TestUploadSexApplicability:
         body = {**VALID_BODY, "sex_applicability": "all"}
         resp = client.post("/api/v1/expert/papers", json=body)
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Task C2 — PATCH /papers/{doc_id}/metadata (FR-RAGK-05/08 ext.)
+# ---------------------------------------------------------------------------
+
+
+def _make_doc(doc_id, sex_applicability="both"):
+    from app.models.rag_document import RagDocument
+
+    return RagDocument(
+        id=doc_id,
+        title="Squat biomechanics",
+        document_type="research_paper",
+        exercise_tags=["squat"],
+        authors=[],
+        doi="10.1234/meta",
+        review_status="reviewed_approved",
+        sex_applicability=sex_applicability,
+        extra_metadata={},
+        ingested_at=datetime.now(timezone.utc),
+    )
+
+
+class TestPatchPaperMetadata:
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_updates_row_and_restamps_qdrant(
+        self, MockRepo, mock_get_qdrant, client
+    ):
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="female")
+        )
+
+        qdrant = MagicMock()
+        qdrant.set_payload = AsyncMock()
+        mock_get_qdrant.return_value = qdrant
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["sex_applicability"] == "female"
+        repo_instance.update_sex_applicability.assert_awaited_once_with(
+            doc_id, sex_applicability="female"
+        )
+
+        qdrant.set_payload.assert_awaited_once()
+        call_args = qdrant.set_payload.await_args[0]
+        assert call_args[0] == "papers_rag"
+        assert call_args[1] == {"sex_applicability": "female"}
+        points_filter = call_args[2]
+        assert points_filter.must[0].key == "paper_id"
+        assert points_filter.must[0].match.value == str(doc_id)
+
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_commits_row_before_restamp(
+        self, MockRepo, mock_get_qdrant, expert_app, client
+    ):
+        _, mock_db = expert_app
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="male")
+        )
+        mock_get_qdrant.return_value = None
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "male"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        mock_db.commit.assert_awaited()
+
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_qdrant_failure_does_not_fail_request(
+        self, MockRepo, mock_get_qdrant, client
+    ):
+        """Restamp is best-effort: ingestion re-stamps on next re-embed."""
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="female")
+        )
+
+        qdrant = MagicMock()
+        qdrant.set_payload = AsyncMock(side_effect=RuntimeError("qdrant down"))
+        mock_get_qdrant.return_value = qdrant
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["sex_applicability"] == "female"
+
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_unknown_doc_returns_404(self, MockRepo, mock_get_qdrant, client):
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(return_value=None)
+        mock_get_qdrant.return_value = None
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{uuid4()}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"]["code"] == "NOT_FOUND"
+
+    def test_patch_invalid_value_returns_422(self, client):
+        resp = client.patch(
+            f"/api/v1/expert/papers/{uuid4()}/metadata",
+            json={"sex_applicability": "all"},
+        )
+        assert resp.status_code == 422
+
+    def test_patch_non_expert_returns_403(self):
+        """Real get_expert_reviewer_user role gate — no expert override."""
+        from app.api.deps import get_current_user
+        from app.db import get_db
+
+        app = FastAPI()
+        app.include_router(expert_router, prefix="/api/v1/expert")
+
+        async def _mock_regular_user():
+            return {"id": uuid4(), "email": "user@spelix.app", "role": "user"}
+
+        mock_db = AsyncMock()
+
+        async def _mock_db():
+            yield mock_db
+
+        app.dependency_overrides[get_current_user] = _mock_regular_user
+        app.dependency_overrides[get_db] = _mock_db
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{uuid4()}/metadata",
+            json={"sex_applicability": "female"},
+        )
+        assert resp.status_code == 403

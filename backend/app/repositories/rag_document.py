@@ -111,6 +111,25 @@ class RagDocumentRepository:
         result = await self._db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def update_sex_applicability(
+        self, doc_id: uuid.UUID, *, sex_applicability: str
+    ) -> RagDocument | None:
+        """Update sex_applicability post-upload (FR-RAGK-05 ext., issue #223).
+
+        Returns the refreshed row, or None when the document does not exist.
+        Qdrant payload restamping is the caller's responsibility.
+        """
+        result = await self._db.execute(
+            select(RagDocument).where(RagDocument.id == doc_id)
+        )
+        doc = result.scalar_one_or_none()
+        if doc is None:
+            return None
+        doc.sex_applicability = sex_applicability
+        await self._db.flush()
+        await self._db.refresh(doc)
+        return doc
+
     async def update_chunk_count(
         self, doc_id: uuid.UUID, *, chunk_count: int
     ) -> None:

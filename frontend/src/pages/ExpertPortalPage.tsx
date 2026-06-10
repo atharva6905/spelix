@@ -15,6 +15,7 @@ import {
   getExpertQueue,
   listExpertPapers,
   reviewPaper,
+  updatePaperMetadata,
   type ExpertQueueItem,
   type RagDocumentResponse,
 } from "@/api/expert";
@@ -210,6 +211,13 @@ const REVIEW_STATUS_STYLES: Record<string, { label: string; className: string }>
   needs_revision: { label: "Needs Revision", className: "bg-orange-100 text-orange-700" },
 };
 
+// Applicable population options (issue #223, FR-RAGK-05 ext.)
+const SEX_APPLICABILITY_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "both", label: "Both" },
+] as const;
+
 const TIER_STYLES: Record<string, string> = {
   L1: "bg-indigo-100 text-indigo-700",
   L2: "bg-blue-100 text-blue-700",
@@ -230,9 +238,10 @@ interface PapersTableProps {
   onNext: () => void;
   onApprove: (paperId: string) => void;
   approving: string | null;
+  onSexApplicabilityChange: (paperId: string, value: string) => void;
 }
 
-function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving }: PapersTableProps) {
+function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving, onSexApplicabilityChange }: PapersTableProps) {
   if (loading) {
     return <p className="py-8 text-center text-sm text-gray-500">Loading papers...</p>;
   }
@@ -266,6 +275,7 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
               <th className="pb-3 pr-4">DOI</th>
               <th className="pb-3 pr-4">Tags</th>
               <th className="pb-3 pr-4">Tier</th>
+              <th className="pb-3 pr-4 normal-case">Applicable population</th>
               <th className="pb-3 pr-4">Status</th>
               <th className="pb-3 pr-4">Chunks</th>
               <th className="pb-3 pr-4">Uploaded</th>
@@ -324,6 +334,18 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <select
+                      aria-label={`Applicable population for ${paper.title}`}
+                      value={paper.sex_applicability}
+                      onChange={(e) => onSexApplicabilityChange(paper.id, e.target.value)}
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    >
+                      {SEX_APPLICABILITY_OPTIONS.map(({ value, label }) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="py-3 pr-4">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusInfo.className}`}>
@@ -446,6 +468,23 @@ export default function ExpertPortalPage() {
     }
   }
 
+  // Issue #223 (FR-RAGK-05 ext.): inline edit of a paper's applicable
+  // population. State updates only after the PATCH succeeds — on failure the
+  // select keeps the old value and an error banner is shown.
+  async function handleSexApplicabilityChange(paperId: string, value: string) {
+    try {
+      await updatePaperMetadata(paperId, {
+        sex_applicability: value as "male" | "female" | "both",
+      });
+      setPapers((prev) =>
+        prev.map((p) => (p.id === paperId ? { ...p, sex_applicability: value } : p))
+      );
+    } catch (err) {
+      console.error("Failed to update applicable population", err);
+      setError("Failed to update applicable population. Please try again.");
+    }
+  }
+
   // Reset offset when switching tabs
   function handleTabChange(tab: QueueType) {
     setActiveTab(tab);
@@ -530,6 +569,7 @@ export default function ExpertPortalPage() {
               onNext={() => setOffset(offset + PAGE_SIZE)}
               onApprove={handleApprovePaper}
               approving={approving}
+              onSexApplicabilityChange={handleSexApplicabilityChange}
             />
           ) : (
             <QueueTable

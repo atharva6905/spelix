@@ -33,6 +33,7 @@ from app.schemas.expert_review import (
 )
 from app.schemas.rag_document import (
     RagDocumentCompleteResponse,
+    RagDocumentMetadataPatch,
     RagDocumentReviewAction,
     RagDocumentReviewResponse,
     RagDocumentUploadRequest,
@@ -45,6 +46,7 @@ from app.schemas.threshold_flag import (
 )
 from app.services.expert import ExpertService
 from app.services.paper_storage import PaperStorageService
+from app.services.qdrant import get_qdrant_client
 from app.services.supabase_client import get_service_role_client
 from app.services.threshold_flag import (
     InvalidThresholdKey,
@@ -513,6 +515,74 @@ async def review_paper(
         await ingest_paper.enqueue(str(doc_id))
 
     return RagDocumentReviewResponse.model_validate(doc, from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Paper Metadata Edit (issue #223, FR-EXPV-05 ext., FR-RAGK-05/08 ext.)
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/papers/{doc_id}/metadata")
+async def update_paper_metadata(
+    doc_id: UUID,
+    body: RagDocumentMetadataPatch,
+    user: CurrentUser = Depends(get_expert_reviewer_user),
+    rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Edit post-upload paper metadata (currently: sex applicability).
+
+    Updates the rag_documents row, commits, then best-effort restamps the
+    paper's existing papers_rag Qdrant points via set_payload — no re-embed
+    (issue #223). A restamp failure is logged and never fails the request;
+    ingestion re-stamps the payload on the next re-embed.
+    """
+    updated = await rag_repo.update_sex_applicability(
+        doc_id, sex_applicability=body.sex_applicability
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Document not found.",
+                    "detail": None,
+                }
+            },
+        )
+    # Persist the row before touching Qdrant so a restamp failure can never
+    # roll back the metadata edit.
+    await db.commit()
+
+    try:
+        qdrant = await get_qdrant_client()
+        if qdrant is not None:
+            from qdrant_client import models as qdrant_models
+
+            await qdrant.set_payload(
+                "papers_rag",
+                {"sex_applicability": body.sex_applicability},
+                qdrant_models.Filter(
+                    must=[
+                        qdrant_models.FieldCondition(
+                            key="paper_id",
+                            match=qdrant_models.MatchValue(value=str(doc_id)),
+                        )
+                    ]
+                ),
+            )
+    except Exception:
+        logger.warning(
+            "Failed to restamp sex_applicability on papers_rag points for %s;"
+            " next re-embed will re-stamp",
+            doc_id,
+        )
+
+    return {
+        "id": str(updated.id),
+        "sex_applicability": updated.sex_applicability,
+    }
 
 
 # ---------------------------------------------------------------------------

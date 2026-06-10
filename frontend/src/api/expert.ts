@@ -84,6 +84,7 @@ export interface RagDocumentResponse {
   review_status: string;
   reviewer_id: string | null;
   reviewed_at: string | null;
+  sex_applicability: string;
   created_at: string;
   updated_at: string;
 }
@@ -276,6 +277,26 @@ export async function reviewPaper(
   return expertFetch(`/api/v1/expert/papers/${docId}/review`, {
     method: "PATCH",
     body: JSON.stringify(action),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Paper Metadata Edit (issue #223, FR-RAGK-05 ext.)
+// ---------------------------------------------------------------------------
+
+// Editable post-upload metadata; backend restamps existing Qdrant points
+// via set_payload (no re-embed).
+export interface PaperMetadataPatch {
+  sex_applicability: "male" | "female" | "both";
+}
+
+export async function updatePaperMetadata(
+  docId: string,
+  patch: PaperMetadataPatch,
+): Promise<{ id: string; sex_applicability: string }> {
+  return expertFetch(`/api/v1/expert/papers/${docId}/metadata`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }
 
