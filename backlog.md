@@ -45,6 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Harness: worktree-safe hooks + worktree exit + approval gate (#237/#238/#239) (2026-06-10, in progress)
+
+/design session (2026-06-10): hooks failed in linked worktrees (relative paths, venv-less checks, handoff writes to wrong checkout); sessions ended parked in worktrees (ship-loop step 8 `git checkout main` dead code from a worktree cwd); terminal `needs-human` to be replaced by an in-session approval gate. Plan: `docs/internal/plans/2026-06-10-harness-worktree-approval-plan.md` (local-only). #237 (T2, hooks) and #239 (T2, governance) are human-gated; rows added as they merge.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #238 | Deterministic worktree exit — /implement Step 6 (ship-loop caller keeps worktree active; standalone ends `ExitWorktree(keep)`), ship-loop step 6 re-entry via `EnterWorktree(path:)` before /bugfix, step 8 outcome-scaled cleanup (merged→`remove`, deferred/blocked→`keep`, then `git pull --ff-only` + `worktree prune`). T0 self-merge: governance-reviewer PASS, CI green. PR #240. | done | S | T0→T0 | `0afa941` | `.claude/skills/implement/SKILL.md`, `.claude/skills/ship-loop/SKILL.md` |
+
 ## Completed — Post-L2 beta ops — /ship-loop run 3: DOI dedup for expert papers (2026-06-10)
 
 First live `/design` → `/ship-loop` run on the harness v3 chain (brainstorm → spec → plan → groomed issues #218/#219/#220 → execution). DOI becomes the enforced unique business key for expert-uploaded papers (expert-partner report: same paper, different titles; unintentional duplicate uploads). UUID PK unchanged — enforcement via partial unique index `uq_rag_documents_doi_live` on live rows (`review_status NOT IN ('reviewed_rejected','uploading')`); race close-out at the uploading→pending flip. Migration 028 (`cf685bd7e8f8`) applied + verified pre-merge. Follow-ups filed on merge: #229 (review_paper IntegrityError), #230 (seed script doi column), #231 (complete ownership check), #232 (DoiLink extraction).
