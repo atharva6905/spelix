@@ -290,6 +290,17 @@ export interface PaperMetadataPatch {
   sex_applicability: "male" | "female" | "both";
 }
 
+// Shared select options for sex_applicability (issue #223, FR-RAGK-05 ext.)
+// — single source of truth for ExpertPaperUploadPage + ExpertPortalPage.
+export const SEX_APPLICABILITY_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "both", label: "Both" },
+] as const satisfies ReadonlyArray<{
+  value: PaperMetadataPatch["sex_applicability"];
+  label: string;
+}>;
+
 export async function updatePaperMetadata(
   docId: string,
   patch: PaperMetadataPatch,

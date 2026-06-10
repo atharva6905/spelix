@@ -10,6 +10,13 @@ vi.mock("@/api/expert", () => ({
   requestPaperUploadUrl: (...a: unknown[]) => mockRequestUrl(...a),
   completePaperUpload: (...a: unknown[]) => mockCompleteUpload(...a),
   uploadPaperFile: (...a: unknown[]) => mockUploadFile(...a),
+  // Real const re-declared here: vi.mock replaces the whole module, and the
+  // page imports these options alongside the mocked API functions.
+  SEX_APPLICABILITY_OPTIONS: [
+    { value: "male", label: "Male" },
+    { value: "female", label: "Female" },
+    { value: "both", label: "Both" },
+  ],
 }));
 
 vi.mock("@/lib/supabase", () => ({

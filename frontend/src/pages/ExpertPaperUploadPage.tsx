@@ -18,6 +18,7 @@ import {
   requestPaperUploadUrl,
   uploadPaperFile,
   completePaperUpload,
+  SEX_APPLICABILITY_OPTIONS,
 } from "@/api/expert";
 
 // ---------------------------------------------------------------------------
@@ -37,12 +38,6 @@ const QUALITY_TIER_OPTIONS = [
   { value: "L2_rct", label: "L2 — Randomized Controlled Trial" },
   { value: "L3_observational", label: "L3 — Observational Study" },
   { value: "L4_guideline", label: "L4 — Clinical Guideline / Expert Consensus" },
-] as const;
-
-const SEX_APPLICABILITY_OPTIONS = [
-  { value: "male", label: "Male" },
-  { value: "female", label: "Female" },
-  { value: "both", label: "Both" },
 ] as const;
 
 const STUDY_DESIGN_OPTIONS = [

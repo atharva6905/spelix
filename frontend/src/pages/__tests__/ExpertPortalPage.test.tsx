@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,13 @@ vi.mock("@/api/expert", () => ({
   listExpertPapers: vi.fn().mockResolvedValue([]),
   reviewPaper: vi.fn(),
   updatePaperMetadata: vi.fn(),
+  // Real const re-declared here: vi.mock replaces the whole module, and the
+  // page imports these options alongside the mocked API functions.
+  SEX_APPLICABILITY_OPTIONS: [
+    { value: "male", label: "Male" },
+    { value: "female", label: "Female" },
+    { value: "both", label: "Both" },
+  ],
 }));
 
 // Import after mocks
@@ -307,6 +314,37 @@ describe("ExpertPortalPage", () => {
       ),
     );
     await waitFor(() => expect(select.value).toBe("female"));
+  });
+
+  it("disables the select while the metadata PATCH is in flight", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
+    let resolvePatch!: (v: { id: string; sex_applicability: string }) => void;
+    vi.mocked(updatePaperMetadata).mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolvePatch = res;
+        }),
+    );
+
+    await openMyPapersTab();
+
+    const select = screen.getByLabelText(
+      /applicable population for squat depth study/i,
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "female" } });
+
+    // Busy while the PATCH promise is unresolved (mirrors the approving pattern)
+    await waitFor(() => expect(select).toBeDisabled());
+
+    await act(async () => {
+      resolvePatch({
+        id: "bbbbbbbb-1111-2222-3333-444444444444",
+        sex_applicability: "female",
+      });
+    });
+
+    await waitFor(() => expect(select).not.toBeDisabled());
+    expect(select.value).toBe("female");
   });
 
   it("shows an error and keeps the old value when the metadata PATCH fails", async () => {
