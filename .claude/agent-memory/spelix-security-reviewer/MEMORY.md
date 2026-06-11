@@ -28,3 +28,11 @@
 - Migration safety: CLEAN. No DDL FK to auth.users. CHECK can't lock out rows: rag_documents backfilled by server_default='both'; user_profiles.sex nullable so existing NULL rows pass IN-list CHECK (Postgres CHECK passes on NULL). No destructive ops. CHECK SQL = static literals, no injection. Model CheckConstraint names match DDL.
 - Sensitive PII (`user_profiles.sex`): posture preserved — optional+nullable+'prefer_not_to_say' opt-out, no new log/serialize sink, RLS untouched (rides existing user_profiles auth.uid()=user_id, migration 002); ProfileResponse owner-only.
 - DOWNSTREAM WATCH for the IMPL issue (not blocking contract): (1) analysis_worker.py body-stats COACHING_FIELDS/getattr loop — ensure `sex` not leaked into agent_trace_json/LangSmith/admin-or-expert-visible columns; (2) new endpoints surfacing sex_applicability joined to user `sex` must not cross-tenant-leak; (3) ChunkPayload.sex_applicability → Qdrant payload is corpus metadata, not user PII — fine.
+
+## Reviewed: issue #223 (sex_applicability expert metadata edit, 2026-06-10) → PASS
+- New `PATCH /expert/papers/{doc_id}/metadata` (`expert.py` ~L525) — gated by `get_expert_reviewer_user`, same as review/complete. Experts may edit ANY paper's metadata (no uploaded_by ownership check) — consistent with existing review_paper power; same accepted-risk class as #218/#231, OK at single-partner scale. RE-FLAG if expert role opens to multiple untrusted partners.
+- `doc_id: UUID` typed path param (422 on malformed). 404 returns generic "Document not found." — no existence/contents leak.
+- Injection-safe: `str(doc_id)` (validated UUID) → Qdrant structured `Filter`/`MatchValue`, no string interp; DB write via SQLAlchemy ORM (parameterized). No f-string SQL.
+- Best-effort Qdrant restamp wrapped in `except Exception`, DB commit precedes it (Qdrant failure never rolls back the edit). Logs only doc_id UUID — no str(exc), no secrets (ADR-DISTILL-05 analog clean).
+- SaMD-clean: all new strings wellness/neutral — "Applicable population" label/column/aria-labels, Male/Female/Both options (`expert.ts` SEX_APPLICABILITY_OPTIONS), static error banner "Failed to update applicable population." No injury/diagnose/treat/prevent.
+- `sex_applicability` validated by `SexApplicabilityLiteral` on every API write path (upload + this PATCH) — corpus metadata, not user PII.
