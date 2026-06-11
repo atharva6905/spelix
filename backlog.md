@@ -57,6 +57,14 @@ Kin-expert request: papers taggable by sex, coaching considers lifter sex. /desi
 | #224 | Profile sex: `ProfileService.upsert` persists both paths; ProfilePage "Sex (optional)" select + helper. Spec/quality/security PASS. PR #254. | done | S | T2→T2 | `44f22f7` | services/profile.py, ProfilePage, profiles.ts |
 | #225 | Retrieval hard filter (MatchAny([sex,'both']) on papers_rag, dense+sparse legs — BM25 additional_filters leak closed), AgentState.lifter_sex, prompt line, worker threading both coaching paths. Spec FAIL→fixed `36e98bc`→PASS; quality/security PASS; review-panel run. PR #256. | done | L | T3→T3 | `20a3a71` | dual_collection, sparse_retrieval, retrieval, agents/{state,tools,graph}, coaching.py, analysis_worker.py |
 
+## Completed — Post-L2 beta ops — /ship-loop run 6: prod ingestion + ownership (2026-06-11)
+
+Queue: #263, #267, #231. Run also filed follow-ups #269 (model-weight checksums), #275 (deploy SSH timeout).
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #263 | Prod paper ingestion broken since launch — Docling RapidOCR PermissionError writing OCR models into read-only site-packages (every `ingest_paper` failed; all 12 rag_documents at chunk_count=0). Two-stage fix: PR #268 `_build_converter()` pins `artifacts_path` from `DOCLING_ARTIFACTS_PATH` (never None) + explicit `RapidOcrOptions` + Dockerfile model bake (`docling-tools models download layout tableformer rapidocr`); PR #274 `docling[rapidocr]` extra adds CPU `onnxruntime 1.26.0` (post-deploy verify caught `ImportError: onnxruntime is not installed` — stray local install had masked it; lock now tracks it). 5 regression tests. Spec/quality/security PASS (#268 T2 chain) + spec PASS (#274 delta). Deploy run-2 needed `gh run rerun` (cold-rebuild SSH timeout → #275). **Prod verified: 4 approved papers re-enqueued, chunk_count 19/15/18/27 — first successful expert ingestions on prod.** Orphan-seed sweep (issue item 3) still open. | done | M | T2→T2 (+T1 delta) | `40c4bdf`, `742756d` | `backend/Dockerfile`, `backend/app/services/pdf_extraction.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/unit/test_paper_ingestion.py` |
+
 ## Completed — Post-L2 beta ops — /ship-loop run 5: DOI dedup follow-ups (2026-06-11)
 
 Follow-up fixes from /code-review findings on the run-3 DOI-dedup PRs (#227/#228/#233). Queue: #229, #230, #232, #234.

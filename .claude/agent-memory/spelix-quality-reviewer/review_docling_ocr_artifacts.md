@@ -1,0 +1,8 @@
+# Review: Docling OCR writable artifacts_path (#263, 2026-06-11) → PASS (1 LOW)
+
+- **Trap class (reusable):** prod container runs `USER spelix` non-root with read-only venv; any dep that lazily downloads models/caches into site-packages crashes with PermissionError. Fix pattern: pre-bake in Dockerfile (`docling-tools models download ... -o <dir>`) + `ENV` pointer + `chown -R` the dir + service reads env with `os.environ.get(...) or DEFAULT` so it NEVER returns None (None re-enables the download = the original bug).
+- **Worker env visibility:** backend + worker share one image; Dockerfile `ENV` reaches both. `ingest_paper` (worker) → `extract_text_from_pdf` → `_build_converter()` reads `DOCLING_ARTIFACTS_PATH`. No separate worker wiring.
+- **4GB budget not impacted:** model bake adds image-layer disk, not runtime RAM. Don't fire the memory gotcha for pre-baking models.
+- **async:** `await asyncio.to_thread(_extract_sync, ...)` preserved; `_build_converter()` runs inside the thread. `to_thread` ≈ `run_in_executor(None, fn)` — don't flag the difference.
+- **Test pattern (good):** build the REAL converter, inspect `converter.format_to_options[InputFormat.PDF].pipeline_options` (`.artifacts_path`, `.ocr_options.kind == "rapidocr"`). No mock of fn-under-test → no vacuous pass. Complements worker-guard tests in `test_paper_ingestion_task.py` (distinct file, no collision).
+- **LOW:** tests couple to docling-2.x-internal API (`kind == "rapidocr"`, pipeline_options import paths); pinned `<3.0`; CI is the gate (docling absent from local Windows Python). Loud failure on API shift is desired — no action.
