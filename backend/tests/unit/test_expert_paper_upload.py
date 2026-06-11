@@ -368,7 +368,9 @@ class TestCompletePaperUploadDoiRace:
             doi="10.1234/race",
             review_status="uploading",
             storage_path=storage_path,
-            extra_metadata={},
+            # FR-EXPV-02 / issue #231: caller must own the row to reach the
+            # DOI-race close-out path at all.
+            extra_metadata={"uploaded_by": str(TEST_EXPERT_ID)},
             ingested_at=datetime.now(timezone.utc),
         )
 

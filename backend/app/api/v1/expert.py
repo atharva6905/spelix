@@ -367,6 +367,27 @@ async def complete_paper_upload(
             },
         )
 
+    # FR-EXPV-02 / issue #231: ownership guard. Only the expert who requested
+    # the upload (recorded in extra_metadata.uploaded_by) may complete it —
+    # admins override. This MUST run before the state check and the
+    # INVALID_PDF / DUPLICATE_DOI cleanup paths, which delete the storage
+    # object and DB row. Rows with a missing uploaded_by (legacy/corrupt)
+    # are FAIL-CLOSED for non-admins: 'uploading' rows are transient orphans
+    # that never lock a DOI, so admins can complete or clean them up.
+    if user.get("role") != "admin":
+        uploaded_by = (doc.extra_metadata or {}).get("uploaded_by")
+        if uploaded_by != str(user["id"]):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "code": "NOT_PAPER_OWNER",
+                        "message": "you do not have permission to complete this upload",
+                        "detail": None,
+                    }
+                },
+            )
+
     if doc.review_status != "uploading":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
