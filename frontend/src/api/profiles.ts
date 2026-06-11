@@ -6,6 +6,8 @@
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
 
+export type Sex = "male" | "female" | "prefer_not_to_say";
+
 export interface ProfileResponse {
   id: string;
   user_id: string;
@@ -15,6 +17,7 @@ export interface ProfileResponse {
   experience_level: string | null;
   arm_span_cm: number | null;
   femur_length_cm: number | null;
+  sex: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +29,7 @@ export interface ProfileUpdateRequest {
   experience_level: "beginner" | "intermediate" | "advanced";
   arm_span_cm?: number | null;
   femur_length_cm?: number | null;
+  sex?: Sex | null;
 }
 
 async function getAuthToken(): Promise<string> {
