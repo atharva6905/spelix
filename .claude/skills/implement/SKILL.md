@@ -61,6 +61,10 @@ Dispatch rules:
   "see issue #N".
 - Include: scene-setting context (what subsystem, why now), FR-ID(s), the TDD gate
   command, and the worktree scope.
+- Harness meta-work: if the task will touch `.claude/skills/**` or `.claude/agents/**`,
+  the implementer prompt MUST mandate `superpowers:writing-skills` via the Skill tool —
+  skill changes are pressure-tested with subagent scenarios before they ship, not just
+  written. (Requires the implementer's Skill tool grant — see the TDD-nesting issue.)
 - The implementer reports one of: `DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED`.
 
 | Status | Handling |
