@@ -19,6 +19,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
+# FR-EXPV-02 / issue #231: complete_paper_upload enforces that the caller
+# matches extra_metadata.uploaded_by. The dependency override runs per
+# request, so the identity must be stable across the upload + complete
+# calls — a per-call uuid4() would make the complete step a non-owner (403).
+TEST_EXPERT_ID = uuid4()
+
 VALID_METADATA = {
     "title": "Integration test paper",
     "document_type": "research_paper",
@@ -96,7 +102,7 @@ def test_full_upload_flow_phase1_through_phase3(MockStorage, mock_svc, MockWorke
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/expert")
     app.dependency_overrides[get_expert_reviewer_user] = lambda: {
-        "id": uuid4(),
+        "id": TEST_EXPERT_ID,
         "email": "e@s.app",
         "role": "expert_reviewer",
     }
@@ -155,7 +161,7 @@ def test_invalid_pdf_bytes_rejected_and_row_deleted(MockStorage, mock_svc):
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/expert")
     app.dependency_overrides[get_expert_reviewer_user] = lambda: {
-        "id": uuid4(),
+        "id": TEST_EXPERT_ID,
         "email": "e@s.app",
         "role": "expert_reviewer",
     }
