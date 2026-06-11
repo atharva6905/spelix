@@ -494,12 +494,33 @@ async def review_paper(
     body: RagDocumentReviewAction,
     user: CurrentUser = Depends(get_expert_reviewer_user),
     rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
+    # Same cached session that _get_rag_repo wraps — needed for the explicit
+    # rollback that discards the poisoned transaction on a DOI collision.
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
-    doc = await rag_repo.update_review_status(
-        doc_id,
-        review_status=body.decision,
-        reviewer_id=user["id"],
-    )
+    try:
+        doc = await rag_repo.update_review_status(
+            doc_id,
+            review_status=body.decision,
+            reviewer_id=user["id"],
+        )
+    except IntegrityError:
+        # Issue #229 (FR-EXPV-03): re-reviewing a 'reviewed_rejected' row whose
+        # DOI went live on another row brings it back into the scope of the
+        # uq_rag_documents_doi_live partial unique index. Mirror the
+        # complete_paper_upload handling MINUS the cleanup — this row is a
+        # reviewed paper, never delete it. Rollback + 409 only.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "DUPLICATE_DOI",
+                    "message": "A paper with this DOI already exists.",
+                    "detail": None,
+                }
+            },
+        ) from None
     if doc is None:
         raise HTTPException(
             status_code=404,

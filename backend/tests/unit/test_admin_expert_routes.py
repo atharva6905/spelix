@@ -693,6 +693,43 @@ class TestExpertPaperReview:
         )
         assert resp.status_code == 422
 
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_review_integrity_error_returns_409_duplicate_doi(
+        self, MockRepo, expert_app, expert_client
+    ):
+        """Issue #229 (FR-EXPV-03): re-reviewing a rejected paper whose DOI
+        went live on another row trips uq_rag_documents_doi_live. The endpoint
+        must roll back and return 409 DUPLICATE_DOI — never delete the row."""
+        from sqlalchemy.exc import IntegrityError
+
+        _, mock_db = expert_app
+        mock_db.rollback = AsyncMock()
+
+        instance = MockRepo.return_value
+        instance.update_review_status = AsyncMock(
+            side_effect=IntegrityError(
+                "UPDATE rag_documents",
+                {},
+                Exception(
+                    "duplicate key value violates unique constraint"
+                    " uq_rag_documents_doi_live"
+                ),
+            )
+        )
+        instance.delete = AsyncMock()
+
+        resp = expert_client.patch(
+            f"/api/v1/expert/papers/{TEST_DOC_ID}/review",
+            json={"decision": "reviewed_approved"},
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["error"]["code"] == "DUPLICATE_DOI"
+        # Discard the poisoned transaction before raising.
+        mock_db.rollback.assert_awaited_once()
+        # Unlike complete_paper_upload, the row must NOT be cleaned up here.
+        instance.delete.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # Golden Dataset Labeling (P2-044, FR-EXPV-07)
