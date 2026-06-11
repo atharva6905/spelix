@@ -255,11 +255,11 @@ describe("ExpertPortalPage", () => {
       expect(screen.getByText("Squat Depth Study")).toBeInTheDocument();
     });
 
-    // Fixture has non-empty authors, a tier, and pending status (Action shows
-    // a button), so the only em dash in the row is the DOI cell.
     const row = screen.getByText("Squat Depth Study").closest("tr");
     expect(row).not.toBeNull();
-    expect(within(row as HTMLTableRowElement).getByText("—")).toBeInTheDocument();
+    expect(
+      within(row as HTMLTableRowElement).getByTestId("doi-empty"),
+    ).toHaveTextContent("—");
   });
 
   // --- My Papers tab — Applicable population (issue #223, FR-RAGK-05 ext.) ---
