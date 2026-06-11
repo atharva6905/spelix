@@ -29,3 +29,6 @@
 - LOW — Qdrant orchestration inline in the route; acceptable (sibling complete_paper does the same; single call site).
 - Test quality strong: response is plain dict[str,Any] (no Pydantic model_validate over MagicMock → no vacuous pass), tests use real RagDocument via _make_doc, failure paths (404/422/403/qdrant-down) covered, frontend error test uses correct post-expertFetch reject shape (honors #219 contract).
 - [Optional UserProfile field](review_profile_optional_field.md) — upsert overwrite-all both paths + MagicMock/Pydantic factory trap + type-guard hydration (#224 PASS)
+
+## Reviewed: issue #225 / sex-aware retrieval (2026-06-10) → PASS (1 non-blocking MEDIUM)
+See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant filter-merge (dense+sparse), cache boundary, normalization defense-in-depth, worker-singleton orchestrator test harness.
