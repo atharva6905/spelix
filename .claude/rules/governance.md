@@ -25,8 +25,13 @@ After any T0 merge that triggers a deploy: verify droplet SHA + container health
 ## Tier 1 — agent PRs, human merges
 Categories: feature code, new endpoints, frontend components, dependency MINOR bumps,
 refactors not touching Tier 2 paths.
-Agent: branch → implement (TDD) → PR → run /code-review → post findings as PR comment →
-STOP. Label `needs-human`. Never merge.
+Agent: branch → implement (TDD) → PR → run /code-review → post findings as PR
+comment → present the in-session APPROVAL GATE (PR gist + AskUserQuestion, per
+/ship-loop). Merge ONLY on an explicit in-session human approval, recorded as a PR
+comment before merging. No human response, headless/autonomous context (incl.
+/groom), or human defers → label `needs-human` and STOP; human skips → leave the
+PR open; human closes → close without merging. Never merge without a recorded
+approval.
 
 ## Tier 2 — human-gated
 Paths/categories: `backend/app/models/**`, `backend/app/schemas/**`, `backend/alembic/**`,
@@ -34,6 +39,11 @@ auth/RLS/JWT code, user-facing strings, `.claude/settings.json` + `.claude/hooks
 `.claude/rules/governance.md`, `.mcp.json`, CI deploy steps, `docs/SRS.md`.
 spelix-security-reviewer PASS required before PR. Never autonomous merge. Explicit human
 diff review.
+
+The in-session approval gate satisfies "explicit human diff review" ONLY when its
+presentation includes the per-file diff summary AND the verbatim
+spelix-security-reviewer verdict; the approval is recorded as a PR comment before
+merge. Absent that, T2 stays `needs-human`.
 
 ## Tier 3 — human + deep review
 Categories: migrations touching existing data, RLS policy changes, coaching prompt

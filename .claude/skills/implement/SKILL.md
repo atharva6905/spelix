@@ -12,6 +12,27 @@ to the CALLER (ship-loop or the user) — never to this skill.
 
 Governance (`.claude/rules/governance.md`) is BINDING.
 
+## Step 0 — Isolation detection (nested sub-skill)
+
+**REQUIRED SUB-SKILL:** invoke `superpowers:using-git-worktrees` via the Skill tool
+BEFORE any git command in this skill. Spelix overrides (take precedence over the
+skill's defaults):
+
+1. The native worktree tool is `EnterWorktree`/`ExitWorktree`. NEVER `git worktree add`
+   (the skill's Step 1b git fallback is forbidden here — if EnterWorktree itself fails,
+   that is a blocker to report, not a reason to fall back).
+2. The skill's Step 0 detection decides the entry path:
+   - Already inside a linked worktree whose branch matches THIS task → skip creation,
+     go directly to Step 2 (dispatch).
+   - Already inside a linked worktree for a DIFFERENT task (stale/leftover) →
+     `ExitWorktree` (action: "keep") back to the main checkout FIRST. Never run
+     preflight git commands from inside a foreign worktree.
+   - In the main checkout → proceed to Step 1 preflight as written.
+3. Skip the skill's Step 3 (project setup) and Step 4 (baseline test run) — Spelix
+   worktrees share refs/venvs and CI is the baseline gate. Run setup only on import
+   failure.
+4. The skill's consent question is waived — isolation is mandated by this harness.
+
 ## Step 1 — Preflight
 
 1. `git fetch origin && git checkout main && git pull --ff-only`
@@ -40,6 +61,10 @@ Dispatch rules:
   "see issue #N".
 - Include: scene-setting context (what subsystem, why now), FR-ID(s), the TDD gate
   command, and the worktree scope.
+- Harness meta-work: if the task will touch `.claude/skills/**` or `.claude/agents/**`,
+  the implementer prompt MUST mandate `superpowers:writing-skills` via the Skill tool —
+  skill changes are pressure-tested with subagent scenarios before they ship, not just
+  written. (Requires the implementer's Skill tool grant — see the TDD-nesting issue.)
 - The implementer reports one of: `DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED`.
 
 | Status | Handling |
@@ -61,6 +86,12 @@ Loop mechanics: reviewer findings → the SAME implementer instance fixes (SendM
 context intact, never a fresh dispatch) → the SAME reviewer re-reviews. Max 3 fix
 iterations per gate, then escalate (Step 4). Quality review never starts before spec
 compliance passes; security review never starts before quality passes.
+Fix-loop discipline (nested sub-skill): the fix prompt sent to the SAME implementer
+MUST mandate invoking `superpowers:receiving-code-review` via the Skill tool — verify
+each finding against the actual code before changing anything; findings are claims,
+not orders. A finding the implementer can refute with evidence goes BACK to the
+reviewer with that evidence (the reviewer's re-verdict decides); no performative
+agreement ("You're right!" + blind patch) in either direction.
 
 Reviewer dispatch template (every reviewer):
 - The branch/diff ref + the task text verbatim + the spec-review PASS statement (for
@@ -94,4 +125,20 @@ Post it as an issue comment (`mcp__github__add_issue_comment`), mirror to
 2. Commits exist in the worktree (conventional format, committed at TDD gate passes).
 3. Report to caller: `{branch, commits, checks, review_verdicts, status}`.
 
+**REQUIRED SUB-SKILL:** invoke `superpowers:verification-before-completion` before
+reporting. Every claim in the Step 5 report carries fresh command evidence (command +
+actual output, run AFTER the final commit). "Should pass", "probably green", or stale
+output = the gate is not passed.
+
 Never `git push` to main, never merge, never create the PR from inside this skill.
+
+## Step 6 — Exit the worktree
+
+The session must never end a task still parked inside the task worktree.
+
+- **Called by /ship-loop**: leave the worktree ACTIVE and return the Step 5 report —
+  ship-loop owns push/PR/CI/merge and the eventual ExitWorktree in its cleanup step.
+- **Standalone invocation**: after reporting, call `ExitWorktree` with
+  `action: "keep"` (branch + worktree survive for the caller to push/PR). Tell the
+  user the worktree path, the branch name, and that refs are shared — `git push -u
+  origin <branch>` works from the main checkout.

@@ -8,6 +8,10 @@ let d = '';
 process.stdin.on('data', (c) => (d += c));
 process.stdin.on('end', () => {
   if (process.env.HOOK_SMOKE) process.exit(0); // smoke test: skip slow checks
+  // Linked worktree: no .venv/node_modules here — checks would fail spuriously and
+  // exit-2 would trap the session. Worktree code is gated by the /implement review
+  // chain + local checks + CI instead. (Human decision 2026-06-10: skip entirely.)
+  if (require('./_lib.js').inLinkedWorktree()) process.exit(0);
   let failures = [];
   try {
     const dirty = run('git status --porcelain').split('\n').filter(Boolean).map((l) => l.slice(3).trim());
