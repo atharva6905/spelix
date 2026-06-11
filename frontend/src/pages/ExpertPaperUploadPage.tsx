@@ -27,6 +27,14 @@ import {
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
+const DOCUMENT_TYPE_OPTIONS = [
+  { value: "research_paper", label: "Research Paper" },
+  { value: "textbook", label: "Textbook" },
+  { value: "clinical_guideline", label: "Clinical Guideline" },
+  { value: "expert_annotation", label: "Expert Annotation" },
+  { value: "other", label: "Other" },
+] as const;
+
 const EXERCISE_TAG_OPTIONS = [
   { value: "squat", label: "Squat" },
   { value: "bench", label: "Bench Press" },
@@ -57,6 +65,7 @@ interface FormState {
   title: string;
   authors: string;
   year: string;
+  document_type: string;
   doi: string;
   exercise_tags: string[];
   quality_tier: string;
@@ -68,6 +77,7 @@ const INITIAL_FORM: FormState = {
   title: "",
   authors: "",
   year: "",
+  document_type: "research_paper",
   doi: "",
   exercise_tags: [],
   quality_tier: "",
@@ -149,7 +159,10 @@ export default function ExpertPaperUploadPage() {
       return;
     }
 
-    if (!form.doi.trim()) {
+    // DOI required iff the document type is a research paper
+    // (FR-EXPV-02, issue #234); optional for DOI-less document types.
+    const doiRequired = form.document_type === "research_paper";
+    if (doiRequired && !form.doi.trim()) {
       setDoiError("DOI is required.");
       return;
     }
@@ -177,11 +190,18 @@ export default function ExpertPaperUploadPage() {
     try {
       const signed = await requestPaperUploadUrl({
         title: form.title.trim(),
-        document_type: "research_paper",
+        document_type: form.document_type as
+          | "research_paper"
+          | "textbook"
+          | "clinical_guideline"
+          | "expert_annotation"
+          | "other",
         exercise_tags: form.exercise_tags,
         authors,
         year: yearNum,
-        doi: form.doi.trim(),
+        // Omit doi entirely when empty and the type allows it; a non-empty
+        // DOI is always sent (and normalized/dedup'd by the backend).
+        ...(form.doi.trim() ? { doi: form.doi.trim() } : {}),
         study_design: (form.study_design || undefined) as
           | "rct"
           | "observational"
@@ -311,10 +331,36 @@ export default function ExpertPaperUploadPage() {
                 />
               </div>
 
-              {/* DOI */}
+              {/* Document type — DOI requirement depends on it (issue #234) */}
+              <div>
+                <label htmlFor="document_type" className="mb-1 block text-sm font-medium text-gray-700">
+                  Document Type <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="document_type"
+                  value={form.document_type}
+                  onChange={(e) => {
+                    setDoiError(null);
+                    setForm((f) => ({ ...f, document_type: e.target.value }));
+                  }}
+                  disabled={uploadPhase !== "idle"}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+                >
+                  {DOCUMENT_TYPE_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* DOI — required only for research papers (issue #234) */}
               <div>
                 <label htmlFor="doi" className="mb-1 block text-sm font-medium text-gray-700">
-                  DOI <span className="text-red-500">*</span>
+                  DOI{" "}
+                  {form.document_type === "research_paper" ? (
+                    <span className="text-red-500">*</span>
+                  ) : (
+                    <span className="text-xs font-normal text-gray-400">(optional)</span>
+                  )}
                 </label>
                 <input
                   id="doi"
@@ -483,7 +529,12 @@ export default function ExpertPaperUploadPage() {
                   <>
                     <button
                       type="submit"
-                      disabled={!selectedFile || !form.title.trim() || !form.doi.trim() || uploadPhase !== "idle"}
+                      disabled={
+                        !selectedFile ||
+                        !form.title.trim() ||
+                        (form.document_type === "research_paper" && !form.doi.trim()) ||
+                        uploadPhase !== "idle"
+                      }
                       className="rounded-md bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                     >
                       {uploadPhase === "requesting"

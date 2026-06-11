@@ -378,6 +378,148 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
   });
 });
 
+describe("ExpertPaperUploadPage — DOI optional by document type (issue #234)", () => {
+  beforeEach(() => {
+    mockRequestUrl.mockReset();
+    mockCompleteUpload.mockReset();
+    mockUploadFile.mockReset();
+  });
+
+  /** Fill title + PDF file (DOI deliberately left empty) */
+  async function fillFormNoDoi() {
+    const titleInput = screen.getByLabelText(/title/i);
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Textbook Chapter" } });
+    });
+    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
+    const file = new File([new Uint8Array(1024)], "x.pdf", {
+      type: "application/pdf",
+    });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+  }
+
+  async function selectDocumentType(value: string) {
+    const select = screen.getByLabelText(/document type/i);
+    await act(async () => {
+      fireEvent.change(select, { target: { value } });
+    });
+  }
+
+  function mockSuccessfulUpload() {
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
+  }
+
+  it("renders a Document Type select defaulting to research_paper", async () => {
+    renderPage();
+    await waitForForm();
+    const select = screen.getByLabelText(/document type/i) as HTMLSelectElement;
+    expect(select.value).toBe("research_paper");
+    const values = Array.from(select.options).map((o) => o.value);
+    expect(values).toEqual([
+      "research_paper",
+      "textbook",
+      "clinical_guideline",
+      "expert_annotation",
+      "other",
+    ]);
+  });
+
+  it("removes the DOI required marker for non-research_paper types", async () => {
+    renderPage();
+    await waitForForm();
+    const doiLabel = document.querySelector('label[for="doi"]')!;
+    expect(doiLabel.textContent).toMatch(/\*/);
+    await selectDocumentType("textbook");
+    expect(doiLabel.textContent).not.toMatch(/\*/);
+  });
+
+  it("enables submit without a DOI when a DOI-less type is selected", async () => {
+    renderPage();
+    await waitForForm();
+    await fillFormNoDoi();
+    expect(screen.getByRole("button", { name: /upload/i })).toBeDisabled();
+    await selectDocumentType("clinical_guideline");
+    expect(screen.getByRole("button", { name: /upload/i })).toBeEnabled();
+  });
+
+  it("omits doi from the payload when empty for a DOI-less type", async () => {
+    mockSuccessfulUpload();
+    renderPage();
+    await waitForForm();
+    await fillFormNoDoi();
+    await selectDocumentType("textbook");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() => expect(mockRequestUrl).toHaveBeenCalled());
+    const payload = mockRequestUrl.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.document_type).toBe("textbook");
+    expect("doi" in payload).toBe(false);
+  });
+
+  it("still sends a non-empty DOI for a DOI-less type (optional DOI path)", async () => {
+    mockSuccessfulUpload();
+    renderPage();
+    await waitForForm();
+    await fillFormNoDoi();
+    await selectDocumentType("textbook");
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: "10.1000/textbook1" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() => expect(mockRequestUrl).toHaveBeenCalled());
+    expect(mockRequestUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        document_type: "textbook",
+        doi: "10.1000/textbook1",
+      }),
+    );
+  });
+
+  it("re-requires the DOI when switching back to research_paper", async () => {
+    renderPage();
+    await waitForForm();
+    await fillFormNoDoi();
+    await selectDocumentType("textbook");
+    expect(screen.getByRole("button", { name: /upload/i })).toBeEnabled();
+    await selectDocumentType("research_paper");
+    expect(screen.getByRole("button", { name: /upload/i })).toBeDisabled();
+  });
+
+  it("keeps the in-handler DOI guard for research_paper only", async () => {
+    renderPage();
+    await waitForForm();
+    await fillFormNoDoi();
+    await selectDocumentType("textbook");
+
+    // Bypass the button — fire submit on the form element directly
+    const formEl = document.querySelector("form");
+    await act(async () => {
+      fireEvent.submit(formEl!);
+    });
+    // No inline DOI-required error for a DOI-less type
+    expect(screen.queryByText(/doi is required/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", () => {
   beforeEach(() => {
     mockRequestUrl.mockReset();
