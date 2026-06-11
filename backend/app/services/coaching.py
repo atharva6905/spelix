@@ -159,6 +159,7 @@ def _build_user_prompt(
     keyframe_analysis_text: str | None = None,
     retrieved_contexts: list[RetrievedContext] | None = None,
     retrieval_source: str | None = None,
+    lifter_sex: str | None = None,
 ) -> str:
     """Build the per-analysis user turn (fresh context, not cached).
 
@@ -186,6 +187,12 @@ def _build_user_prompt(
         numbered "Retrieved Evidence" section is prepended and cite-then-
         generate instructions are appended. When None or empty, the prompt
         is identical to the Phase 1 format.
+    lifter_sex:
+        Pre-normalized lifter sex — only "male"/"female"/None reach here
+        (the worker normalizes "prefer_not_to_say" and undisclosed to None).
+        When "male"/"female", a single sex-context line is appended to the
+        Athlete Profile block (FR-AICP-05 ext., issue #225). None → no line,
+        and the existing no-profile fallback line is untouched.
     """
     rep_count = len(rep_metrics)
     confidence_label_str = confidence_label(confidence_score)
@@ -224,6 +231,15 @@ def _build_user_prompt(
     else:
         lines += [
             "No athlete profile on file — apply general population coaching standards.",
+            "",
+        ]
+
+    # Lifter sex context (FR-AICP-05 ext., issue #225). Internal prompt text —
+    # NOT user-facing, and contains no banned SaMD language. Only "male"/"female"
+    # reach here; None / undisclosed adds no line (behavior identical to today).
+    if lifter_sex in ("male", "female"):
+        lines += [
+            f"Lifter sex: {lifter_sex} — apply evidence for {lifter_sex} lifters where it differs.",
             "",
         ]
 
@@ -488,6 +504,7 @@ class CoachingService:
         retrieval_source: str | None = None,
         analysis_id: Any = None,
         pubsub_redis: Any = None,
+        lifter_sex: str | None = None,
     ) -> CoachingOutput:
         """Stream coaching from Claude via instructor create_partial, publish chunks to Redis.
 
@@ -530,6 +547,10 @@ class CoachingService:
         pubsub_redis:
             An async Redis client with a ``publish(channel, message)`` coroutine.
             None → Redis publishing is skipped entirely.
+        lifter_sex:
+            Pre-normalized lifter sex ("male"/"female"/None). Forwarded to
+            ``_build_user_prompt`` for the sex-context line (FR-AICP-05 ext.,
+            issue #225). None → no sex line, behavior identical to today.
         """
         if self._instructor_client is None:
             raise ValueError(
@@ -548,6 +569,7 @@ class CoachingService:
             keyframe_analysis_text=keyframe_analysis_text,
             retrieved_contexts=retrieved_contexts,
             retrieval_source=retrieval_source,
+            lifter_sex=lifter_sex,
         )
 
         channel = f"coaching:{analysis_id}" if analysis_id else None

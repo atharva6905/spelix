@@ -734,6 +734,63 @@ class TestCoachingService:
         assert "general population" in prompt
         assert "Athlete Profile" not in prompt
 
+    # ---------------------------------------------------------------------------
+    # Lifter sex in coaching context (FR-AICP-05 ext., issue #225)
+    # ---------------------------------------------------------------------------
+
+    def test_lifter_sex_female_adds_line(self) -> None:
+        """lifter_sex='female' → exact sex line present near Athlete Profile."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats={"height_cm": 170},
+            lifter_sex="female",
+        )
+        assert (
+            "Lifter sex: female — apply evidence for female lifters where it differs."
+            in prompt
+        )
+
+    def test_lifter_sex_male_adds_line(self) -> None:
+        prompt = _build_user_prompt(
+            exercise_type="bench",
+            exercise_variant="flat",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats=None,
+            lifter_sex="male",
+        )
+        assert (
+            "Lifter sex: male — apply evidence for male lifters where it differs."
+            in prompt
+        )
+        # No-profile fallback line must remain verbatim and untouched.
+        assert (
+            "No athlete profile on file — apply general population coaching standards."
+            in prompt
+        )
+
+    def test_lifter_sex_none_no_line(self) -> None:
+        """lifter_sex=None → no sex line; fallback line untouched (verbatim)."""
+        prompt = _build_user_prompt(
+            exercise_type="squat",
+            exercise_variant="high_bar",
+            rep_metrics=_make_sample_rep_metrics(),
+            confidence_score=0.88,
+            thresholds=ThresholdConfig(),
+            body_stats=None,
+            lifter_sex=None,
+        )
+        assert "Lifter sex:" not in prompt
+        assert (
+            "No athlete profile on file — apply general population coaching standards."
+            in prompt
+        )
+
     def test_keyframe_analysis_in_prompt(self) -> None:
         """When keyframe_analysis_text is provided, it must appear in the prompt."""
         keyframe_text = "Lifter shows forward lean exceeding 45 degrees at bottom position."

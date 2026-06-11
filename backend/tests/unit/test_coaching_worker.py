@@ -498,6 +498,117 @@ async def test_pipeline_passes_contexts_to_coaching():
     assert analysis.status == "completed"
 
 
+def _profile_repo_patch(*, sex: str | None):
+    """Patch UserProfileRepository so get_by_user_id returns a profile whose
+    body-stats fields are absent (None) but `sex` is set explicitly.
+
+    MagicMock gotcha: a bare MagicMock returns truthy mocks for every attr,
+    so body_stats would fill with junk. We set every body-stats field to None
+    and pin `sex` to the test value.
+    """
+    from unittest.mock import patch as _patch
+
+    from app.workers.analysis_worker import _USER_PROFILE_BODY_STATS_FIELDS
+
+    profile = MagicMock()
+    for attr in _USER_PROFILE_BODY_STATS_FIELDS:
+        setattr(profile, attr, None)
+    profile.sex = sex
+
+    repo_instance = MagicMock()
+    repo_instance.get_by_user_id = AsyncMock(return_value=profile)
+
+    return _patch(
+        "app.repositories.user_profile.UserProfileRepository",
+        return_value=repo_instance,
+    )
+
+
+@pytest.mark.asyncio
+async def test_imperative_path_threads_lifter_sex_female():
+    """Imperative path: profile sex='female' → orchestrator.retrieve and
+    generate_coaching_streaming both receive lifter_sex='female'
+    (FR-AICP-05 ext., FR-AICP-12 ext., issue #225)."""
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+    )
+    captured: dict[str, Any] = {}
+    with patches as mock_svc, _profile_repo_patch(sex="female"):
+        from app.workers.analysis_worker import process_analysis
+
+        # Grab the orchestrator mock to inspect retrieve kwargs.
+        import app.services.dual_collection as _dc
+
+        orchestrator = _dc.DualCollectionOrchestrator(None, None)
+        captured["orchestrator"] = orchestrator
+
+        await process_analysis(ctx, aid)
+
+    retrieve_kwargs = captured["orchestrator"].retrieve.call_args.kwargs
+    assert retrieve_kwargs.get("lifter_sex") == "female"
+
+    cs_kwargs = mock_svc.generate_coaching_streaming.call_args.kwargs
+    assert cs_kwargs.get("lifter_sex") == "female"
+
+
+@pytest.mark.asyncio
+async def test_imperative_path_prefer_not_to_say_normalizes_to_none():
+    """sex='prefer_not_to_say' → lifter_sex normalizes to None (no filter)."""
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+    )
+    captured: dict[str, Any] = {}
+    with patches as mock_svc, _profile_repo_patch(sex="prefer_not_to_say"):
+        from app.workers.analysis_worker import process_analysis
+
+        import app.services.dual_collection as _dc
+
+        orchestrator = _dc.DualCollectionOrchestrator(None, None)
+        captured["orchestrator"] = orchestrator
+
+        await process_analysis(ctx, aid)
+
+    retrieve_kwargs = captured["orchestrator"].retrieve.call_args.kwargs
+    assert retrieve_kwargs.get("lifter_sex") is None
+
+    cs_kwargs = mock_svc.generate_coaching_streaming.call_args.kwargs
+    assert cs_kwargs.get("lifter_sex") is None
+
+
+@pytest.mark.asyncio
+async def test_imperative_path_no_profile_lifter_sex_none():
+    """No profile row → lifter_sex=None passed through."""
+    from unittest.mock import patch as _patch
+
+    contexts = _make_contexts(5)
+    ctx, aid, analysis, patches, created, pubsub, _ = _setup_worker_test(
+        retrieval_results=contexts,
+    )
+    repo_instance = MagicMock()
+    repo_instance.get_by_user_id = AsyncMock(return_value=None)
+    captured: dict[str, Any] = {}
+    with patches as mock_svc, _patch(
+        "app.repositories.user_profile.UserProfileRepository",
+        return_value=repo_instance,
+    ):
+        from app.workers.analysis_worker import process_analysis
+
+        import app.services.dual_collection as _dc
+
+        orchestrator = _dc.DualCollectionOrchestrator(None, None)
+        captured["orchestrator"] = orchestrator
+
+        await process_analysis(ctx, aid)
+
+    retrieve_kwargs = captured["orchestrator"].retrieve.call_args.kwargs
+    assert retrieve_kwargs.get("lifter_sex") is None
+
+    cs_kwargs = mock_svc.generate_coaching_streaming.call_args.kwargs
+    assert cs_kwargs.get("lifter_sex") is None
+
+
 @pytest.mark.asyncio
 async def test_retrieval_guard_failure_no_contexts():
     """When retrieval returns <3 results, coaching called with None."""
