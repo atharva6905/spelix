@@ -18,3 +18,9 @@
 ## Tool-grant trap (added 2026-06-10)
 - An added `tools:` entry (e.g. `Skill`) in an agent `.md` frontmatter is NOT a guardrail-file edit. Agent `.md` files are not in the governance.md meta-safety list (only settings.json / hooks/** / governance.md are). Distinguish "agent gains a capability" from "guardrail file modified": former is in-scope T0; latter is instant T0 FAIL.
 - Decisive question for any tool grant: does the new tool create a self-merge / self-approval path? If the agent is an implementer (not the merge gate), the answer is no → stays T0.
+
+## PR #252 (2026-06-10) → PASS — bugfix skill sub-skill rebuild (issue #247)
+- Single file `.claude/skills/bugfix/SKILL.md`. T0 (`.claude/**`, outside all exclusions; no T2 paths, no guardrail files).
+- Rewrote the bugfix loop to REQUIRE `superpowers:systematic-debugging` (4 binding phases) + `superpowers:test-driven-development` for the fix phase. Same pattern as #250: Spelix overrides take precedence over skill defaults; stop-after-3 backstop preserved (now "Phase 4.5 stop" → emit /implement Step 4 blocker report, "do not try harder").
+- Net effect STRENGTHENS discipline (no "just try this", mandatory failing-test-first). No governance-semantics change, no self-merge/approval path created, no SaMD/user-facing strings. Kept test_pose_extraction.py Windows-crash exclusion ("CI is the gate") — consistent with env memory, not a gate weakening.
+- Precedent: a skill markdown that ADDS a required `superpowers:` sub-skill and tightens the loop is in-scope T0, same as #250's tool-grant ruling.
