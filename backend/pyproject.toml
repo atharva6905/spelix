@@ -10,7 +10,11 @@ dependencies = [
     "streaq>=6.4.0,<7.0",
     "asyncpg>=0.31.0,<1.0",
     "cohere>=6.1.0,<7.0",
-    "docling>=2.0.0,<3.0",
+    # [rapidocr] extra pulls the CPU onnxruntime wheel that RapidOCR's default
+    # onnxruntime inference engine needs to load the pre-baked ONNX OCR models
+    # (#263). Without it, ingest_paper fails at reader init with
+    # "ImportError: onnxruntime is not installed."
+    "docling[rapidocr]>=2.0.0,<3.0",
     "fastapi>=0.135.3,<0.136",
     "langchain-anthropic>=0.2.0,<0.3",
     "langchain-core>=0.3.0,<0.4",

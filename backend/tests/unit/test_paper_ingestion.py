@@ -13,6 +13,7 @@ future refactor that drops it fails loudly.
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 from app.services import pdf_extraction
@@ -64,3 +65,36 @@ def test_build_converter_default_artifacts_path_is_not_site_packages() -> None:
 
     assert artifacts_path is not None
     assert "site-packages" not in str(artifacts_path)
+
+
+def test_rapidocr_onnx_inference_engine_is_installed() -> None:
+    """The onnxruntime inference engine must be installed for RapidOCR (#263).
+
+    Docling pins the RapidOCR backend to ``EngineType.ONNXRUNTIME`` (it builds
+    ``Det/Cls/Rec.engine_type = onnxruntime`` from the default
+    ``RapidOcrOptions.backend == "onnxruntime"``) and we pre-bake the ONNX model
+    set (RapidOcr/onnx/PP-OCRv4/*.onnx). At reader init RapidOCR calls
+    ``get_engine(cfg.engine_type)`` which raises
+    ``ImportError("onnxruntime is not installed.")`` if the engine wheel is
+    absent. The old broken code path used torch ``.pth`` models, so onnxruntime
+    was never required; once we pinned ONNX artifacts it became mandatory.
+
+    Guard: ``docling[rapidocr]`` (feat-ocr-rapidocr-onnx) must keep pulling the
+    CPU onnxruntime wheel into the dependency set.
+    """
+    assert importlib.util.find_spec("onnxruntime") is not None, (
+        "onnxruntime missing: RapidOCR's onnxruntime engine cannot load the "
+        "pre-baked ONNX OCR models — ingest_paper will fail at reader init"
+    )
+
+
+def test_docling_rapidocr_backend_default_is_onnxruntime() -> None:
+    """Pin the assumption that docling drives RapidOCR via the onnxruntime engine.
+
+    If a docling upgrade changed the default backend away from onnxruntime, the
+    onnxruntime dependency guard above would no longer match the engine docling
+    actually configures — this test makes that drift loud.
+    """
+    from docling.datamodel.pipeline_options import RapidOcrOptions
+
+    assert RapidOcrOptions.model_fields["backend"].default == "onnxruntime"
