@@ -65,6 +65,12 @@ class AgentState(TypedDict):
     body_stats: dict[str, Any] | None
     keyframe_analysis_text: str | None
     mode: Literal["deterministic", "adaptive"]
+    # Pre-normalized lifter sex for sex-aware retrieval + prompt (issue #225,
+    # FR-AICP-12 ext.). Only "male"/"female"/None reach here — the worker
+    # normalizes "prefer_not_to_say" and undisclosed to None. PII: this field
+    # is an INPUT only; it is never emitted as a node output_key, so it never
+    # lands in agent_trace_json / LangSmith traces (FR-EXPV-03).
+    lifter_sex: str | None
 
     # --- Tool outputs ----------------------------------------------------
     rep_metrics: list[dict[str, Any]]
@@ -95,6 +101,7 @@ def make_initial_state(
     mode: Literal["deterministic", "adaptive"] = "deterministic",
     body_stats: dict[str, Any] | None = None,
     keyframe_analysis_text: str | None = None,
+    lifter_sex: str | None = None,
 ) -> AgentState:
     """Construct a valid initial AgentState with safe defaults for every field."""
     return AgentState(
@@ -106,6 +113,7 @@ def make_initial_state(
         body_stats=body_stats,
         keyframe_analysis_text=keyframe_analysis_text,
         mode=mode,
+        lifter_sex=lifter_sex,
         rep_metrics=[],
         papers_contexts=[],
         brain_contexts=[],

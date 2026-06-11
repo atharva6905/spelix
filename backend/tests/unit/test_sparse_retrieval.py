@@ -352,6 +352,76 @@ class TestSparseSearch:
             "query_filter must not be present in query_points call when exercise_filter is None."
         )
 
+    # -----------------------------------------------------------------------
+    # #225 — additional_filters merged into Filter.must (sex-applicability leak fix)
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_additional_filters_merged_into_must(self) -> None:
+        """additional_filters conditions are added to query_filter.must alongside
+        the exercise condition (FR-AICP-12 ext.). Without this the BM25 leg would
+        surface opposite-sex papers that the dense leg already filters out."""
+        from qdrant_client import models as qdrant_models
+
+        service = _make_service()
+        service._qdrant.query_points.return_value = _make_query_response([])
+
+        sex_cond = qdrant_models.FieldCondition(
+            key="sex_applicability",
+            match=qdrant_models.MatchAny(any=["female", "both"]),
+        )
+
+        await service.sparse_search(
+            "squat depth",
+            collection="papers_rag",
+            exercise_filter="squat",
+            additional_filters=[sex_cond],
+        )
+
+        call_kwargs = service._qdrant.query_points.call_args.kwargs
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None
+        keys = {c.key for c in query_filter.must}
+        assert keys == {"exercise", "sex_applicability"}
+        sex = next(c for c in query_filter.must if c.key == "sex_applicability")
+        assert set(sex.match.any) == {"female", "both"}
+
+    @pytest.mark.asyncio
+    async def test_additional_filters_without_exercise_filter(self) -> None:
+        """additional_filters alone (no exercise_filter) still builds a query_filter."""
+        from qdrant_client import models as qdrant_models
+
+        service = _make_service()
+        service._qdrant.query_points.return_value = _make_query_response([])
+
+        sex_cond = qdrant_models.FieldCondition(
+            key="sex_applicability",
+            match=qdrant_models.MatchAny(any=["male", "both"]),
+        )
+
+        await service.sparse_search(
+            "bench press",
+            collection="papers_rag",
+            additional_filters=[sex_cond],
+        )
+
+        call_kwargs = service._qdrant.query_points.call_args.kwargs
+        query_filter = call_kwargs.get("query_filter")
+        assert query_filter is not None
+        assert len(query_filter.must) == 1
+        assert query_filter.must[0].key == "sex_applicability"
+
+    @pytest.mark.asyncio
+    async def test_no_additional_filters_omits_query_filter(self) -> None:
+        """No exercise_filter and no additional_filters → no query_filter at all."""
+        service = _make_service()
+        service._qdrant.query_points.return_value = _make_query_response([])
+
+        await service.sparse_search("deadlift", additional_filters=None)
+
+        call_kwargs = service._qdrant.query_points.call_args.kwargs
+        assert "query_filter" not in call_kwargs
+
 
 # ---------------------------------------------------------------------------
 # _parse_response — unit tests (pure function)

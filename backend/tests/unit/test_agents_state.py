@@ -38,6 +38,20 @@ def test_make_initial_state_populates_required_fields():
     assert state["eval_scores"] == {}
     assert state["degraded_mode"] is False
     assert state["user_history_summary"] is None
+    # #225: lifter_sex defaults to None when not supplied.
+    assert state["lifter_sex"] is None
+
+
+def test_make_initial_state_threads_lifter_sex():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="bench",
+        exercise_variant="flat",
+        confidence_score=0.9,
+        lifter_sex="female",
+    )
+    assert state["lifter_sex"] == "female"
 
 
 def test_node_event_serializes_to_plain_dict():

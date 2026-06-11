@@ -118,6 +118,74 @@ async def test_retrieve_papers_returns_empty_on_service_error():
     assert update == {"papers_contexts": [], "degraded_mode": True}
 
 
+def _sex_conditions(additional_filters: object) -> list:
+    if not additional_filters:
+        return []
+    return [
+        c for c in additional_filters
+        if getattr(c, "key", None) == "sex_applicability"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_papers_adds_sex_filter_when_lifter_sex_known():
+    """state['lifter_sex']='male' → hybrid_search gets MatchAny(['male','both'])
+    on sex_applicability (FR-AICP-12 ext., issue #225)."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.82,
+        lifter_sex="male",
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+    await retrieve_papers(state, retrieval_svc=retrieval_svc)
+
+    call = retrieval_svc.hybrid_search.await_args
+    sex = _sex_conditions(call.kwargs.get("additional_filters"))
+    assert len(sex) == 1
+    assert set(sex[0].match.any) == {"male", "both"}
+
+
+@pytest.mark.asyncio
+async def test_retrieve_papers_no_sex_filter_when_lifter_sex_none():
+    """lifter_sex=None → no sex condition forwarded (today's behavior)."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.82,
+        lifter_sex=None,
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+    await retrieve_papers(state, retrieval_svc=retrieval_svc)
+
+    call = retrieval_svc.hybrid_search.await_args
+    assert _sex_conditions(call.kwargs.get("additional_filters")) == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_papers_no_sex_filter_when_prefer_not_to_say():
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.82,
+        lifter_sex="prefer_not_to_say",
+    )
+    retrieval_svc = SimpleNamespace(hybrid_search=AsyncMock(return_value=[]))
+
+    await retrieve_papers(state, retrieval_svc=retrieval_svc)
+
+    call = retrieval_svc.hybrid_search.await_args
+    assert _sex_conditions(call.kwargs.get("additional_filters")) == []
+
+
 @pytest.mark.asyncio
 async def test_retrieve_coach_brain_applies_status_active_filter():
     state = make_initial_state(
