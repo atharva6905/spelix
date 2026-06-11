@@ -61,6 +61,10 @@ Dispatch rules:
   "see issue #N".
 - Include: scene-setting context (what subsystem, why now), FR-ID(s), the TDD gate
   command, and the worktree scope.
+- Harness meta-work: if the task will touch `.claude/skills/**` or `.claude/agents/**`,
+  the implementer prompt MUST mandate `superpowers:writing-skills` via the Skill tool —
+  skill changes are pressure-tested with subagent scenarios before they ship, not just
+  written. (Requires the implementer's Skill tool grant — see the TDD-nesting issue.)
 - The implementer reports one of: `DONE | DONE_WITH_CONCERNS | NEEDS_CONTEXT | BLOCKED`.
 
 | Status | Handling |
@@ -82,6 +86,12 @@ Loop mechanics: reviewer findings → the SAME implementer instance fixes (SendM
 context intact, never a fresh dispatch) → the SAME reviewer re-reviews. Max 3 fix
 iterations per gate, then escalate (Step 4). Quality review never starts before spec
 compliance passes; security review never starts before quality passes.
+Fix-loop discipline (nested sub-skill): the fix prompt sent to the SAME implementer
+MUST mandate invoking `superpowers:receiving-code-review` via the Skill tool — verify
+each finding against the actual code before changing anything; findings are claims,
+not orders. A finding the implementer can refute with evidence goes BACK to the
+reviewer with that evidence (the reviewer's re-verdict decides); no performative
+agreement ("You're right!" + blind patch) in either direction.
 
 Reviewer dispatch template (every reviewer):
 - The branch/diff ref + the task text verbatim + the spec-review PASS statement (for
@@ -114,6 +124,11 @@ Post it as an issue comment (`mcp__github__add_issue_comment`), mirror to
    (if frontend touched) `tsc` + `vitest`.
 2. Commits exist in the worktree (conventional format, committed at TDD gate passes).
 3. Report to caller: `{branch, commits, checks, review_verdicts, status}`.
+
+**REQUIRED SUB-SKILL:** invoke `superpowers:verification-before-completion` before
+reporting. Every claim in the Step 5 report carries fresh command evidence (command +
+actual output, run AFTER the final commit). "Should pass", "probably green", or stale
+output = the gate is not passed.
 
 Never `git push` to main, never merge, never create the PR from inside this skill.
 

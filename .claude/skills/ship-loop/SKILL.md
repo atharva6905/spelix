@@ -38,6 +38,9 @@ Continuous delivery over a task queue, fully in-session. Governance:
    yet passed) before continuing.
 5. Watch CI via mcp__github__get_pull_request_status (or `gh pr checks <N> --watch` in
    background). Poll with ScheduleWakeup ~270s if watching manually.
+   Claims discipline (superpowers:verification-before-completion): "CI green" may only
+   be stated after reading the actual check conclusions; "deployed" only after the
+   droplet SHA/health command output is in hand. Never claim from expectation.
 6. CI red → /bugfix loop on the branch (max 3 iterations) → still red → label `blocked`,
    comment root-cause summary on PR, count as blocked, NEXT task. If the session has
    already left the task worktree, re-enter it with `EnterWorktree` (`path:` the
