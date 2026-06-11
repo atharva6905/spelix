@@ -9,18 +9,60 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 from typing import Any
+
+from docling.datamodel.base_models import InputFormat
 
 logger = logging.getLogger(__name__)
 
 SECTION_HEADINGS = ("abstract", "introduction", "methods", "results", "discussion", "conclusion")
 
+# Default writable location for Docling/RapidOCR model artifacts. The prod
+# container runs non-root with a read-only venv, so Docling MUST NOT fall back
+# to RapidOCR's default behaviour of downloading its OCR model into
+# ``site-packages`` (raises PermissionError → every ingest_paper task fails;
+# see #263). The Dockerfile pre-bakes the models here at build time and sets
+# DOCLING_ARTIFACTS_PATH to match.
+_DEFAULT_ARTIFACTS_PATH = "/app/models/docling"
+
+
+def _artifacts_path() -> str:
+    """Resolve the writable Docling artifacts directory.
+
+    Never returns None: a None ``artifacts_path`` lets RapidOCR download into
+    site-packages, which is exactly the #263 crash we are guarding against.
+    """
+    return os.environ.get("DOCLING_ARTIFACTS_PATH") or _DEFAULT_ARTIFACTS_PATH
+
+
+def _build_converter() -> Any:
+    """Construct a DocumentConverter pinned to a writable artifacts path.
+
+    Setting ``artifacts_path`` makes Docling pass explicit ``Det/Cls/Rec``
+    model paths to RapidOCR, so RapidOCR uses the pre-baked local files instead
+    of attempting a download into the read-only venv (#263). OCR is pinned to
+    the RapidOCR backend explicitly rather than the ``auto`` resolver so the
+    model paths are always pinned.
+    """
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, RapidOcrOptions
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+
+    pipeline_options = PdfPipelineOptions(
+        artifacts_path=_artifacts_path(),
+        ocr_options=RapidOcrOptions(),
+    )
+    return DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        },
+    )
+
 
 def _extract_sync(pdf_bytes: bytes) -> tuple[str, dict[str, str] | None]:
     from docling.datamodel.base_models import DocumentStream
-    from docling.document_converter import DocumentConverter
 
-    converter = DocumentConverter()
+    converter = _build_converter()
     source = DocumentStream(name="paper.pdf", stream=io.BytesIO(pdf_bytes))
     result = converter.convert(source)
 
