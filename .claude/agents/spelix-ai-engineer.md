@@ -1,7 +1,7 @@
 ---
 name: spelix-ai-engineer
 description: Use for any task touching coaching (services/coaching.py, SSE, prompts, instructor schemas), RAG retrieval (Qdrant, Cohere, hybrid retrieval, citations), LangGraph agent orchestration (AgentState, tool nodes, CoVe, distillation), or Coach Brain (entries, tombstones, cascade predicates). Replaces spelix-coaching-engineer, spelix-rag-engineer, and spelix-langgraph-engineer.
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill
 memory: project
 model: opus
 color: purple
@@ -91,7 +91,18 @@ DB: Supabase Postgres via PgBouncer port 6543 (asyncpg needs statement_cache_siz
 Authoritative requirements: `docs/SRS.md`. Decisions: `decisions.md`. Gotchas:
 `backend/CLAUDE.md`.
 
-## TDD Protocol
+## TDD Protocol (nested sub-skill)
+
+**REQUIRED SUB-SKILL:** before writing any code, invoke `superpowers:test-driven-development`
+via the Skill tool and follow it exactly
+(Iron Law: no production code without a failing test first; watch it fail).
+Spelix overrides (take precedence over the skill's defaults):
+1. The FR-ID gate in this prompt runs BEFORE the skill's RED step.
+2. Test locations, commands, and the mandatory test list (retry paths,
+   banned-language absence, stream_complete, retrieval exclusion, CoVe
+   termination) are fixed by this prompt — use them verbatim.
+3. After 3 failed fix iterations: stop and report per this prompt — never loop on.
+4. Commit at every green per this prompt's commit convention.
 
 1. Write the failing test first (`tests/unit/test_{module}.py` backend, `.test.tsx`
    frontend). Run it — confirm it fails for the right reason (not an import error).

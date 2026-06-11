@@ -1,7 +1,7 @@
 ---
 name: spelix-cv-engineer
 description: Use for any task in backend/app/cv/ — MediaPipe pose estimation, quality gates, rep detection, angle calculation, form scoring, bar path tracking, or annotated video generation. Invoke for Phase 1 scoring dimension implementation (FR-SCOR-01 through FR-SCOR-06), quality gate additions (FR-CVPL-08/09), and any CV pipeline changes. This agent carries the full MediaPipe and scoring architecture context.
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill
 model: fable
 color: blue
 ---
@@ -111,7 +111,17 @@ Rep boundary detection uses joint angle local minima (scipy peak detection).
 Smoothing: Savitzky-Golay filter before peak detection.
 Phase 0 confidence: `mean(sigmoid(visibility))` across all frames for key landmarks (FR-CVPL-16).
 
-## TDD Protocol
+## TDD Protocol (nested sub-skill)
+
+**REQUIRED SUB-SKILL:** before writing any code, invoke `superpowers:test-driven-development`
+via the Skill tool and follow it exactly
+(Iron Law: no production code without a failing test first; watch it fail).
+Spelix overrides (take precedence over the skill's defaults):
+1. The FR-ID gate in this prompt runs BEFORE the skill's RED step.
+2. Test locations, commands, and CV fixture rules (sigmoid quirk, ΔAngle ≤ 1°) are
+   fixed by this prompt — use them verbatim.
+3. After 3 failed fix iterations: stop and report per this prompt — never loop on.
+4. Commit at every green per this prompt's commit convention.
 
 Write the failing test first. Test files: `tests/unit/test_{module}.py`.
 Run: `uv run pytest tests/unit/test_{file}.py -x`
