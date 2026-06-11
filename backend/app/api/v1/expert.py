@@ -534,8 +534,12 @@ async def update_paper_metadata(
 
     Updates the rag_documents row, commits, then best-effort restamps the
     paper's existing papers_rag Qdrant points via set_payload — no re-embed
-    (issue #223). A restamp failure is logged and never fails the request;
-    ingestion re-stamps the payload on the next re-embed.
+    (issue #223). A restamp failure is logged and never fails the request.
+    NOTE: nothing automatically re-stamps already-ingested papers later (no
+    reconciliation job; re-ingestion runs only on approval/re-upload), so a
+    failed restamp leaves the Qdrant payload — which the retrieval hard
+    filter evaluates — stale until the edit is retried or the #222 backfill
+    script is re-run. The warning below is the operator's signal.
     """
     updated = await rag_repo.update_sex_applicability(
         doc_id, sex_applicability=body.sex_applicability
@@ -572,11 +576,18 @@ async def update_paper_metadata(
                     ]
                 ),
             )
+        else:
+            logger.warning(
+                "Qdrant unavailable — sex_applicability restamp skipped for %s;"
+                " DB and papers_rag payload now diverge until retried",
+                doc_id,
+            )
     except Exception:
         logger.warning(
             "Failed to restamp sex_applicability on papers_rag points for %s;"
-            " next re-embed will re-stamp",
+            " DB and papers_rag payload now diverge until retried",
             doc_id,
+            exc_info=True,
         )
 
     return {
