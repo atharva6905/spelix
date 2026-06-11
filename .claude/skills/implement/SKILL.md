@@ -115,6 +115,11 @@ Post it as an issue comment (`mcp__github__add_issue_comment`), mirror to
 2. Commits exist in the worktree (conventional format, committed at TDD gate passes).
 3. Report to caller: `{branch, commits, checks, review_verdicts, status}`.
 
+**REQUIRED SUB-SKILL:** invoke `superpowers:verification-before-completion` before
+reporting. Every claim in the Step 5 report carries fresh command evidence (command +
+actual output, run AFTER the final commit). "Should pass", "probably green", or stale
+output = the gate is not passed.
+
 Never `git push` to main, never merge, never create the PR from inside this skill.
 
 ## Step 6 — Exit the worktree
