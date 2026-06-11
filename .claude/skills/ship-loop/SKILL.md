@@ -86,6 +86,14 @@ Continuous delivery over a task queue, fully in-session. Governance:
      The gate is for INTERACTIVE sessions: if the human does not respond or the
      session is autonomous/headless, fall back to label `needs-human` + NEXT task.
 8. Cleanup — runs for EVERY outcome before the next task:
+   - Agent-memory preservation FIRST, before ANY ExitWorktree: reviewer/implementer
+     agents inherit the session cwd, so their `.claude/agent-memory/**` writes land in
+     the TASK WORKTREE — removing it destroys them. Check
+     `git -C <worktree> status --short -- .claude/agent-memory/` and copy any
+     modified/untracked files to the same path in the main checkout, then revert the
+     worktree copies (`git checkout -- .claude/agent-memory/` + delete untracked).
+     Commit the main-checkout copies as docs hygiene (`docs: <agent> memory from
+     <PR> gate`).
    - Merged: `ExitWorktree` (action: "remove") — deletes the worktree and its local
      branch (the work is on main). If the tool refuses citing unmerged changes,
      STOP and reconcile — never pass discard_changes blind.
