@@ -213,6 +213,46 @@ class TestChunkPayloadConstruction:
         payloads = svc._build_payloads("paper-003", pairs, SAMPLE_METADATA)
         assert payloads[0].section == "results"
 
+    def test_exercise_and_sex_applicability_stamped_on_payloads(self) -> None:
+        """Issue #222 (FR-RAGK-02 ext., FR-AICP-12): every ChunkPayload carries the
+        exercise list and sex_applicability from DocumentMetadata, and both keys
+        survive model_dump() (the dict actually upserted to Qdrant)."""
+        mock_cohere = MagicMock()
+        mock_qdrant = MagicMock()
+        svc = IngestionService(cohere_client=mock_cohere, qdrant_client=mock_qdrant)
+
+        metadata = DocumentMetadata(
+            title="Female-specific squat mechanics",
+            authors=["Doe J"],
+            year=2023,
+            doi=None,
+            quality_tier="L2_rct",
+            review_status="reviewed_approved",
+            exercise_tags=["squat"],
+            sex_applicability="female",
+        )
+
+        pairs = [(None, "chunk A"), ("methods", "chunk B")]
+        payloads = svc._build_payloads("paper-sex", pairs, metadata)
+
+        for p in payloads:
+            assert p.exercise == ["squat"]
+            assert p.sex_applicability == "female"
+            dumped = p.model_dump()
+            assert dumped["exercise"] == ["squat"]
+            assert dumped["sex_applicability"] == "female"
+
+    def test_exercise_and_sex_applicability_default_when_unset(self) -> None:
+        """DocumentMetadata defaults: exercise_tags=[] and sex_applicability='both'."""
+        mock_cohere = MagicMock()
+        mock_qdrant = MagicMock()
+        svc = IngestionService(cohere_client=mock_cohere, qdrant_client=mock_qdrant)
+
+        pairs = [(None, "chunk")]
+        payloads = svc._build_payloads("paper-default", pairs, SAMPLE_METADATA)
+        assert payloads[0].exercise == []
+        assert payloads[0].sex_applicability == "both"
+
 
 # ---------------------------------------------------------------------------
 # Integration: IngestionService.ingest_document — status guard

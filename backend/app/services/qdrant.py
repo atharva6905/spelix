@@ -157,13 +157,15 @@ class QdrantClientWrapper:
         and the startup path once Phase 2 worker is wired.
 
         Collections created:
-        - ``papers_rag``: 1024-dim cosine + BM25 sparse + keyword index on
-          ``exercise`` (ADR-RAG-03, ADR-BRAIN-03, FR-AICP-15 retrieval filter)
+        - ``papers_rag``: 1024-dim cosine + BM25 sparse + keyword indexes on
+          ``exercise`` and ``sex_applicability`` (ADR-RAG-03, ADR-BRAIN-03,
+          FR-AICP-15 retrieval filter, FR-AICP-12 sex filter — issue #222)
         - ``coach_brain``: same vector config + keyword indexes on
           ``exercise`` and ``status`` (ADR-BRAIN-01, FR-BRAIN-04)
         """
         await self._ensure_collection(
-            COLLECTION_PAPERS_RAG, payload_index_fields=("exercise",)
+            COLLECTION_PAPERS_RAG,
+            payload_index_fields=("exercise", "sex_applicability"),
         )
         await self._ensure_collection(
             COLLECTION_COACH_BRAIN, payload_index_fields=("exercise", "status")
@@ -269,6 +271,28 @@ class QdrantClientWrapper:
         """
         return await self._client.upsert(
             collection_name=collection, points=points
+        )
+
+    async def set_payload(
+        self, collection: str, payload: dict, points_filter: Any
+    ) -> None:
+        """Overwrite payload keys on all points matching points_filter (no re-embed).
+
+        Thin passthrough to ``AsyncQdrantClient.set_payload``. Used by the
+        corpus backfill (issue #222) to stamp ``exercise`` + ``sex_applicability``
+        onto existing ``papers_rag`` points without re-running embedding.
+
+        Parameters
+        ----------
+        collection:
+            Target collection name.
+        payload:
+            Mapping of payload keys → values to set/overwrite on matched points.
+        points_filter:
+            A Qdrant ``Filter`` selecting which points to update.
+        """
+        await self._client.set_payload(
+            collection_name=collection, payload=payload, points=points_filter,
         )
 
     async def query_points(

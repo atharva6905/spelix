@@ -69,6 +69,15 @@ class DocumentMetadata:
     review_status:
         Document curation status. Only "reviewed_approved" documents
         may pass through to Qdrant. This is a hard gate (FR-RAGK-01).
+    exercise_tags:
+        Exercise tags from ``rag_documents.exercise_tags`` (e.g. ["squat"]).
+        Stamped into every ChunkPayload.exercise so the papers-side
+        exercise_filter (a Qdrant MatchValue on a multi-value array) matches
+        (issue #222, FR-RAGK-02 ext.). Defaults to an empty list.
+    sex_applicability:
+        Which lifter sex the source's findings apply to: 'male' | 'female' |
+        'both' (FR-AICP-12). Stamped into ChunkPayload.sex_applicability.
+        Defaults to 'both'.
     """
 
     title: str
@@ -77,6 +86,8 @@ class DocumentMetadata:
     doi: str | None
     quality_tier: QualityTier
     review_status: str
+    exercise_tags: list[str] = field(default_factory=list)
+    sex_applicability: str = "both"
 
 
 @dataclass
@@ -383,6 +394,8 @@ class IngestionService:
                     authors=metadata.authors,
                     year=metadata.year,
                     doi=metadata.doi,
+                    exercise=metadata.exercise_tags,
+                    sex_applicability=metadata.sex_applicability,
                 )
             )
         return payloads

@@ -282,6 +282,37 @@ class TestEnsureCollections:
             f"papers_rag.exercise, got {wrapper._client.create_payload_index.await_args_list}"
         )
 
+    @pytest.mark.asyncio
+    async def test_ensure_collections_creates_sex_applicability_index_on_papers_rag(
+        self,
+    ) -> None:
+        """Issue #222 (FR-AICP-12): papers_rag must get a keyword payload index on
+        `sex_applicability` so retrieval-side sex filtering (issue #225) does not
+        raise under Qdrant strict mode."""
+        from qdrant_client.http.models import PayloadSchemaType
+
+        from app.services.qdrant import COLLECTION_PAPERS_RAG
+
+        wrapper = self._make_wrapper()
+        wrapper._client.collection_exists = AsyncMock(return_value=False)
+        wrapper._client.create_collection = AsyncMock(return_value=True)
+        wrapper._client.create_payload_index = AsyncMock()
+
+        await wrapper.ensure_collections()
+
+        index_calls = [
+            c
+            for c in wrapper._client.create_payload_index.await_args_list
+            if c.kwargs.get("collection_name") == COLLECTION_PAPERS_RAG
+            and c.kwargs.get("field_name") == "sex_applicability"
+            and c.kwargs.get("field_schema") == PayloadSchemaType.KEYWORD
+        ]
+        assert len(index_calls) == 1, (
+            f"expected exactly one create_payload_index call for "
+            f"papers_rag.sex_applicability, got "
+            f"{wrapper._client.create_payload_index.await_args_list}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # ping()
@@ -358,6 +389,23 @@ class TestPassthroughMethods:
             collection_name="coach_brain", query=[0.1] * 1024, limit=5
         )
         assert result is fake_result
+
+    @pytest.mark.asyncio
+    async def test_set_payload_delegates_to_inner_client(self) -> None:
+        """Issue #222 (FR-RAGK-02 ext.): set_payload forwards
+        (collection, payload, points_filter) to the inner client's set_payload,
+        used by the corpus backfill to overwrite keys without re-embedding."""
+        wrapper = self._make_wrapper()
+        wrapper._client.set_payload = AsyncMock(return_value=None)
+
+        fake_filter = MagicMock(name="points_filter")
+        payload = {"exercise": ["squat"], "sex_applicability": "both"}
+
+        await wrapper.set_payload("papers_rag", payload, fake_filter)
+
+        wrapper._client.set_payload.assert_awaited_once_with(
+            collection_name="papers_rag", payload=payload, points=fake_filter
+        )
 
 
 # ---------------------------------------------------------------------------

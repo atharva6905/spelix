@@ -59,6 +59,8 @@ async def ingest_paper(ctx: dict[str, Any], paper_id: str) -> dict[str, Any]:
         doi=doc.doi,
         quality_tier=doc.quality_tier,
         review_status=doc.review_status,
+        exercise_tags=list(doc.exercise_tags) if doc.exercise_tags else [],
+        sex_applicability=doc.sex_applicability or "both",
     )
 
     cohere_client = get_cohere_client()
