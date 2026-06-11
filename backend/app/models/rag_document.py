@@ -27,6 +27,10 @@ class RagDocument(TimestampMixin, Base):
             ")",
             name="ck_rag_documents_review_status",
         ),
+        CheckConstraint(
+            "sex_applicability IN ('male','female','both')",
+            name="ck_rag_documents_sex_applicability",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=gen_uuid)
@@ -51,3 +55,8 @@ class RagDocument(TimestampMixin, Base):
     reviewer_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Migration 9fffb59ba45f — sex applicability for retrieval filtering (FR-RAGK-05 ext.)
+    sex_applicability: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default="both"
+    )

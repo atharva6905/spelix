@@ -62,6 +62,7 @@ def _make_rag_document(**kwargs):
         reviewer_id=kwargs.get("reviewer_id", None),
         reviewed_at=kwargs.get("reviewed_at", None),
         storage_path=kwargs.get("storage_path", None),
+        sex_applicability=kwargs.get("sex_applicability", "both"),
     )
     doc.__dict__.update({
         "id": kwargs.get("id", TEST_DOC_ID),

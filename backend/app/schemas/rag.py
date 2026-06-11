@@ -89,6 +89,12 @@ class ChunkPayload(BaseModel):
         Publication year, or None if unknown.
     doi:
         DOI string (without ``https://doi.org/`` prefix), or None.
+    exercise:
+        Exercise tags from ``rag_documents.exercise_tags`` — multi-value;
+        a Qdrant ``MatchValue`` matches if any element equals the query value.
+    sex_applicability:
+        Which lifter sex the source's findings apply to (FR-RAGK-05 ext.):
+        ``'male'`` | ``'female'`` | ``'both'``. Defaults to ``'both'``.
     """
 
     id: str
@@ -102,6 +108,8 @@ class ChunkPayload(BaseModel):
     authors: list[str]
     year: int | None
     doi: str | None
+    exercise: list[str] = []          # from rag_documents.exercise_tags — multi-value, MatchValue matches any element
+    sex_applicability: str = "both"   # 'male' | 'female' | 'both' (FR-RAGK-05 ext.)
 
 
 # ---------------------------------------------------------------------------
