@@ -253,6 +253,29 @@ class TestChunkPayloadConstruction:
         assert payloads[0].exercise == []
         assert payloads[0].sex_applicability == "both"
 
+    def test_none_quality_tier_defaults_to_l4_guideline(self) -> None:
+        """Issue #267 (FR-EXPV-02, FR-RAGK-01): DOI-less document types may land
+        in the corpus with quality_tier=NULL. _build_payloads must not raise a
+        Pydantic ValidationError (ChunkPayload.quality_tier is non-optional) — a
+        None tier is floored to the lowest evidence level, L4_guideline."""
+        mock_cohere = MagicMock()
+        mock_qdrant = MagicMock()
+        svc = IngestionService(cohere_client=mock_cohere, qdrant_client=mock_qdrant)
+
+        metadata = DocumentMetadata(
+            title="Untiered guideline",
+            authors=["Author X"],
+            year=2023,
+            doi=None,
+            quality_tier=None,  # NULL tier from a DOI-less upload (#234)
+            review_status="reviewed_approved",
+        )
+
+        pairs = [(None, "chunk")]
+        # Must not raise pydantic ValidationError.
+        payloads = svc._build_payloads("paper-null-tier", pairs, metadata)
+        assert payloads[0].quality_tier == "L4_guideline"
+
 
 # ---------------------------------------------------------------------------
 # Integration: IngestionService.ingest_document — status guard

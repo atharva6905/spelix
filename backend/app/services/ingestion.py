@@ -44,6 +44,17 @@ _PAPERS_RAG_COLLECTION = "papers_rag"
 # Valid review statuses — only reviewed_approved may be indexed.
 _APPROVED_STATUS = "reviewed_approved"
 
+# Evidence-quality floor for documents uploaded without a quality_tier.
+# The upload schema makes quality_tier optional and the rag_documents column is
+# nullable, so a NULL tier can reach ingestion — widened by DOI-less document
+# types (#234). ChunkPayload.quality_tier is a non-optional literal, so a None
+# would raise a Pydantic ValidationError and fail the whole ingest (#267). We
+# floor missing tiers to the lowest evidence level (least authoritative
+# downstream weighting), mirroring retrieval.py's read-side default. L4_guideline
+# is the lowest tier that currently exists in QualityTier; there is no
+# L5_expert_opinion literal (FR-EXPV-02, FR-RAGK-01).
+_DEFAULT_QUALITY_TIER: QualityTier = "L4_guideline"
+
 # ---------------------------------------------------------------------------
 # Public data classes
 # ---------------------------------------------------------------------------
@@ -64,8 +75,11 @@ class DocumentMetadata:
     doi:
         DOI string without the ``https://doi.org/`` prefix, or None.
     quality_tier:
-        Evidence quality tier — must be one of the QualityTier literals
-        (L1_systematic_review, L2_rct, L3_observational, L4_guideline).
+        Evidence quality tier — one of the QualityTier literals
+        (L1_systematic_review, L2_rct, L3_observational, L4_guideline), or
+        None when the source was uploaded without a tier (the upload schema
+        and rag_documents column both allow NULL — #234/#267). A None tier is
+        floored to ``_DEFAULT_QUALITY_TIER`` at ChunkPayload construction.
     review_status:
         Document curation status. Only "reviewed_approved" documents
         may pass through to Qdrant. This is a hard gate (FR-RAGK-01).
@@ -84,7 +98,7 @@ class DocumentMetadata:
     authors: list[str]
     year: int | None
     doi: str | None
-    quality_tier: QualityTier
+    quality_tier: QualityTier | None
     review_status: str
     exercise_tags: list[str] = field(default_factory=list)
     sex_applicability: str = "both"
@@ -389,7 +403,7 @@ class IngestionService:
                     chunk_index=chunk_index,
                     section=section,
                     token_count=token_count,
-                    quality_tier=metadata.quality_tier,
+                    quality_tier=metadata.quality_tier or _DEFAULT_QUALITY_TIER,
                     title=metadata.title,
                     authors=metadata.authors,
                     year=metadata.year,
