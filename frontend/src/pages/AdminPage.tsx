@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Link, Navigate } from "react-router";
+import { DoiLink } from "@/components/DoiLink";
 import { supabase } from "@/lib/supabase";
 import {
   listAdminUsers,
@@ -698,18 +699,7 @@ function RagCorpusPanel() {
                   <td className="px-3 py-2">{d.chunk_count}</td>
                   <td className="px-3 py-2">{d.year ?? "—"}</td>
                   <td className="px-3 py-2">
-                    {d.doi ? (
-                      <a
-                        href={`https://doi.org/${d.doi}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-xs text-indigo-600 hover:underline"
-                      >
-                        {d.doi}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
+                    <DoiLink doi={d.doi} className="font-mono text-xs text-indigo-600" />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex gap-2">

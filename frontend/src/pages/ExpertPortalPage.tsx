@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Link, Navigate } from "react-router";
+import { DoiLink } from "@/components/DoiLink";
 import { supabase } from "@/lib/supabase";
 import {
   getExpertQueue,
@@ -296,18 +297,7 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
                     {paper.authors.length > 0 ? paper.authors.join(", ") : "—"}
                   </td>
                   <td className="max-w-[160px] truncate py-3 pr-4">
-                    {paper.doi ? (
-                      <a
-                        href={`https://doi.org/${paper.doi}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono text-xs text-indigo-600 hover:underline"
-                      >
-                        {paper.doi}
-                      </a>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
+                    <DoiLink doi={paper.doi} className="font-mono text-xs text-indigo-600" />
                   </td>
                   <td className="py-3 pr-4">
                     <div className="flex flex-wrap gap-1">

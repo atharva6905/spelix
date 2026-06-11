@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Citation } from "@/api/analyses";
+import { DoiLink } from "@/components/DoiLink";
 
 interface CitationTooltipProps {
   index: number;
@@ -31,15 +32,13 @@ export function CitationTooltip({ index, citation }: CitationTooltipProps) {
           {citation.authors.join(", ")} ({citation.year})
         </p>
         {citation.doi && (
-          <a
-            href={`https://doi.org/${citation.doi}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-1 inline-block text-blue-600 hover:underline"
+          <DoiLink
+            doi={citation.doi}
+            className="mt-1 inline-block text-blue-600"
             aria-label="DOI link"
           >
             DOI: {citation.doi}
-          </a>
+          </DoiLink>
         )}
       </span>
     </span>

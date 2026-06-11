@@ -223,11 +223,11 @@ describe("AdminPage — panels branch coverage", () => {
     ]);
     renderPage();
     await waitFor(() => expect(screen.getByText("Unlinked Paper")).toBeInTheDocument());
-    // Quality tier and year are populated, so the only em dash in the row is
-    // the DOI cell.
     const row = screen.getByText("Unlinked Paper").closest("tr");
     expect(row).not.toBeNull();
-    expect(within(row as HTMLTableRowElement).getByText("—")).toBeInTheDocument();
+    expect(
+      within(row as HTMLTableRowElement).getByTestId("doi-empty"),
+    ).toHaveTextContent("—");
   });
 
   it("renders empty state for RAG corpus panel", async () => {
