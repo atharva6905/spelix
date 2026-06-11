@@ -45,6 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 5: DOI dedup follow-ups (2026-06-11)
+
+Follow-up fixes from /code-review findings on the run-3 DOI-dedup PRs (#227/#228/#233). Queue: #229, #230, #232, #234.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #229 | FR-EXPV-03 `review_paper` IntegrityError → rollback → 409 DUPLICATE_DOI (lean envelope, row never deleted; mirrors `complete_paper_upload` minus cleanup; `db: AsyncSession = Depends(get_db)` added). Spec/security PASS; /code-review: 2 non-blocking findings → follow-up #260 (frontend 409 message). PR #257. | done | S | T1→T1 | `d16e817` | `backend/app/api/v1/expert.py`, `backend/tests/unit/test_admin_expert_routes.py` |
+
 ## Completed — Harness: superpowers nesting — /ship-loop run 4 (#245–#248) (2026-06-10)
 
 /design session (2026-06-10): nest superpowers skills into the harness (plan: `docs/internal/plans/2026-06-10-superpowers-nesting-plan.md`, local-only). Root cause of recurring Enter/ExitWorktree errors: double isolation (agent `isolation: worktree` frontmatter nesting a second worktree off the session task worktree) + no Step-0 detection when a session starts inside a leftover worktree. Decision: session owns isolation, single layer.

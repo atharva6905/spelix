@@ -54,3 +54,9 @@
 - SaMD: new prompt line (coaching.py ~L242) + all new comments banned-term-clean. Downstream LLM output still passes safety_filter.py (injury-phrase scrubber) + cove.py constraints before the user.
 - Retrieval filter is `MatchAny([lifter_sex,'both'])` on papers_rag only (coach_brain unchanged, #226); None → unfiltered full recall. Corpus is shared/non-tenant → filter is a relevance property, not an authz boundary; no cross-tenant concern. Both dense+sparse legs get it via the same `additional_filters` mechanism already used for status_filter.
 - No secret/env handling changes; no logging of sex values (dual_collection/tools debug logs carry only counts + exercise_type).
+
+## Reviewed: issue #229 (review_paper IntegrityError → 409 DUPLICATE_DOI, 2026-06-10) → PASS
+- `PATCH /expert/papers/{doc_id}/review` (`expert.py` ~L491) now catches IntegrityError from update_review_status (uq_rag_documents_doi_live collision on re-reviewing a reviewed_rejected row whose DOI went live elsewhere), `db.rollback()` + 409 DUPLICATE_DOI. Added `db: AsyncSession = Depends(get_db)`; role gate `get_expert_reviewer_user` + `reviewer_id=user["id"]` UNCHANGED — no auth regression.
+- 409 envelope is the LEAN variant: static "A paper with this DOI already exists." + detail:None (no title/UUID/DOI echoed) — strictly less than POST /papers 409 (#218 accepted risk). No new cross-expert enumeration surface; collision boolean only fires on a genuine race within the expert's existing review authority.
+- Mirrors complete_paper_upload MINUS cleanup: deliberately does NOT delete storage object or row (reviewed paper must never be destroyed by a DOI race). Unit test asserts rollback awaited once + delete NOT awaited.
+- except IntegrityError does NOT log/interpolate str(exc) (no raw constraint/SQL leak); `from None` suppresses chain. Injection-safe (ORM parameterized, body.decision Pydantic-constrained). SaMD-clean.
