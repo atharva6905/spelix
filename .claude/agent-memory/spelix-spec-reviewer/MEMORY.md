@@ -10,3 +10,6 @@
 - [Issue #263 review](review_issue_263.md) --- Docling OCR PermissionError fix (bake models + writable artifacts path, no-FR): PASS, 2026-06-11
 - [decisions.md cross-link rule](feedback_decisions_crosslink.md) --- superseded ADRs must have a back-reference added (both ways); flag CRITICAL if missing
 - [Docling OCR fix pattern](docling_ocr_fix_pattern.md) — issue #263 fix: docling[rapidocr] extra pulls CPU onnxruntime; onnxruntime-gpu is NOT used
+- [or-idiom safety for QualityTier](feedback_or_idiom_safety.md) — `x or default` is safe for quality_tier; empty string not a valid DB value (#267)
+- [ChunkPayload construction](project_chunkpayload_construction.md) — constructed in exactly one place: ingestion.py _build_payloads (#267)
+- [Retrieval read-side fallback](project_retrieval_fallback.md) — retrieval.py:246 defaults to L3_observational; ingestion write-side defaults to L4_guideline (intentional asymmetry) (#267)
