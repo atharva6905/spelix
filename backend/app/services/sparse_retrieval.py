@@ -82,6 +82,7 @@ class SparseRetrievalService:
         collection: CollectionName = _DEFAULT_COLLECTION,
         top_k: int = 10,
         exercise_filter: str | None = None,
+        additional_filters: list | None = None,
     ) -> list[RetrievedContext]:
         """BM25 sparse vector search using Qdrant's server-side sparse index.
 
@@ -101,6 +102,13 @@ class SparseRetrievalService:
             When provided, restricts results to points whose ``exercise``
             payload field matches this value exactly.  Primarily useful for
             the ``coach_brain`` collection (FR-AICP-12, P2-011).
+        additional_filters:
+            Extra ``FieldCondition`` objects ANDed into ``Filter.must``
+            alongside the exercise condition (issue #225, FR-AICP-12 ext.).
+            Mirrors ``RetrievalService.dense_search`` so the sex-applicability
+            hard filter applies to the BM25 leg too — without this the sparse
+            leg would surface opposite-sex papers the dense leg already
+            excludes.
 
         Returns
         -------
@@ -120,17 +128,22 @@ class SparseRetrievalService:
         indices: list[int] = sparse_vector["indices"]  # type: ignore[assignment]
         values: list[float] = sparse_vector["values"]  # type: ignore[assignment]
 
-        # Build optional payload filter for exercise-type restriction (FR-AICP-12).
+        # Build optional payload filter (FR-AICP-12 + additional_filters
+        # merge, issue #225). Mirrors RetrievalService.dense_search: the
+        # exercise condition plus any additional_filters are ANDed in must.
         query_filter = None
+        must_conditions: list = []
         if exercise_filter is not None:
-            query_filter = qdrant_models.Filter(
-                must=[
-                    qdrant_models.FieldCondition(
-                        key="exercise",
-                        match=qdrant_models.MatchValue(value=exercise_filter),
-                    )
-                ]
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="exercise",
+                    match=qdrant_models.MatchValue(value=exercise_filter),
+                )
             )
+        if additional_filters:
+            must_conditions.extend(additional_filters)
+        if must_conditions:
+            query_filter = qdrant_models.Filter(must=must_conditions)
 
         qdrant_kwargs: dict = {
             "collection": collection,

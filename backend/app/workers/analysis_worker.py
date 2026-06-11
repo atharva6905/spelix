@@ -267,6 +267,10 @@ async def _run_coaching_imperative(
     # Body stats (FR-AICP-05) — best-effort
     # ------------------------------------------------------------------ #
     body_stats: dict | None = None
+    # Lifter sex for sex-aware retrieval + prompt (issue #225, FR-AICP-12 ext.).
+    # NOT folded into body_stats / _USER_PROFILE_BODY_STATS_FIELDS — the prompt
+    # line is the single representation. 'prefer_not_to_say'/undisclosed → None.
+    lifter_sex: str | None = None
     try:
         from app.repositories.user_profile import UserProfileRepository
 
@@ -280,6 +284,8 @@ async def _run_coaching_imperative(
             }
             if not body_stats:
                 body_stats = None
+            if getattr(profile, "sex", None) in ("male", "female"):
+                lifter_sex = profile.sex
     except Exception:
         logger.warning(
             "Failed to fetch user profile for %s — coaching without body stats",
@@ -347,6 +353,7 @@ async def _run_coaching_imperative(
                 retrieval_result = await orchestrator.retrieve(
                     query=retrieval_query,
                     exercise_type=analysis.exercise_type,
+                    lifter_sex=lifter_sex,
                 )
 
                 guard_result = RetrievalGuard.check(retrieval_result.primary)
@@ -430,6 +437,7 @@ async def _run_coaching_imperative(
             retrieval_source=retrieval_source,
             analysis_id=analysis_id,
             pubsub_redis=pubsub_redis,
+            lifter_sex=lifter_sex,
         )
 
         # P2-019: stamp degraded_mode on coaching output if Qdrant was unavailable
@@ -664,6 +672,9 @@ async def _run_coaching_graph(
     profile_repo = UserProfileRepository(repo.db)
     profile = await profile_repo.get_by_user_id(analysis.user_id)
     body_stats: dict | None = None
+    # Lifter sex for sex-aware retrieval + prompt (issue #225, FR-AICP-12 ext.).
+    # 'prefer_not_to_say'/undisclosed normalizes to None (no filter, no line).
+    lifter_sex: str | None = None
     if profile:
         body_stats = {
             attr: getattr(profile, attr)
@@ -671,6 +682,8 @@ async def _run_coaching_graph(
             if getattr(profile, attr, None) is not None
         }
         body_stats = body_stats or None
+        if getattr(profile, "sex", None) in ("male", "female"):
+            lifter_sex = profile.sex
 
     # Keyframe analysis — best-effort
     keyframe_analysis_text: str | None = None
@@ -783,6 +796,7 @@ async def _run_coaching_graph(
             body_stats=body_stats,
             keyframe_analysis_text=keyframe_analysis_text,
             mode=mode,
+            lifter_sex=lifter_sex,
             rep_metric_repo=rep_metric_repo,
             retrieval_svc=retrieval_svc,
             thresholds=thresholds,

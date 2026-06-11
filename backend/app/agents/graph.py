@@ -435,6 +435,7 @@ async def run_coaching_graph(
     body_stats: dict[str, Any] | None,
     keyframe_analysis_text: str | None,
     mode: str,
+    lifter_sex: str | None = None,
     rep_metric_repo: Any,
     retrieval_svc: Any,
     thresholds: Any,
@@ -466,6 +467,7 @@ async def run_coaching_graph(
         mode=mode,  # type: ignore[arg-type]
         body_stats=body_stats,
         keyframe_analysis_text=keyframe_analysis_text,
+        lifter_sex=lifter_sex,
     )
 
     if mode == "adaptive":

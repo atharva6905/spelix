@@ -115,6 +115,21 @@ async def retrieve_papers(
         f"{state['exercise_type']} {state['exercise_variant']} "
         "technique coaching biomechanics"
     )
+
+    # Sex-applicability hard filter (FR-AICP-12 ext., issue #225): include the
+    # lifter's sex OR 'both'. None / undisclosed → unfiltered (full recall).
+    additional_filters: list = []
+    lifter_sex = state.get("lifter_sex")
+    if lifter_sex in ("male", "female"):
+        from qdrant_client import models as qdrant_models  # deferred — ADR-032
+
+        additional_filters.append(
+            qdrant_models.FieldCondition(
+                key="sex_applicability",
+                match=qdrant_models.MatchAny(any=[lifter_sex, "both"]),
+            )
+        )
+
     try:
         contexts = await retrieval_svc.hybrid_search(
             query,
@@ -122,6 +137,7 @@ async def retrieve_papers(
             top_k=top_k,
             rerank_top_n=rerank_top_n,
             exercise_filter=state["exercise_type"],
+            additional_filters=additional_filters or None,
             rerank=True,
         )
         return {"papers_contexts": contexts}
@@ -406,6 +422,7 @@ async def generate_correction_plan(
         retrieval_source=retrieval_source,
         analysis_id=state["analysis_id"],
         pubsub_redis=pubsub_redis,
+        lifter_sex=state.get("lifter_sex"),
     )
 
     if state.get("degraded_mode"):

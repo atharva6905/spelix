@@ -72,6 +72,7 @@ class DualCollectionOrchestrator:
         exercise_type: str,
         top_k: int = 10,
         rerank_top_n: int = 5,
+        lifter_sex: str | None = None,
     ) -> RetrievalResult:
         """Query both collections concurrently, rerank merged results, route.
 
@@ -85,6 +86,13 @@ class DualCollectionOrchestrator:
             Per-collection result limit before merging.
         rerank_top_n:
             Final result count after cross-collection reranking.
+        lifter_sex:
+            Pre-normalized lifter sex ("male"/"female"/None). When "male" or
+            "female", a hard sex-applicability filter is applied to the
+            ``papers_rag`` leg only (FR-AICP-12 ext., issue #225): papers
+            tagged the lifter's sex OR "both" are retrievable. None /
+            undisclosed → unfiltered (full recall, today's behavior).
+            coach_brain retrieval is unchanged (deferred to #226).
 
         Returns
         -------
@@ -104,6 +112,18 @@ class DualCollectionOrchestrator:
             match=qdrant_models.MatchAny(any=["active", "seed"]),
         )
 
+        # Sex-applicability hard filter (FR-AICP-12 ext., issue #225): include
+        # the lifter's sex OR 'both'. None / undisclosed → unfiltered (full
+        # recall). Applied to papers_rag ONLY — coach_brain is unchanged (#226).
+        papers_filters: list = []
+        if lifter_sex in ("male", "female"):
+            papers_filters.append(
+                qdrant_models.FieldCondition(
+                    key="sex_applicability",
+                    match=qdrant_models.MatchAny(any=[lifter_sex, "both"]),
+                )
+            )
+
         # Step 2: concurrent collection queries (FR-AICP-09).
         # rerank=False — we do ONE cross-collection rerank below (ADR-RAG-01).
         papers_results, brain_results = await asyncio.gather(
@@ -112,6 +132,7 @@ class DualCollectionOrchestrator:
                 collection="papers_rag",
                 top_k=top_k,
                 exercise_filter=exercise_type,
+                additional_filters=papers_filters or None,
                 rerank=False,
             ),
             self._retrieval.hybrid_search(

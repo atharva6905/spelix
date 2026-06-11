@@ -330,6 +330,7 @@ class RetrievalService:
                     collection=collection,
                     top_k=top_k,
                     exercise_filter=exercise_filter,
+                    additional_filters=additional_filters,
                 ),
             )
         else:

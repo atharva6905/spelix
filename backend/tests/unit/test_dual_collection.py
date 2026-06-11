@@ -436,3 +436,107 @@ async def test_langfuse_error_does_not_crash():
 
     assert result is not None
     assert result.retrieval_source == "papers_only_fallback"
+
+
+# ---------------------------------------------------------------------------
+# Sex-applicability hard filter (FR-AICP-12 ext., issue #225)
+# ---------------------------------------------------------------------------
+
+
+def _papers_call_kwargs(svc: MagicMock) -> dict:
+    """Return the kwargs of the papers_rag hybrid_search call."""
+    for call in svc.hybrid_search.await_args_list:
+        if call.kwargs.get("collection") == "papers_rag":
+            return call.kwargs
+    raise AssertionError("no papers_rag hybrid_search call recorded")
+
+
+def _brain_call_kwargs(svc: MagicMock) -> dict:
+    for call in svc.hybrid_search.await_args_list:
+        if call.kwargs.get("collection") == "coach_brain":
+            return call.kwargs
+    raise AssertionError("no coach_brain hybrid_search call recorded")
+
+
+def _sex_conditions(additional_filters: object) -> list:
+    """Extract sex_applicability FieldConditions from additional_filters."""
+    if not additional_filters:
+        return []
+    return [
+        c
+        for c in additional_filters
+        if getattr(c, "key", None) == "sex_applicability"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_retrieve_female_adds_sex_filter_to_papers_only() -> None:
+    """lifter_sex='female' → papers_rag gets MatchAny(['female','both']);
+    coach_brain call is unchanged (no sex condition)."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    svc = _make_retrieval_service(
+        papers_results=[_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+    )
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+    orchestrator = DualCollectionOrchestrator(svc, cohere)
+
+    await orchestrator.retrieve("squat depth", exercise_type="squat", lifter_sex="female")
+
+    papers_sex = _sex_conditions(_papers_call_kwargs(svc).get("additional_filters"))
+    assert len(papers_sex) == 1
+    assert set(papers_sex[0].match.any) == {"female", "both"}
+
+    # coach_brain must NOT carry a sex condition (#225: papers only).
+    assert _sex_conditions(_brain_call_kwargs(svc).get("additional_filters")) == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_male_adds_male_both_filter() -> None:
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    svc = _make_retrieval_service(
+        papers_results=[_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+    )
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+    orchestrator = DualCollectionOrchestrator(svc, cohere)
+
+    await orchestrator.retrieve("bench", exercise_type="bench", lifter_sex="male")
+
+    papers_sex = _sex_conditions(_papers_call_kwargs(svc).get("additional_filters"))
+    assert len(papers_sex) == 1
+    assert set(papers_sex[0].match.any) == {"male", "both"}
+
+
+@pytest.mark.asyncio
+async def test_retrieve_none_sex_no_filter() -> None:
+    """lifter_sex=None → no sex condition on papers (full recall, today's behavior)."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    svc = _make_retrieval_service(
+        papers_results=[_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+    )
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+    orchestrator = DualCollectionOrchestrator(svc, cohere)
+
+    await orchestrator.retrieve("squat depth", exercise_type="squat", lifter_sex=None)
+
+    assert _sex_conditions(_papers_call_kwargs(svc).get("additional_filters")) == []
+
+
+@pytest.mark.asyncio
+async def test_retrieve_prefer_not_to_say_no_filter() -> None:
+    """lifter_sex='prefer_not_to_say' → no sex condition (undisclosed = unfiltered)."""
+    from app.services.dual_collection import DualCollectionOrchestrator
+
+    svc = _make_retrieval_service(
+        papers_results=[_make_ctx(chunk_id="p" * 64, score=0.80, collection="papers_rag")]
+    )
+    cohere = _make_cohere_client(rerank_results=[(0, 0.80)])
+    orchestrator = DualCollectionOrchestrator(svc, cohere)
+
+    await orchestrator.retrieve(
+        "squat depth", exercise_type="squat", lifter_sex="prefer_not_to_say"
+    )
+
+    assert _sex_conditions(_papers_call_kwargs(svc).get("additional_filters")) == []
