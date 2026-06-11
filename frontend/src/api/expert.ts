@@ -101,7 +101,9 @@ export interface PaperUploadMetadata {
   exercise_tags?: string[];
   authors?: string[];
   year?: number;
-  doi: string;
+  // Required iff document_type === "research_paper" (FR-EXPV-02, issue #234);
+  // omit for DOI-less document types when the field is empty.
+  doi?: string;
   study_design?:
     | "rct"
     | "observational"
