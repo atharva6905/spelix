@@ -36,3 +36,10 @@
 - Best-effort Qdrant restamp wrapped in `except Exception`, DB commit precedes it (Qdrant failure never rolls back the edit). Logs only doc_id UUID — no str(exc), no secrets (ADR-DISTILL-05 analog clean).
 - SaMD-clean: all new strings wellness/neutral — "Applicable population" label/column/aria-labels, Male/Female/Both options (`expert.ts` SEX_APPLICABILITY_OPTIONS), static error banner "Failed to update applicable population." No injury/diagnose/treat/prevent.
 - `sex_applicability` validated by `SexApplicabilityLiteral` on every API write path (upload + this PATCH) — corpus metadata, not user PII.
+
+## Reviewed: issue #224 (profile sex field wiring, 2026-06-10) → PASS
+- Resolves the #221 PII downstream watch item for the `/profiles/me` path: this diff wires optional `sex` into the OWNER-SCOPED `ProfileService.upsert` (create+update) and owner-scoped `ProfileResponse` only. Route auth unchanged (`get_current_user` → `user["id"]`, profiles.py L29/L43); no new endpoint, no widened response, no admin/expert/RLS/migration file in diff. No new logging/analytics sink — frontend logs only `err`, never `form.sex` (ProfilePage.tsx L77/L129).
+- SaMD-clean: label "Sex (optional)", options Prefer not to say/Male/Female, helper "Used to match coaching evidence to you." — no injury/diagnose/treat/prevent.
+- No dark pattern: genuine opt-out, default = `prefer_not_to_say`, save never blocks on sex.
+- Always-send-default persists `'prefer_not_to_say'` string for untouched users — allowed by #221 CHECK `ck_user_profiles_sex` (sex IN male/female/prefer_not_to_say); column also nullable. `ProfileUpdate.sex` is a closed Literal → out-of-enum rejected at Pydantic boundary (422), server-side authoritative.
+- STILL OPEN (belongs to #221, NOT this PR): pre-existing admin read path `UserProfileRepository.list_with_analysis_count` (services/admin.py) selects full UserProfile ORM — re-check whether `sex` is serialized to admins under #221's schema review, not here. Not regressed by #224.

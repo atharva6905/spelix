@@ -28,3 +28,4 @@
 - MEDIUM — duplicated SEX_APPLICABILITY_OPTIONS copy-pasted into ExpertPaperUploadPage.tsx AND ExpertPortalPage.tsx. Existing QUALITY_TIER/STUDY_DESIGN options are page-local (no shared module), so page-local is the convention — but first option set shared across two pages → dedup to a shared module.
 - LOW — Qdrant orchestration inline in the route; acceptable (sibling complete_paper does the same; single call site).
 - Test quality strong: response is plain dict[str,Any] (no Pydantic model_validate over MagicMock → no vacuous pass), tests use real RagDocument via _make_doc, failure paths (404/422/403/qdrant-down) covered, frontend error test uses correct post-expertFetch reject shape (honors #219 contract).
+- [Optional UserProfile field](review_profile_optional_field.md) — upsert overwrite-all both paths + MagicMock/Pydantic factory trap + type-guard hydration (#224 PASS)
