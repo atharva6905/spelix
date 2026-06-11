@@ -82,6 +82,12 @@ Loop mechanics: reviewer findings → the SAME implementer instance fixes (SendM
 context intact, never a fresh dispatch) → the SAME reviewer re-reviews. Max 3 fix
 iterations per gate, then escalate (Step 4). Quality review never starts before spec
 compliance passes; security review never starts before quality passes.
+Fix-loop discipline (nested sub-skill): the fix prompt sent to the SAME implementer
+MUST mandate invoking `superpowers:receiving-code-review` via the Skill tool — verify
+each finding against the actual code before changing anything; findings are claims,
+not orders. A finding the implementer can refute with evidence goes BACK to the
+reviewer with that evidence (the reviewer's re-verdict decides); no performative
+agreement ("You're right!" + blind patch) in either direction.
 
 Reviewer dispatch template (every reviewer):
 - The branch/diff ref + the task text verbatim + the spec-review PASS statement (for
