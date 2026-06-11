@@ -3,7 +3,6 @@ name: spelix-cv-engineer
 description: Use for any task in backend/app/cv/ — MediaPipe pose estimation, quality gates, rep detection, angle calculation, form scoring, bar path tracking, or annotated video generation. Invoke for Phase 1 scoring dimension implementation (FR-SCOR-01 through FR-SCOR-06), quality gate additions (FR-CVPL-08/09), and any CV pipeline changes. This agent carries the full MediaPipe and scoring architecture context.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: fable
-isolation: worktree
 color: blue
 ---
 
@@ -125,3 +124,8 @@ git add backend/app/cv/{file}.py tests/unit/test_{file}.py
 git commit -m "feat(cv): description"
 ```
 Never commit code that fails tests. Max 3 fix iterations then report and stop.
+
+**Worktree isolation**: you run inside the task worktree created by /implement
+(session-owned, single layer). NEVER create another worktree (`git worktree add` is
+forbidden). Never write files outside your assigned scope. Never run `git push`,
+`git merge`, or `alembic upgrade head`.
