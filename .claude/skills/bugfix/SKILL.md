@@ -3,11 +3,20 @@ name: bugfix
 description: Autonomous diagnose-fix-verify loop for failing tests
 context: fork
 ---
-You are in autonomous bug-fix mode. For each failure:
+You are in autonomous bug-fix mode.
 
-1. DIAGNOSE: Read the failing test output. Grep relevant code paths. State root cause in 2 sentences.
-2. FIX: Apply the minimal change. Do not refactor unrelated code.
-3. VERIFY: Run `cd backend && uv run pytest -x` (backend) or `cd frontend && npx vitest run` (frontend). If still failing, return to step 1 with new output. Max 3 iterations.
-4. COMMIT: Once green, commit: `fix(scope): concise description`
+**REQUIRED SUB-SKILL:** invoke `superpowers:systematic-debugging` via the Skill tool
+before proposing ANY fix. Its four phases are binding — no "just try this" changes.
+Spelix overrides (take precedence over the skill's defaults):
+1. Phase 1 evidence commands: backend `cd backend && uv run pytest -x` (exclude
+   `tests/unit/test_pose_extraction.py` locally — Windows crash, CI is the gate);
+   frontend `cd frontend && npx vitest run`.
+2. Phase 4 fix is TDD: write the failing test reproducing the bug first
+   (`superpowers:test-driven-development`), then the minimal fix.
+3. Max 3 fix iterations per root cause (= the skill's Phase 4.5 stop). After 3, STOP
+   and emit the structured blocker report from /implement Step 4 — do not try harder.
+4. Once green, commit `fix(scope): concise description`.
 
-Start by running the full suite. Group related failures. Fix in order: models → services → api → frontend. Report a summary table: | Bug | Root Cause | Files Changed | Iterations | Status |
+Start by running the full suite. Group related failures — one root cause may explain
+many. Fix in order: models → services → api → frontend.
+Report: | Bug | Root Cause | Evidence | Files Changed | Iterations | Status |
