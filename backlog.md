@@ -64,6 +64,7 @@ Follow-up fixes from /code-review findings on the run-3 DOI-dedup PRs (#227/#228
 | ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
 |----|-------|--------|------|--------------------|--------|-------|
 | #229 | FR-EXPV-03 `review_paper` IntegrityError → rollback → 409 DUPLICATE_DOI (lean envelope, row never deleted; mirrors `complete_paper_upload` minus cleanup; `db: AsyncSession = Depends(get_db)` added). Spec/security PASS; /code-review: 2 non-blocking findings → follow-up #260 (frontend 409 message). PR #257. | done | S | T1→T1 | `d16e817` | `backend/app/api/v1/expert.py`, `backend/tests/unit/test_admin_expert_routes.py` |
+| #230 | FR-RAGK-05 seed script writes `normalize_doi(...)` into the `doi` column (`_INSERT_SQL` + `build_rag_document_row`; NULL only for genuinely DOI-less entries) + `validate_seed_dois` fail-fast before any DB work; `__import__("json")` hack removed. Spec PASS; /code-review: 2 plausible pre-existing findings → follow-up #264 (review_status column + re-run idempotency). PR #262. | done | XS | T1→T1 | `47041e7` | `backend/scripts/seed_research_papers.py`, `backend/tests/unit/test_seed_research_papers.py` |
 
 ## Completed — Harness: superpowers nesting — /ship-loop run 4 (#245–#248) (2026-06-10)
 
