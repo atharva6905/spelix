@@ -107,7 +107,7 @@ Use the Explore built-in subagent for file discovery — its reads stay out of m
 The PreCompact hook auto-writes a mini-handoff to `.claude/handoff.md` before any compaction.
 After compaction: re-read `@docs/SRS.md` Section 3 for current phase requirements before resuming.
 
-**Phase completion criterion**: All MUST requirements implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10. Phase 2 passed 2026-04-14. Phase 3 + L2 passed 2026-05-03. Current: **2311 backend unit tests, 803 frontend tests, 28 migrations applied** (head: `cf685bd7e8f8`).
+**Phase completion criterion**: All MUST requirements implemented + full test suite green + migration applied + specialist audit clean. Phase 1 passed 2026-04-10. Phase 2 passed 2026-04-14. Phase 3 + L2 passed 2026-05-03. Current: **2353 backend unit tests, 816 frontend tests, 29 migrations applied** (head: `9fffb59ba45f`).
 
 ## Session State Protocol
 

@@ -25,6 +25,8 @@
 | ADR-AUTONOMY-01 | In-session autonomy over headless `claude -p` | Foundational / Platform | Accepted |
 | ADR-HARNESS-01 | Harness v3 — nested superpowers chains, /implement review layer, memory reviewers | Foundational / Platform | Accepted |
 | ADR-HARNESS-02 | In-session approval gate supersedes terminal needs-human for T1/T2 merges | Foundational / Platform | Accepted |
+| ADR-HARNESS-03 | Stacked-PR chains — retarget before deleting base; CI only fires on main-base PRs | Foundational / Platform | Accepted |
+| ADR-RAG-05 | Qdrant payload filters must reach both retrieval legs; MatchAny excludes key-less points | RAG & Retrieval | Accepted |
 | ADR-TXN-01 | get_db rolls back on HTTPException — cleanup-then-raise needs explicit commit | Foundational / Platform | Accepted |
 | ADR-012 | Phase 0 Confidence — Simple Mean | CV & Scoring | Accepted |
 | ADR-015 | Tier 5 Per-Rep Confidence — 10th Percentile, Not Mean | CV & Scoring | Accepted |
@@ -277,6 +279,11 @@ Mode is selected via env `SPELIX_AGENT_MODE=deterministic|adaptive` (default `de
 **Context**: ship-loop ended every T1+ task by labeling `needs-human` and moving on; in practice the human was present in-session and merges of #227/#228/#233 were already "human-authorized" inline, so the label added a detour without adding review rigor. The needs-human terminal state also left sessions parked in worktrees with no cleanup trigger.
 **Decision**: T1+ tasks end at an interactive APPROVAL GATE (PR gist presentation + AskUserQuestion). Merge happens in the main session ONLY on explicit human approval recorded as a PR comment before merging. For T2 the presentation must include the per-file diff summary and the verbatim spelix-security-reviewer verdict — that presentation constitutes the "explicit human diff review" governance requires. T3 requires /code-review ultra before the gate. Headless/autonomous contexts (incl. /groom, AskUserQuestion-disallowed) retain the needs-human fallback. Outcome feeds ship-loop step 8 outcome-scaled cleanup (merged→remove worktree, defer/blocked→keep).
 **Consequences**: Trades asynchronous label-driven review for synchronous recorded approval; merge authorization is auditable on the PR; `needs-human` becomes the fallback, not the terminus. Cross-link: ADR-HARNESS-01 (harness v3 chain), supersedes the "label needs-human; never merge" T1 terminal behavior introduced with harness v2 governance.
+
+## ADR-HARNESS-03: Stacked-PR chains — retarget before deleting base branches; CI only fires on main-base PRs (run 6, 2026-06-11)
+**Context**: The sex-aware series (#221–#225) had a hard dependency chain on T2/T3 paths, so each issue's branch stacked on the previous one's, with PR bases pointing at the parent branch. Three mechanics bit during the merge runbook: (1) the CI workflow (`on: pull_request: branches: [main]`) never runs on a PR whose base is a feature branch — only Vercel statuses appear, so "all checks green" on a stacked PR is vacuous; (2) GitHub does NOT auto-retarget dependent PRs when a merged base branch is deleted by a raw `git push --delete` — it **closes** them (PR #243 was lost this way and recreated as #261); (3) a third-party commit status (Vercel preview) can wedge at `pending` forever, deadlocking any `gh pr checks --watch`-style gate.
+**Decision**: For stacked chains: merge bottom-up; after each merge, explicitly PATCH the next PR's base to `main` (REST `pulls` endpoint — `gh pr edit --base` needs extra token scopes), then `update-branch`/empty-commit to fire a `synchronize` event so real CI runs against the main base; only delete a base branch after its dependents are retargeted. Gate merges on the GitHub **Actions run** result (`gh run watch`), never on the aggregate check list that includes third-party statuses.
+**Consequences**: Stacked T2+ chains remain reviewable PR-by-PR with true CI coverage at merge time; the lost-PR failure mode is documented; watchers always terminate. Recorded in ship-loop runbook practice; cross-link ADR-HARNESS-02 (in-session approval gate).
 
 # CV & Scoring
 
@@ -921,6 +928,11 @@ Conclusion: **no current building block reliably yields a bench bar path.** A ge
 - **Unstructured.io**: heavier dependency, cloud-hosted API tier, overkill for straightforward PDF parsing.
 
 **Consequences.** `docling` adds ~30 MB to the Docker image. The worker task timeout is 300s (may need increase for very large PDFs — monitor after first real uploads). Docling's `DocumentConverter` loads an ML model on first call (~2s cold start); subsequent calls reuse it within the worker process.
+
+## ADR-RAG-05: Qdrant payload filters must reach BOTH retrieval legs; MatchAny excludes key-less points — stamp before you filter (issues #222/#225, 2026-06-11)
+**Context**: The sex-applicability hard filter (FR-AICP-12 ext.) is a `FieldCondition(key="sex_applicability", match=MatchAny(any=[sex, "both"]))` ANDed into the papers_rag query. Two failure classes surfaced during design review and deploy: (1) `RetrievalService.hybrid_search` forwarded `additional_filters` only to the dense leg — the BM25 sparse leg would have surfaced opposite-sex papers, silently defeating the filter; (2) Qdrant `MatchAny`/`MatchValue` do **not** match points that lack the payload key at all, so any filter on a newly introduced key returns zero results until every live point is stamped — and the prod backfill revealed the existing 39 papers_rag points were orphans of an old seed corpus with no matching `rag_documents` rows (row-keyed backfills can't reach them; they were stamped in-place by title).
+**Decision**: (a) Every payload filter added to retrieval must be threaded through BOTH legs — `dense_search` AND `sparse_search` build the same `Filter(must=[...])`; a regression test asserts the condition lands in the sparse leg's `must`. (b) Introducing a new filterable payload key is a three-step deploy: stamp at ingestion + backfill ALL live points (verify by `count` with the filter, not by script exit code) + only then ship the filter. (c) Backfills must verify against the Qdrant points themselves, never trust row↔point identity.
+**Consequences**: The #225 filter shipped leak-free with the sparse regression test. The deploy-order constraint is now explicit runbook material. Orphan corpus adoption and the broken prod ingestion that caused the identity drift are tracked in #263.
 
 # Coach Brain & Distillation
 

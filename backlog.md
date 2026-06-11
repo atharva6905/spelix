@@ -5,8 +5,8 @@
 > provenance (each row carries its merge SHA). Newest phases are summarized first in the Contents below.
 
 **Project status:** Post-L2, private beta live on `spelix.app`. Phase 0/1/2/3 + the L2 sprint are complete;
-the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2311 backend unit tests,
-803 frontend tests, 28 migrations** (alembic head `cf685bd7e8f8`). See `decisions.md` for the ADR log.
+the cv-audit effort (7 sessions, 16 sagittal metrics) is complete. Current: **2353 backend unit tests,
+816 frontend tests, 29 migrations** (alembic head `9fffb59ba45f`). See `decisions.md` for the ADR log.
 
 ## Open work (→ GitHub Issues)
 
@@ -44,6 +44,18 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 2** (RAG: ingestion, hybrid retrieval, four-stage coaching, Coach Brain foundation, admin + expert portal).
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
+
+## Completed — Sex-aware coaching — /ship-loop run 6: #221–#225 (2026-06-10/11)
+
+Kin-expert request: papers taggable by sex, coaching considers lifter sex. /design 2026-06-09 (spec/plan local-only); stacked-PR chain, every PR through the tier-scaled review chain; #225 (T3) additionally passed the `review-panel` workflow (12 confirmed findings — 3 fixed inline pre-merge: SRS Must scoping `4ead9ac`, restamp docstring/log `e9042b7`, LangSmith PII comment `2d7a73a`). All five merged human-authorized 2026-06-11, deploy verified per step, prod E2E PASS (profile sex round-trip; upload select → Female persisted; My Papers inline edit Female→Both persisted; retrieval filters match 17 squat points for female/male/unset). Migration `9fffb59ba45f` applied. Prod backfill ran with a discovery: papers_rag's 39 points are an orphaned old seed corpus (no matching rows) and all 12 expert rows have chunk_count=0 → stamped the 39 points in-place by title→tags + created `paper_id` keyword index; ingestion itself is broken on prod (Docling OCR PermissionError) → **#263**. Follow-ups filed: **#258** (restamp_failed flag + retry queue), **#259** (consent surface for profile sex), **#263** (prod ingestion). #226 (Coach Brain sex) remains needs-design.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #221 | Contract: migration `9fffb59ba45f` (rag_documents.sex_applicability NOT NULL DEFAULT 'both' + CHECK; user_profiles.sex nullable + CHECK), models, `SexApplicabilityLiteral`/`SexLiteral`, ChunkPayload.exercise+.sex_applicability, SRS FR-RAGK-05/EXPV-05/PROF-03/AICP-05/09/12. Spec/quality/security PASS. PR #241. | done | M | T2→T2 | `7a75d50` | models, schemas, alembic, docs/SRS.md |
+| #222 | Ingestion stamping (DocumentMetadata.exercise_tags/sex_applicability → ChunkPayload), `QdrantClientWrapper.set_payload`, papers_rag index tuple, oneoff backfill script. Fixes prod papers-never-retrieved exercise-filter bug. Spec PASS. PR #261 (replaced #243 — closed by base-branch deletion). | done | M | T1→T1 | `ccd386c` | services/ingestion+qdrant, workers, scripts |
+| #223 | Expert portal: "Applicable population" upload select; `PATCH /expert/papers/{id}/metadata` + repo method + best-effort Qdrant restamp; My Papers column + inline select (busy state). Spec/quality (2 MEDIUM fixed `2f28ca1`)/security PASS. PR #251. | done | M | T2→T2 | `f37f2e1` | expert.py, rag_document repo/schema, ExpertPortalPage, ExpertPaperUploadPage, expert.ts |
+| #224 | Profile sex: `ProfileService.upsert` persists both paths; ProfilePage "Sex (optional)" select + helper. Spec/quality/security PASS. PR #254. | done | S | T2→T2 | `44f22f7` | services/profile.py, ProfilePage, profiles.ts |
+| #225 | Retrieval hard filter (MatchAny([sex,'both']) on papers_rag, dense+sparse legs — BM25 additional_filters leak closed), AgentState.lifter_sex, prompt line, worker threading both coaching paths. Spec FAIL→fixed `36e98bc`→PASS; quality/security PASS; review-panel run. PR #256. | done | L | T3→T3 | `20a3a71` | dual_collection, sparse_retrieval, retrieval, agents/{state,tools,graph}, coaching.py, analysis_worker.py |
 
 ## Completed — Post-L2 beta ops — /ship-loop run 5: DOI dedup follow-ups (2026-06-11)
 
