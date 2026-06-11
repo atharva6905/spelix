@@ -345,4 +345,75 @@ describe("ProfilePage", () => {
       expect(screen.getByLabelText(/femur length/i)).toBeInTheDocument();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Optional sex field (FR-PROF-03 ext., FR-PROF-06 ext.)
+  // -------------------------------------------------------------------------
+  it("renders sex select with Prefer not to say, Male, Female options", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/sex \(optional\)/i)).toBeInTheDocument();
+    });
+    const select = screen.getByLabelText(/sex \(optional\)/i);
+    const options = Array.from((select as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(options).toEqual(["Prefer not to say", "Male", "Female"]);
+  });
+
+  it("renders sex helper text", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Used to match coaching evidence to you.")).toBeInTheDocument();
+    });
+  });
+
+  it("defaults sex to prefer_not_to_say when profile has no sex", async () => {
+    mockGetProfile.mockResolvedValue({ ...PROFILE_FIXTURE, sex: null });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/sex \(optional\)/i)).toHaveValue("prefer_not_to_say");
+    });
+  });
+
+  it("pre-populates sex from existing profile", async () => {
+    mockGetProfile.mockResolvedValue({ ...PROFILE_FIXTURE, sex: "female" });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText(/sex \(optional\)/i)).toHaveValue("female");
+    });
+  });
+
+  it("sends selected sex with the save payload", async () => {
+    mockGetProfile.mockResolvedValue({ ...PROFILE_FIXTURE, sex: null });
+    mockUpdateProfile.mockResolvedValue(PROFILE_FIXTURE);
+
+    renderPage();
+    await waitFor(() => screen.getByRole("button", { name: /save/i }));
+
+    fireEvent.change(screen.getByLabelText(/sex \(optional\)/i), {
+      target: { value: "male" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ sex: "male" }),
+      );
+    });
+  });
+
+  it("sends prefer_not_to_say when sex untouched so saves don't clear other values", async () => {
+    mockGetProfile.mockResolvedValue({ ...PROFILE_FIXTURE, sex: null });
+    mockUpdateProfile.mockResolvedValue(PROFILE_FIXTURE);
+
+    renderPage();
+    await waitFor(() => screen.getByRole("button", { name: /save/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ sex: "prefer_not_to_say" }),
+      );
+    });
+  });
 });

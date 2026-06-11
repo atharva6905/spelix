@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { getProfile, updateProfile, type ProfileUpdateRequest } from "@/api/profiles";
+import { getProfile, updateProfile, type ProfileUpdateRequest, type Sex } from "@/api/profiles";
 
 type ExperienceLevel = "beginner" | "intermediate" | "advanced";
 
@@ -21,6 +21,16 @@ const EXPERIENCE_OPTIONS: { value: ExperienceLevel; label: string; description: 
   { value: "advanced", label: "Advanced", description: "More than 3 years of training" },
 ];
 
+const SEX_OPTIONS: { value: Sex; label: string }[] = [
+  { value: "prefer_not_to_say", label: "Prefer not to say" },
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+];
+
+function isSex(value: string | null): value is Sex {
+  return value === "male" || value === "female" || value === "prefer_not_to_say";
+}
+
 interface FormState {
   height_cm: string;
   weight_kg: string;
@@ -28,6 +38,7 @@ interface FormState {
   experience_level: ExperienceLevel | "";
   arm_span_cm: string;
   femur_length_cm: string;
+  sex: Sex;
 }
 
 const EMPTY_FORM: FormState = {
@@ -37,6 +48,7 @@ const EMPTY_FORM: FormState = {
   experience_level: "",
   arm_span_cm: "",
   femur_length_cm: "",
+  sex: "prefer_not_to_say",
 };
 
 export default function ProfilePage() {
@@ -56,6 +68,7 @@ export default function ProfilePage() {
           experience_level: (profile.experience_level as ExperienceLevel | null) ?? "",
           arm_span_cm: profile.arm_span_cm != null ? String(profile.arm_span_cm) : "",
           femur_length_cm: profile.femur_length_cm != null ? String(profile.femur_length_cm) : "",
+          sex: isSex(profile.sex) ? profile.sex : "prefer_not_to_say",
         });
       })
       .catch((err) => {
@@ -105,6 +118,7 @@ export default function ProfilePage() {
       experience_level: form.experience_level,
       arm_span_cm: form.arm_span_cm ? parseFloat(form.arm_span_cm) : null,
       femur_length_cm: form.femur_length_cm ? parseFloat(form.femur_length_cm) : null,
+      sex: form.sex,
     };
 
     setSaving(true);
@@ -204,6 +218,25 @@ export default function ProfilePage() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label htmlFor="sex" className="block text-sm font-medium text-gray-700">
+              Sex (optional)
+            </label>
+            <select
+              id="sex"
+              value={form.sex}
+              onChange={(e) => handleChange("sex", e.target.value)}
+              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {SEX_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">Used to match coaching evidence to you.</p>
           </div>
 
           {/* Optional fields */}
