@@ -260,32 +260,37 @@ async def request_paper_upload(
             detail={"error": {"code": "INVALID_FILENAME", "message": str(err), "detail": None}},
         ) from err
 
-    # FR-EXPV-02 / FR-RAGK-05 (issue #218): DOI is the enforced unique
-    # business key. Normalize before the dedup pre-check so the stored value
-    # matches the uq_rag_documents_doi_live partial index's expectations.
-    try:
-        normalized_doi = normalize_doi(body.doi)
-    except DoiValidationError as err:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"error": {"code": "INVALID_DOI", "message": str(err), "detail": None}},
-        ) from err
+    # FR-EXPV-02 / FR-RAGK-05 (issues #218/#234): DOI is the enforced unique
+    # business key — required for research_paper (schema-validated), optional
+    # for DOI-less document types. Any non-null DOI is normalized before the
+    # dedup pre-check so the stored value matches the uq_rag_documents_doi_live
+    # partial index's expectations; a null DOI skips both (the partial index
+    # is scoped to doi IS NOT NULL).
+    normalized_doi: str | None = None
+    if body.doi is not None:
+        try:
+            normalized_doi = normalize_doi(body.doi)
+        except DoiValidationError as err:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": {"code": "INVALID_DOI", "message": str(err), "detail": None}},
+            ) from err
 
-    existing = await rag_repo.get_live_by_doi(normalized_doi)
-    if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "error": {
-                    "code": "DUPLICATE_DOI",
-                    "message": f"A paper with this DOI already exists: {existing.title}",
-                    "detail": {
-                        "existing_paper_id": str(existing.id),
-                        "existing_title": existing.title,
-                    },
-                }
-            },
-        )
+        existing = await rag_repo.get_live_by_doi(normalized_doi)
+        if existing is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": {
+                        "code": "DUPLICATE_DOI",
+                        "message": f"A paper with this DOI already exists: {existing.title}",
+                        "detail": {
+                            "existing_paper_id": str(existing.id),
+                            "existing_title": existing.title,
+                        },
+                    }
+                },
+            )
 
     paper_id = uuid4()
     storage_path = f"papers/{paper_id}/{safe_name}"

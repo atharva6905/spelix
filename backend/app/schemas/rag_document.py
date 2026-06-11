@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 ReviewStatusLiteral = Literal[
@@ -134,9 +134,12 @@ class RagDocumentUploadRequest(BaseModel):
     exercise_tags: list[str] = Field(default_factory=list)
     authors: list[str] = Field(default_factory=list)
     year: int | None = Field(default=None, ge=1900, le=2100)
-    # Required: DOI is the enforced unique business key for expert-uploaded
-    # papers (FR-EXPV-02, issue #218). Normalized server-side via normalize_doi.
-    doi: str = Field(..., min_length=1, max_length=200)
+    # DOI is the enforced unique business key for research papers
+    # (FR-EXPV-02, issues #218/#234) — required iff document_type ==
+    # "research_paper", optional (omit/null) for DOI-less types
+    # (textbook, clinical_guideline, expert_annotation, other). Non-null
+    # values are normalized server-side via normalize_doi for every type.
+    doi: str | None = Field(default=None, min_length=1, max_length=200)
     study_design: StudyDesignLiteral | None = None
     population: str | None = Field(default=None, max_length=500)
     measurement_method: str | None = Field(default=None, max_length=500)
@@ -145,6 +148,15 @@ class RagDocumentUploadRequest(BaseModel):
 
     filename: str = Field(..., min_length=5, max_length=255)
     file_size_bytes: int = Field(..., gt=0, le=52_428_800)
+
+    @model_validator(mode="after")
+    def _require_doi_for_research_paper(self) -> RagDocumentUploadRequest:
+        if self.document_type == "research_paper" and self.doi is None:
+            raise ValueError(
+                "A DOI is required for research papers. For documents without"
+                " a DOI, choose a different document type."
+            )
+        return self
 
 
 class RagDocumentUploadResponse(BaseModel):

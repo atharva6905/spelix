@@ -261,6 +261,96 @@ class TestUploadDoiEnforcement:
         assert repo_instance.create.await_count == 1
 
 
+class TestUploadDoiOptionalByDocumentType:
+    """Issue #234 (FR-EXPV-02): DOI required iff document_type ==
+    'research_paper'; optional (omit/null) for DOI-less types."""
+
+    @staticmethod
+    def _wire(MockRepo, MockStorage, mock_service_role_client):
+        from app.services.paper_storage import SignedPaperUpload
+
+        repo_instance = MockRepo.return_value
+        repo_instance.get_live_by_doi = AsyncMock(return_value=None)
+
+        async def fake_create(doc):
+            return doc
+
+        repo_instance.create = AsyncMock(side_effect=fake_create)
+        storage_instance = MockStorage.return_value
+        storage_instance.generate_signed_upload_url = AsyncMock(
+            return_value=SignedPaperUpload(
+                url="https://x.supabase.co/upload/tok",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+        mock_service_role_client.return_value = MagicMock()
+        return repo_instance
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_textbook_without_doi_returns_201_and_skips_dedup(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        repo_instance = self._wire(MockRepo, MockStorage, mock_service_role_client)
+
+        body = {k: v for k, v in VALID_BODY.items() if k != "doi"}
+        body["document_type"] = "textbook"
+        resp = client.post("/api/v1/expert/papers", json=body)
+
+        assert resp.status_code == 201, resp.text
+        repo_instance.get_live_by_doi.assert_not_awaited()
+        doc_arg = repo_instance.create.await_args[0][0]
+        assert doc_arg.doi is None
+        assert doc_arg.document_type == "textbook"
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_textbook_with_doi_still_normalized_and_deduped(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        """An optional DOI provided for a DOI-less type still goes through
+        normalize_doi + the get_live_by_doi pre-check."""
+        repo_instance = self._wire(MockRepo, MockStorage, mock_service_role_client)
+
+        body = {
+            **VALID_BODY,
+            "document_type": "textbook",
+            "doi": "https://doi.org/10.1519/JSC.0B013E31818546BB",
+        }
+        resp = client.post("/api/v1/expert/papers", json=body)
+
+        assert resp.status_code == 201, resp.text
+        repo_instance.get_live_by_doi.assert_awaited_once_with(
+            "10.1519/jsc.0b013e31818546bb"
+        )
+        doc_arg = repo_instance.create.await_args[0][0]
+        assert doc_arg.doi == "10.1519/jsc.0b013e31818546bb"
+
+    @patch("app.api.v1.expert.get_service_role_client")
+    @patch("app.api.v1.expert.PaperStorageService")
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_textbook_with_malformed_doi_still_422(
+        self, MockRepo, MockStorage, mock_service_role_client, client
+    ):
+        repo_instance = self._wire(MockRepo, MockStorage, mock_service_role_client)
+
+        body = {**VALID_BODY, "document_type": "textbook", "doi": "not-a-doi"}
+        resp = client.post("/api/v1/expert/papers", json=body)
+
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["error"]["code"] == "INVALID_DOI"
+        repo_instance.create.assert_not_awaited()
+
+    def test_research_paper_null_doi_returns_422_with_message(self, client):
+        body = {**VALID_BODY, "doi": None}
+        resp = client.post("/api/v1/expert/papers", json=body)
+
+        assert resp.status_code == 422, resp.text
+        assert "DOI is required for research papers" in resp.text
+
+
 class TestCompletePaperUploadDoiRace:
     """Concurrent-race close-out (issue #218): the partial unique index
     uq_rag_documents_doi_live fires on the uploading->pending UPDATE."""

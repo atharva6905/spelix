@@ -24,11 +24,62 @@ class TestRagDocumentUploadRequest:
         assert req.exercise_tags == []
         assert req.authors == []
 
-    def test_rejects_missing_doi(self):
-        """DOI is the enforced unique business key (FR-EXPV-02, issue #218)."""
+    def test_rejects_missing_doi_for_research_paper(self):
+        """DOI is the unique business key for research papers
+        (FR-EXPV-02, issues #218/#234). document_type defaults to
+        research_paper, so an omitted DOI must fail validation."""
+        with pytest.raises(ValidationError) as exc_info:
+            RagDocumentUploadRequest(
+                title="Test",
+                filename="paper.pdf",
+                file_size_bytes=100,
+            )
+        assert "DOI is required for research papers" in str(exc_info.value)
+
+    def test_rejects_null_doi_for_explicit_research_paper(self):
         with pytest.raises(ValidationError):
             RagDocumentUploadRequest(
                 title="Test",
+                document_type="research_paper",
+                doi=None,
+                filename="paper.pdf",
+                file_size_bytes=100,
+            )
+
+    @pytest.mark.parametrize(
+        "doc_type", ["textbook", "clinical_guideline", "expert_annotation", "other"]
+    )
+    def test_doi_optional_for_non_research_paper_types(self, doc_type):
+        """DOI-less document types are part of the contract (issue #234):
+        the dedup index tolerates NULL and the corpus already has a
+        DOI-less guideline row."""
+        req = RagDocumentUploadRequest(
+            title="Test",
+            document_type=doc_type,
+            filename="paper.pdf",
+            file_size_bytes=100,
+        )
+        assert req.doi is None
+
+    def test_doi_accepted_when_provided_for_non_research_paper_type(self):
+        """An optional DOI supplied for e.g. a textbook is still kept (and
+        normalized/dedup'd downstream)."""
+        req = RagDocumentUploadRequest(
+            title="Test",
+            document_type="textbook",
+            doi=VALID_DOI,
+            filename="paper.pdf",
+            file_size_bytes=100,
+        )
+        assert req.doi == VALID_DOI
+
+    def test_rejects_empty_string_doi(self):
+        """min_length=1 still applies to non-null values for every type."""
+        with pytest.raises(ValidationError):
+            RagDocumentUploadRequest(
+                title="Test",
+                document_type="textbook",
+                doi="",
                 filename="paper.pdf",
                 file_size_bytes=100,
             )
