@@ -49,6 +49,7 @@ class ProfileService:
                 experience_level=data.experience_level,
                 arm_span_cm=data.arm_span_cm,
                 femur_length_cm=data.femur_length_cm,
+                sex=data.sex,
             )
             return await self._repo.create(profile)
 
@@ -59,4 +60,5 @@ class ProfileService:
         existing.experience_level = data.experience_level
         existing.arm_span_cm = data.arm_span_cm
         existing.femur_length_cm = data.femur_length_cm
+        existing.sex = data.sex
         return await self._repo.update(existing)

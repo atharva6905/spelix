@@ -36,6 +36,7 @@ def _make_orm_profile(**kwargs) -> UserProfile:
         experience_level=kwargs.get("experience_level", "intermediate"),
         arm_span_cm=kwargs.get("arm_span_cm", None),
         femur_length_cm=kwargs.get("femur_length_cm", None),
+        sex=kwargs.get("sex", None),
     )
     # Inject non-constructor attributes that ORM normally sets after flush
     p.__dict__.update(
@@ -207,3 +208,146 @@ class TestPutProfile:
         body = resp.json()
         assert body["arm_span_cm"] == 182.0
         assert body["femur_length_cm"] == 46.0
+
+
+# ---------------------------------------------------------------------------
+# Optional sex field (FR-PROF-03 ext., FR-PROF-06 ext.)
+# ---------------------------------------------------------------------------
+
+
+class TestSexField:
+    def test_put_with_sex_echoes_it(self, app_client: TestClient):
+        profile = _make_orm_profile(sex="female")
+
+        with patch("app.api.v1.profiles.ProfileService") as MockService:
+            instance = AsyncMock()
+            instance.upsert.return_value = profile
+            MockService.return_value = instance
+
+            resp = app_client.put(
+                "/api/v1/profiles/me",
+                json={
+                    "height_cm": 175.0,
+                    "weight_kg": 70.0,
+                    "age": 25,
+                    "experience_level": "intermediate",
+                    "sex": "female",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["sex"] == "female"
+
+    def test_put_without_sex_returns_none(self, app_client: TestClient):
+        profile = _make_orm_profile()
+
+        with patch("app.api.v1.profiles.ProfileService") as MockService:
+            instance = AsyncMock()
+            instance.upsert.return_value = profile
+            MockService.return_value = instance
+
+            resp = app_client.put(
+                "/api/v1/profiles/me",
+                json={
+                    "height_cm": 175.0,
+                    "weight_kg": 70.0,
+                    "age": 25,
+                    "experience_level": "intermediate",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["sex"] is None
+
+    def test_put_with_invalid_sex_returns_422(self, app_client: TestClient):
+        resp = app_client.put(
+            "/api/v1/profiles/me",
+            json={
+                "height_cm": 175.0,
+                "weight_kg": 70.0,
+                "age": 25,
+                "experience_level": "intermediate",
+                "sex": "other",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_get_includes_sex(self, app_client: TestClient):
+        profile = _make_orm_profile(sex="male")
+
+        with patch("app.api.v1.profiles.ProfileService") as MockService:
+            instance = AsyncMock()
+            instance.get_or_404.return_value = profile
+            MockService.return_value = instance
+
+            resp = app_client.get("/api/v1/profiles/me")
+
+        assert resp.status_code == 200
+        assert resp.json()["sex"] == "male"
+
+
+class TestServicePersistsSex:
+    """ProfileService.upsert must copy `sex` to the ORM object on both paths."""
+
+
+    async def test_create_path_persists_sex(self):
+        from app.schemas.profile import ProfileUpdate
+        from app.services.profile import ProfileService
+
+        repo = AsyncMock()
+        repo.get_by_user_id.return_value = None
+        repo.create.side_effect = lambda p: p
+
+        service = ProfileService(repo)
+        data = ProfileUpdate(
+            height_cm=175.0,
+            weight_kg=70.0,
+            age=25,
+            experience_level="intermediate",
+            sex="female",
+        )
+        result = await service.upsert(TEST_USER_ID, data)
+        assert result.sex == "female"
+
+
+    async def test_update_path_persists_sex(self):
+        from app.schemas.profile import ProfileUpdate
+        from app.services.profile import ProfileService
+
+        existing = _make_orm_profile(sex=None)
+        repo = AsyncMock()
+        repo.get_by_user_id.return_value = existing
+        repo.update.side_effect = lambda p: p
+
+        service = ProfileService(repo)
+        data = ProfileUpdate(
+            height_cm=175.0,
+            weight_kg=70.0,
+            age=25,
+            experience_level="intermediate",
+            sex="prefer_not_to_say",
+        )
+        result = await service.upsert(TEST_USER_ID, data)
+        assert result.sex == "prefer_not_to_say"
+
+
+    async def test_update_path_omitted_sex_sets_none(self):
+        """Upsert assigns all fields — omitted sex defaults to None (matches
+        arm_span_cm/femur_length_cm overwrite-all semantics)."""
+        from app.schemas.profile import ProfileUpdate
+        from app.services.profile import ProfileService
+
+        existing = _make_orm_profile(sex="male")
+        repo = AsyncMock()
+        repo.get_by_user_id.return_value = existing
+        repo.update.side_effect = lambda p: p
+
+        service = ProfileService(repo)
+        data = ProfileUpdate(
+            height_cm=175.0,
+            weight_kg=70.0,
+            age=25,
+            experience_level="intermediate",
+        )
+        result = await service.upsert(TEST_USER_ID, data)
+        assert result.sex is None
