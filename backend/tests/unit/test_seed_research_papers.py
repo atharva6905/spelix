@@ -17,7 +17,14 @@ _SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR.parent) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR.parent))
 
-from scripts.seed_research_papers import SEED_PAPERS  # noqa: E402
+from app.utils.doi import DoiValidationError, normalize_doi  # noqa: E402
+from scripts.seed_research_papers import (  # noqa: E402
+    _INSERT_SQL,
+    SEED_PAPERS,
+    SeedPaper,
+    build_rag_document_row,
+    validate_seed_dois,
+)
 
 VALID_QUALITY_TIERS = {
     "L1_systematic_review",
@@ -93,3 +100,52 @@ class TestSeedPapersRequirements:
             lower = p.text.lower()
             assert "injury risk" not in lower, f"Paper {i}: forbidden 'injury risk'"
             assert "injury prevention" not in lower, f"Paper {i}: forbidden 'injury prevention'"
+
+
+def _make_paper(doi: str | None) -> SeedPaper:
+    return SeedPaper(
+        title="Test paper title long enough",
+        authors=["Author A"],
+        year=2020,
+        doi=doi,
+        quality_tier="L2_rct",
+        exercise_tags=["squat"],
+        document_type="research_paper",
+        text="x" * 250,
+    )
+
+
+class TestSeedDoiColumn:
+    """Issue #230 / FR-RAGK-05: seed rows must populate the doi column."""
+
+    def test_insert_sql_includes_doi_column(self) -> None:
+        assert " doi," in _INSERT_SQL
+        assert ":doi" in _INSERT_SQL
+
+    def test_row_includes_normalized_doi(self) -> None:
+        paper = _make_paper("https://doi.org/10.1519/JSC.0b013e3182a1fbd2")
+        from datetime import datetime, timezone
+
+        row = build_rag_document_row(paper, str(__import__("uuid").uuid4()), datetime.now(timezone.utc))
+        assert row["doi"] == "10.1519/jsc.0b013e3182a1fbd2"
+
+    def test_row_doi_null_when_paper_has_no_doi(self) -> None:
+        paper = _make_paper(None)
+        from datetime import datetime, timezone
+
+        row = build_rag_document_row(paper, str(__import__("uuid").uuid4()), datetime.now(timezone.utc))
+        assert row["doi"] is None
+
+    def test_validate_seed_dois_raises_on_malformed_with_entry_name(self) -> None:
+        bad = _make_paper("not-a-doi")
+        with pytest.raises(DoiValidationError, match="Test paper title"):
+            validate_seed_dois([bad])
+
+    def test_validate_seed_dois_allows_none_doi(self) -> None:
+        validate_seed_dois([_make_paper(None)])
+
+    def test_all_hardcoded_seed_dois_normalize(self) -> None:
+        validate_seed_dois(SEED_PAPERS)
+        for p in SEED_PAPERS:
+            if p.doi is not None:
+                assert normalize_doi(p.doi)

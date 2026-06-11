@@ -20,16 +20,20 @@ Environment:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 # Ensure backend/ on sys.path
 _BACKEND_DIR = Path(__file__).parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
+
+from app.utils.doi import DoiValidationError, normalize_doi  # noqa: E402
 
 _BACKEND_ENV = _BACKEND_DIR / ".env"
 _ROOT_ENV = _BACKEND_DIR.parent / ".env"
@@ -844,8 +848,69 @@ SEED_PAPERS: list[SeedPaper] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# DOI dedup-key support (issue #230, FR-RAGK-05)
+# ---------------------------------------------------------------------------
+
+_INSERT_SQL = (
+    "INSERT INTO rag_documents (id, title, source_url, document_type, "
+    "exercise_tags, doi, chunk_count, ingested_at, metadata, created_at, updated_at) "
+    "VALUES (:id, :title, :source_url, :document_type, :exercise_tags, :doi, "
+    ":chunk_count, :ingested_at, :metadata, :created_at, :updated_at)"
+)
+
+
+def validate_seed_dois(papers: list[SeedPaper]) -> None:
+    """Fail fast on malformed hardcoded DOIs before any DB work.
+
+    Entries that genuinely lack a DOI (textbooks/guidelines, doi=None) are
+    allowed; any non-None DOI must pass normalize_doi.
+    """
+    for paper in papers:
+        if paper.doi is None:
+            continue
+        try:
+            normalize_doi(paper.doi)
+        except DoiValidationError as exc:
+            raise DoiValidationError(
+                f"Seed entry '{paper.title}' has malformed DOI {paper.doi!r}: {exc}"
+            ) from exc
+
+
+def build_rag_document_row(paper: SeedPaper, paper_id: str, now: datetime) -> dict[str, object]:
+    """Build the rag_documents INSERT params for one seed paper.
+
+    Writes the normalized DOI into the doi column so seed rows participate in
+    the get_live_by_doi pre-check and the uq_rag_documents_doi_live partial
+    unique index (doi IS NOT NULL predicate). NULL only for entries that
+    genuinely lack a DOI.
+    """
+    return {
+        "id": uuid.UUID(paper_id),
+        "title": paper.title,
+        "source_url": f"https://doi.org/{paper.doi}" if paper.doi else None,
+        "document_type": paper.document_type,
+        "exercise_tags": paper.exercise_tags,
+        "doi": normalize_doi(paper.doi) if paper.doi is not None else None,
+        "chunk_count": 0,  # Will update after ingestion
+        "ingested_at": now,
+        "metadata": json.dumps(
+            {
+                "authors": paper.authors,
+                "year": paper.year,
+                "doi": paper.doi,
+                "quality_tier": paper.quality_tier,
+                "source": "seed_corpus_p2_007",
+                "review_status": "reviewed_approved",
+            }
+        ),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
 async def main(dry_run: bool = False) -> None:
-    from datetime import datetime, timezone
+    from datetime import timezone
 
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -854,6 +919,9 @@ async def main(dry_run: bool = False) -> None:
     from app.services.ingestion import DocumentMetadata, IngestionService
     from app.services.cohere_client import get_cohere_client
     from app.services.qdrant import get_qdrant_client
+
+    # Fail fast on malformed hardcoded DOIs before any DB work (issue #230).
+    validate_seed_dois(SEED_PAPERS)
 
     print(f"[seed-papers] {len(SEED_PAPERS)} papers to seed")
 
@@ -920,33 +988,10 @@ async def main(dry_run: bool = False) -> None:
         for paper in SEED_PAPERS:
             paper_id = str(uuid.uuid4())
 
-            # Insert rag_documents row
+            # Insert rag_documents row (doi column populated — issue #230)
             await session.execute(
-                text(
-                    "INSERT INTO rag_documents (id, title, source_url, document_type, "
-                    "exercise_tags, chunk_count, ingested_at, metadata, created_at, updated_at) "
-                    "VALUES (:id, :title, :source_url, :document_type, :exercise_tags, "
-                    ":chunk_count, :ingested_at, :metadata, :created_at, :updated_at)"
-                ),
-                {
-                    "id": uuid.UUID(paper_id),
-                    "title": paper.title,
-                    "source_url": f"https://doi.org/{paper.doi}" if paper.doi else None,
-                    "document_type": paper.document_type,
-                    "exercise_tags": paper.exercise_tags,
-                    "chunk_count": 0,  # Will update after ingestion
-                    "ingested_at": now,
-                    "metadata": __import__("json").dumps({
-                        "authors": paper.authors,
-                        "year": paper.year,
-                        "doi": paper.doi,
-                        "quality_tier": paper.quality_tier,
-                        "source": "seed_corpus_p2_007",
-                        "review_status": "reviewed_approved",
-                    }),
-                    "created_at": now,
-                    "updated_at": now,
-                },
+                text(_INSERT_SQL),
+                build_rag_document_row(paper, paper_id, now),
             )
 
             # Ingest into Qdrant via IngestionService
