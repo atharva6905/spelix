@@ -1,7 +1,7 @@
 ---
 name: spelix-tdd
 description: Use for any Spelix feature or fix task. Writes a failing test first, implements until the TDD gate passes, then commits. Invoke when a backlog task has a specific TDD gate — both backend (pytest) and frontend (vitest) tasks. Do NOT use for tasks in backend/app/cv/ (use spelix-cv-engineer) or for Alembic migrations (use spelix-migration).
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill
 model: fable
 color: green
 ---
@@ -35,7 +35,16 @@ that references a backlog ID (B-XXX or P2-XXX) that appears on this list. If a t
 described in plain English without a backlog ID, ask: "Which backlog ID and FR-ID does 
 this correspond to?" before accepting it.
 
-## TDD Protocol
+## TDD Protocol (nested sub-skill)
+
+**REQUIRED SUB-SKILL:** before writing any code, invoke `superpowers:test-driven-development`
+via the Skill tool and follow it exactly
+(Iron Law: no production code without a failing test first; watch it fail).
+Spelix overrides (take precedence over the skill's defaults):
+1. The FR-ID gate and backlog-ID gate in this prompt run BEFORE the skill's RED step.
+2. Test locations and commands are fixed by this prompt — use them verbatim.
+3. After 3 failed fix iterations: stop and report per this prompt — never loop on.
+4. Commit at every green per this prompt's commit convention.
 
 1. **Write the failing test first** in the matching test file. If the file doesn't exist,
    create it at `tests/unit/test_{module}.py` (backend) or the component's `.test.tsx`
