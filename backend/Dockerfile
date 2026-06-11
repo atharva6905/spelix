@@ -73,11 +73,25 @@ RUN mkdir -p /app/models && \
         -o /app/models/pose_landmarker_heavy.task && \
     echo "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b  /app/models/pose_landmarker_heavy.task" | sha256sum -c -
 
+# Pre-bake Docling model artifacts (layout + tableformer + RapidOCR) into the
+# image at build time. The prod container runs non-root with a read-only venv;
+# without this, Docling's RapidOCR backend tries to download its OCR model into
+# the venv site-packages at first use and raises PermissionError, which made
+# EVERY ingest_paper task fail (all rag_documents ended with chunk_count=0).
+# See issue #263. DOCLING_ARTIFACTS_PATH points app/services/pdf_extraction.py
+# at this writable, pre-populated dir so no runtime download is ever attempted.
+ENV DOCLING_ARTIFACTS_PATH=/app/models/docling
+RUN mkdir -p /app/models/docling && \
+    uv run --no-dev docling-tools models download \
+        layout tableformer rapidocr \
+        -o /app/models/docling
+
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix
 
 # Run as non-root user for security
-RUN useradd -m -r spelix && chown spelix:spelix /tmp/spelix
+RUN useradd -m -r spelix && \
+    chown -R spelix:spelix /tmp/spelix /app/models/docling
 USER spelix
 
 EXPOSE 8000
