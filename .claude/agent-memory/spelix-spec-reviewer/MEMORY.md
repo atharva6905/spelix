@@ -6,4 +6,5 @@
 - [Issue #229 review](review_issue_229.md) — IntegrityError catch on review_paper (FR-EXPV-03): PASS, 2026-06-10
 - [Issue #230 review](review_issue_230.md) — seed doi column fix (no-FR, seed script): PASS, 2026-06-10
 - [Issue #232 review](review_issue_232.md) — DoiLink extraction (3 sites, testid fallback, children/aria justified): PASS, 2026-06-11
+- [Issue #234 review](review_issue_234.md) — DOI optional for non-research-paper types (FR-EXPV-02, doc-type select): PASS, 2026-06-11
 - [decisions.md cross-link rule](feedback_decisions_crosslink.md) — superseded ADRs must have a back-reference added (both ways); flag CRITICAL if missing
