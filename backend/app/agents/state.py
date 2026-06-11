@@ -69,7 +69,11 @@ class AgentState(TypedDict):
     # FR-AICP-12 ext.). Only "male"/"female"/None reach here — the worker
     # normalizes "prefer_not_to_say" and undisclosed to None. PII: this field
     # is an INPUT only; it is never emitted as a node output_key, so it never
-    # lands in agent_trace_json / LangSmith traces (FR-EXPV-03).
+    # lands in agent_trace_json or any expert-visible surface (FR-EXPV-03).
+    # CAVEAT: when LANGCHAIN_TRACING_V2 is enabled, LangGraph serializes full
+    # node-input state to LangSmith, which includes this field — LangSmith is
+    # internal-only tooling, but enable input hiding/anonymization there
+    # before widening trace access.
     lifter_sex: str | None
 
     # --- Tool outputs ----------------------------------------------------
