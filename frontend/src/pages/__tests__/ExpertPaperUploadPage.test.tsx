@@ -10,6 +10,13 @@ vi.mock("@/api/expert", () => ({
   requestPaperUploadUrl: (...a: unknown[]) => mockRequestUrl(...a),
   completePaperUpload: (...a: unknown[]) => mockCompleteUpload(...a),
   uploadPaperFile: (...a: unknown[]) => mockUploadFile(...a),
+  // Real const re-declared here: vi.mock replaces the whole module, and the
+  // page imports these options alongside the mocked API functions.
+  SEX_APPLICABILITY_OPTIONS: [
+    { value: "male", label: "Male" },
+    { value: "female", label: "Female" },
+    { value: "both", label: "Both" },
+  ],
 }));
 
 vi.mock("@/lib/supabase", () => ({
@@ -368,5 +375,96 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
       fireEvent.change(doiInput, { target: { value: "10.1000/dup2" } });
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", () => {
+  beforeEach(() => {
+    mockRequestUrl.mockReset();
+    mockCompleteUpload.mockReset();
+    mockUploadFile.mockReset();
+  });
+
+  /** Fill title + DOI + PDF file so the form is submittable */
+  async function fillForm(doi = "10.1000/abc123") {
+    const titleInput = screen.getByLabelText(/title/i);
+    await act(async () => {
+      fireEvent.change(titleInput, { target: { value: "Paper T" } });
+    });
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: doi } });
+    });
+    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
+    const file = new File([new Uint8Array(1024)], "x.pdf", {
+      type: "application/pdf",
+    });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+    });
+  }
+
+  function mockSuccessfulUpload() {
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
+  }
+
+  it("renders the Applicable population select with Male/Female/Both, default Both", async () => {
+    renderPage();
+    await waitForForm();
+
+    const select = screen.getByLabelText(/applicable population/i) as HTMLSelectElement;
+    expect(select).toBeInTheDocument();
+    expect(select.value).toBe("both");
+
+    const options = Array.from(select.options).map((o) => o.textContent);
+    expect(options).toEqual(["Male", "Female", "Both"]);
+  });
+
+  it("includes the selected sex_applicability in the upload payload", async () => {
+    mockSuccessfulUpload();
+
+    renderPage();
+    await waitForForm();
+    await fillForm();
+
+    const select = screen.getByLabelText(/applicable population/i);
+    await act(async () => {
+      fireEvent.change(select, { target: { value: "female" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() => expect(mockRequestUrl).toHaveBeenCalled());
+    expect(mockRequestUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ sex_applicability: "female" }),
+    );
+  });
+
+  it("defaults sex_applicability to both in the upload payload", async () => {
+    mockSuccessfulUpload();
+
+    renderPage();
+    await waitForForm();
+    await fillForm();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    await waitFor(() => expect(mockRequestUrl).toHaveBeenCalled());
+    expect(mockRequestUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ sex_applicability: "both" }),
+    );
   });
 });

@@ -84,6 +84,7 @@ export interface RagDocumentResponse {
   review_status: string;
   reviewer_id: string | null;
   reviewed_at: string | null;
+  sex_applicability: string;
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +116,7 @@ export interface PaperUploadMetadata {
     | "L2_rct"
     | "L3_observational"
     | "L4_guideline";
+  sex_applicability?: "male" | "female" | "both";
   filename: string;
   file_size_bytes: number;
 }
@@ -275,6 +277,37 @@ export async function reviewPaper(
   return expertFetch(`/api/v1/expert/papers/${docId}/review`, {
     method: "PATCH",
     body: JSON.stringify(action),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Paper Metadata Edit (issue #223, FR-RAGK-05 ext.)
+// ---------------------------------------------------------------------------
+
+// Editable post-upload metadata; backend restamps existing Qdrant points
+// via set_payload (no re-embed).
+export interface PaperMetadataPatch {
+  sex_applicability: "male" | "female" | "both";
+}
+
+// Shared select options for sex_applicability (issue #223, FR-RAGK-05 ext.)
+// — single source of truth for ExpertPaperUploadPage + ExpertPortalPage.
+export const SEX_APPLICABILITY_OPTIONS = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "both", label: "Both" },
+] as const satisfies ReadonlyArray<{
+  value: PaperMetadataPatch["sex_applicability"];
+  label: string;
+}>;
+
+export async function updatePaperMetadata(
+  docId: string,
+  patch: PaperMetadataPatch,
+): Promise<{ id: string; sex_applicability: string }> {
+  return expertFetch(`/api/v1/expert/papers/${docId}/metadata`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
   });
 }
 

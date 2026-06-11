@@ -92,6 +92,12 @@ class RagDocumentUpload(BaseModel):
     sex_applicability: SexApplicabilityLiteral = "both"
 
 
+class RagDocumentMetadataPatch(BaseModel):
+    """Editable metadata after upload (FR-RAGK-05 ext.). Extend per-field as needed."""
+
+    sex_applicability: SexApplicabilityLiteral
+
+
 class RagDocumentReviewAction(BaseModel):
     """Schema for paper review decision (FR-EXPV-06)."""
 

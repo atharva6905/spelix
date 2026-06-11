@@ -15,6 +15,8 @@ import {
   getExpertQueue,
   listExpertPapers,
   reviewPaper,
+  updatePaperMetadata,
+  SEX_APPLICABILITY_OPTIONS,
   type ExpertQueueItem,
   type RagDocumentResponse,
 } from "@/api/expert";
@@ -230,9 +232,11 @@ interface PapersTableProps {
   onNext: () => void;
   onApprove: (paperId: string) => void;
   approving: string | null;
+  onSexApplicabilityChange: (paperId: string, value: string) => void;
+  savingMeta: string | null;
 }
 
-function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving }: PapersTableProps) {
+function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving, onSexApplicabilityChange, savingMeta }: PapersTableProps) {
   if (loading) {
     return <p className="py-8 text-center text-sm text-gray-500">Loading papers...</p>;
   }
@@ -266,6 +270,7 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
               <th className="pb-3 pr-4">DOI</th>
               <th className="pb-3 pr-4">Tags</th>
               <th className="pb-3 pr-4">Tier</th>
+              <th className="pb-3 pr-4 normal-case">Applicable population</th>
               <th className="pb-3 pr-4">Status</th>
               <th className="pb-3 pr-4">Chunks</th>
               <th className="pb-3 pr-4">Uploaded</th>
@@ -324,6 +329,19 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
                     ) : (
                       <span className="text-gray-400">—</span>
                     )}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <select
+                      aria-label={`Applicable population for ${paper.title}`}
+                      value={paper.sex_applicability}
+                      onChange={(e) => onSexApplicabilityChange(paper.id, e.target.value)}
+                      disabled={savingMeta === paper.id}
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+                    >
+                      {SEX_APPLICABILITY_OPTIONS.map(({ value, label }) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="py-3 pr-4">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusInfo.className}`}>
@@ -391,6 +409,7 @@ export default function ExpertPortalPage() {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [approving, setApproving] = useState<string | null>(null);
+  const [savingMeta, setSavingMeta] = useState<string | null>(null);
 
   // Role check — FR-EXPV-01
   useEffect(() => {
@@ -443,6 +462,26 @@ export default function ExpertPortalPage() {
       setError("Failed to approve paper. Please try again.");
     } finally {
       setApproving(null);
+    }
+  }
+
+  // Issue #223 (FR-RAGK-05 ext.): inline edit of a paper's applicable
+  // population. State updates only after the PATCH succeeds — on failure the
+  // select keeps the old value and an error banner is shown.
+  async function handleSexApplicabilityChange(paperId: string, value: string) {
+    setSavingMeta(paperId);
+    try {
+      await updatePaperMetadata(paperId, {
+        sex_applicability: value as "male" | "female" | "both",
+      });
+      setPapers((prev) =>
+        prev.map((p) => (p.id === paperId ? { ...p, sex_applicability: value } : p))
+      );
+    } catch (err) {
+      console.error("Failed to update applicable population", err);
+      setError("Failed to update applicable population. Please try again.");
+    } finally {
+      setSavingMeta(null);
     }
   }
 
@@ -530,6 +569,8 @@ export default function ExpertPortalPage() {
               onNext={() => setOffset(offset + PAGE_SIZE)}
               onApprove={handleApprovePaper}
               approving={approving}
+              onSexApplicabilityChange={handleSexApplicabilityChange}
+              savingMeta={savingMeta}
             />
           ) : (
             <QueueTable
