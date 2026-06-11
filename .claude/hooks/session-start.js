@@ -3,6 +3,8 @@
 // Every probe is timeout-guarded; failures degrade to a SKIPPED line, never an error.
 const { execSync } = require('node:child_process');
 const { readFileSync, existsSync } = require('node:fs');
+const path = require('node:path');
+const { resolveRoot, inLinkedWorktree } = require('./_lib.js');
 function probe(label, fn) {
   try { return `${label}:\n${fn().toString().trim()}`; }
   catch (e) { return `${label}: SKIPPED (${e.message.split('\n')[0].slice(0, 80)})`; }
@@ -16,9 +18,13 @@ process.stdin.on('end', () => {
     probe('worktrees', () => execSync('git worktree list', { timeout: 8000 })),
     probe('streaq queue depth', () =>
       execSync('docker compose exec -T redis redis-cli llen streaq:queue', { timeout: 6000 })),
+    probe('session cwd', () => inLinkedWorktree()
+      ? `LINKED WORKTREE: ${process.cwd()} (main checkout: ${resolveRoot()})`
+      : process.cwd()),
     probe('handoff (head)', () => {
-      if (!existsSync('.claude/handoff.md')) return '(no handoff file)';
-      return readFileSync('.claude/handoff.md', 'utf8').split('\n').slice(0, 20).join('\n');
+      const handoff = path.join(resolveRoot(), '.claude', 'handoff.md');
+      if (!existsSync(handoff)) return '(no handoff file)';
+      return readFileSync(handoff, 'utf8').split('\n').slice(0, 20).join('\n');
     }),
   ];
   process.stdout.write(JSON.stringify({

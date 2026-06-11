@@ -2,8 +2,33 @@
 
 (Persisted by the main agent on 2026-06-10 — the reviewer ran read-only and asked for these to be recorded.)
 
+## Reviewed: issue #239 / approval gate (T2 governance docs) (2026-06-10) → FAIL then re-review
+- [Harness governance reviews](harness_governance_review.md) — outcome-enum drift is the dominant failure mode in ship-loop SKILL.md procedural diffs
+
+## Reviewed: issue #237 / worktree-safe hooks (T2) (2026-06-10) → FAIL then re-review
+- [Hooks worktree review (#237)](hooks_worktree_review.md) — smoke-test conflated cwd with git main checkout; polluted real handoff.md; fixture setup outside try/finally. Production `_lib.js` fix itself sound.
+
 ## Reviewed: issue #219 / DOI upload form (2026-06-10) → PASS (1 MEDIUM, fixed pre-merge)
 
 - **expertFetch flattened-error-shape contract** (reusable for every expert-portal form review): backend raises `HTTPException(detail={"error": {"code","message","detail"}})` → FastAPI wraps as `{"detail": {...}}` → `expertFetch` (frontend/src/api/expert.ts ~164) throws `{ status, ...(body.detail ?? body) }`, i.e. components see `{ status, error: { code, message, detail } }`. Correct test mocks reject the api-function with this POST-expertFetch shape, never the raw fetch Response. When reviewing error handling in expert pages, verify the component reads `err.status` + `err.error?.code` — reading `err.detail.error` is a contract bug.
 - **Stale field-error-state trap** (recurring React form pattern): a field-scoped error state (`doiError`-style) that is cleared only in that field's onChange goes stale when the user resubmits after editing a DIFFERENT field — the alert survives into the success state. Check every per-field error is also reset at submit start, alongside the page-level error reset. Found as MEDIUM on #219; fix is one line at the top of handleSubmit.
 - Upload-phase state machine on ExpertPaperUploadPage: inputs are `disabled={uploadPhase !== "idle"}`, so any error path that should leave the form editable must set phase back to `"idle"` (not `"error"`) and early-return before the generic handler.
+
+## Reviewed: issue #221 / sex-aware coaching contract (T2) (2026-06-10) → PASS (1 LOW)
+- **Contract-task review heuristic (worked here)**: for "add field, keep N call-sites valid" tasks, the load-bearing checks are (a) every existing constructor still type-checks via field DEFAULTS, (b) no exact-key-set test breaks on schema growth, (c) `model_dump`-based serializers silently pick up the new field. Do NOT flag "field written but never read" on a contract task — reading/filtering is the next issue's scope.
+- **ChunkPayload round-trip map**: ingest writes via `ingestion.py::_build_points` → `payload.model_dump()` into Qdrant (new fields auto-serialize, forward-compatible). Retrieval reads via `retrieval.py::dense_search` constructing field-by-field from `point.payload.get(...)` — new fields fall to defaults until a downstream issue adds the `.get()` lines.
+- **CHECK-constraint test convention**: no precedent for DB-integration CHECK-violation tests (all `IntegrityError` usages are UNIQUE or mocked). Conventional bar for a new CHECK column = Pydantic-Literal accept/reject + column-metadata assertion. Residual LOW: nothing asserts the model `__table_args__` CHECK predicate matches the migration's.
+- **Profile test factories build REAL ORM objects** (`_make_orm_profile`, `_make_profile`), not MagicMocks — adding a nullable column does NOT trigger the MagicMock+Pydantic-500 trap on the profile path (contrast analysis API/CRUD factories which do). No mock-factory follow-up needed for profile-schema growth.
+
+## Reviewed: issue #223 / sex-applicability expert portal (2026-06-10) → PASS (2 MEDIUM, 1 LOW — non-blocking; MEDIUMs fixed in-loop)
+- ADR-TXN-01 commit-before-side-effect pattern (validated good here): expert.py routes that mutate the row then touch an external store (Qdrant/Storage) must (1) check the repo's None-return and raise HTTPException BEFORE db.commit() — get_db rolls back on HTTPException and the repo method early-returns without flushing when the row is missing, so the 404 path leaks no state; (2) await db.commit() AFTER the None-check, BEFORE the external call. _get_rag_repo and the route's db both Depends(get_db) → FastAPI dependency caching gives the SAME session, so the route's explicit db.commit() flushes the repo's change. complete_paper documents this same pattern. Verify this exact ordering on every new expert mutate-then-restamp route.
+- Best-effort external restamp = bare `except Exception` + logger.warning is the ACCEPTED pattern (issue #223): Qdrant set_payload failure is swallowed, request still 200s, ingestion re-stamps on next re-embed. Intentional, spec-scoped, test-covered. Do NOT flag broad except here. Route also guards `if qdrant is not None` (get_qdrant_client can return None when Qdrant disabled).
+- Function-local `from qdrant_client import models as qdrant_models` is the dominant convention (7 call sites). Lazy import for optional dep. Never flag.
+- MEDIUM — inline-select busy-state inconsistency: handleApprovePaper tracks `approving` to disable mid-request; new handleSexApplicabilityChange inline <select> had NO busy state during in-flight PATCH. Mirror the `approving`-style guard on inline mutating controls.
+- MEDIUM — duplicated SEX_APPLICABILITY_OPTIONS copy-pasted into ExpertPaperUploadPage.tsx AND ExpertPortalPage.tsx. Existing QUALITY_TIER/STUDY_DESIGN options are page-local (no shared module), so page-local is the convention — but first option set shared across two pages → dedup to a shared module.
+- LOW — Qdrant orchestration inline in the route; acceptable (sibling complete_paper does the same; single call site).
+- Test quality strong: response is plain dict[str,Any] (no Pydantic model_validate over MagicMock → no vacuous pass), tests use real RagDocument via _make_doc, failure paths (404/422/403/qdrant-down) covered, frontend error test uses correct post-expertFetch reject shape (honors #219 contract).
+- [Optional UserProfile field](review_profile_optional_field.md) — upsert overwrite-all both paths + MagicMock/Pydantic factory trap + type-guard hydration (#224 PASS)
+
+## Reviewed: issue #225 / sex-aware retrieval (2026-06-10) → PASS (1 non-blocking MEDIUM)
+See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant filter-merge (dense+sparse), cache boundary, normalization defense-in-depth, worker-singleton orchestrator test harness.

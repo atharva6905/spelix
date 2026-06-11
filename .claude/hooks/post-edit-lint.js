@@ -11,8 +11,10 @@ process.stdin.on('end', () => {
     if (f.endsWith('.py')) {
       try { execSync(`ruff check --fix ${JSON.stringify(f)}`, { stdio: 'pipe', timeout: 30000 }); }
       catch (e) { process.stdout.write(e.stdout?.toString() || ''); }
-      try { execSync(`pyright ${JSON.stringify(f)}`, { stdio: 'pipe', timeout: 60000 }); }
-      catch (e) { process.stdout.write(e.stdout?.toString() || ''); }
+      if (!require('./_lib.js').inLinkedWorktree()) { // worktrees: pyright needs the main .venv — ruff-only there
+        try { execSync(`pyright ${JSON.stringify(f)}`, { stdio: 'pipe', timeout: 60000 }); }
+        catch (e) { process.stdout.write(e.stdout?.toString() || ''); }
+      }
     }
   } catch (e) { /* ignore */ }
   process.exit(0);

@@ -497,12 +497,33 @@ async def review_paper(
     body: RagDocumentReviewAction,
     user: CurrentUser = Depends(get_expert_reviewer_user),
     rag_repo: RagDocumentRepository = Depends(_get_rag_repo),
+    # Same cached session that _get_rag_repo wraps — needed for the explicit
+    # rollback that discards the poisoned transaction on a DOI collision.
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
-    doc = await rag_repo.update_review_status(
-        doc_id,
-        review_status=body.decision,
-        reviewer_id=user["id"],
-    )
+    try:
+        doc = await rag_repo.update_review_status(
+            doc_id,
+            review_status=body.decision,
+            reviewer_id=user["id"],
+        )
+    except IntegrityError:
+        # Issue #229 (FR-EXPV-03): re-reviewing a 'reviewed_rejected' row whose
+        # DOI went live on another row brings it back into the scope of the
+        # uq_rag_documents_doi_live partial unique index. Mirror the
+        # complete_paper_upload handling MINUS the cleanup — this row is a
+        # reviewed paper, never delete it. Rollback + 409 only.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "DUPLICATE_DOI",
+                    "message": "A paper with this DOI already exists.",
+                    "detail": None,
+                }
+            },
+        ) from None
     if doc is None:
         raise HTTPException(
             status_code=404,
@@ -534,8 +555,12 @@ async def update_paper_metadata(
 
     Updates the rag_documents row, commits, then best-effort restamps the
     paper's existing papers_rag Qdrant points via set_payload — no re-embed
-    (issue #223). A restamp failure is logged and never fails the request;
-    ingestion re-stamps the payload on the next re-embed.
+    (issue #223). A restamp failure is logged and never fails the request.
+    NOTE: nothing automatically re-stamps already-ingested papers later (no
+    reconciliation job; re-ingestion runs only on approval/re-upload), so a
+    failed restamp leaves the Qdrant payload — which the retrieval hard
+    filter evaluates — stale until the edit is retried or the #222 backfill
+    script is re-run. The warning below is the operator's signal.
     """
     updated = await rag_repo.update_sex_applicability(
         doc_id, sex_applicability=body.sex_applicability
@@ -572,11 +597,18 @@ async def update_paper_metadata(
                     ]
                 ),
             )
+        else:
+            logger.warning(
+                "Qdrant unavailable — sex_applicability restamp skipped for %s;"
+                " DB and papers_rag payload now diverge until retried",
+                doc_id,
+            )
     except Exception:
         logger.warning(
             "Failed to restamp sex_applicability on papers_rag points for %s;"
-            " next re-embed will re-stamp",
+            " DB and papers_rag payload now diverge until retried",
             doc_id,
+            exc_info=True,
         )
 
     return {
