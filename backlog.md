@@ -45,6 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Harness: superpowers nesting — /ship-loop run 4 (#245–#248) (2026-06-10)
+
+/design session (2026-06-10): nest superpowers skills into the harness (plan: `docs/internal/plans/2026-06-10-superpowers-nesting-plan.md`, local-only). Root cause of recurring Enter/ExitWorktree errors: double isolation (agent `isolation: worktree` frontmatter nesting a second worktree off the session task worktree) + no Step-0 detection when a session starts inside a leftover worktree. Decision: session owns isolation, single layer.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #245 | Worktree discipline — `superpowers:using-git-worktrees` nested as /implement Step 0 (EnterWorktree native, `git worktree add` forbidden, foreign-worktree → ExitWorktree keep first); ship-loop "Isolation check FIRST" hard guard + step 6/7.4 re-entry annotations; `isolation: worktree` frontmatter removed from spelix-tdd/cv-engineer/ai-engineer with single-layer prose rule in all three. Grep gates + subagent pressure test PASS. T0 self-merge: governance-reviewer PASS, CI green. PR #249. | done | S | T0→T0 | `33de36d` | `.claude/skills/implement/SKILL.md`, `.claude/skills/ship-loop/SKILL.md`, `.claude/agents/spelix-{tdd,cv-engineer,ai-engineer}.md` |
+
 ## Completed — Harness: worktree-safe hooks + worktree exit + approval gate (#237/#238/#239) (2026-06-10)
 
 /design session (2026-06-10): hooks failed in linked worktrees (relative paths, venv-less checks, handoff writes to wrong checkout); sessions ended parked in worktrees (ship-loop step 8 `git checkout main` dead code from a worktree cwd); terminal `needs-human` replaced by an in-session approval gate. Plan: `docs/internal/plans/2026-06-10-harness-worktree-approval-plan.md` (local-only). All three merged same-day; #237/#239 on recorded in-session human approval (the procedure #239 itself codifies as ADR-HARNESS-02). Loose end: `docs-issue-239-approval-gate` worktree DIRECTORY left on disk (registration pruned, branch deleted; Windows handle held by the implementing session — plain `Remove-Item` after that session ends). Pending: fresh-session `$CLAUDE_PROJECT_DIR` hook-interpolation verification (#237/PR #242 checklist).
