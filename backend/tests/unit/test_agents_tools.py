@@ -511,6 +511,7 @@ async def test_generate_correction_plan_invokes_streaming_with_state():
         confidence_score=0.85,
         body_stats={"height_cm": 180},
         keyframe_analysis_text="keyframe notes",
+        lifter_sex="male",
     )
     state["rep_metrics"] = [{"rep_number": 1, "depth_angle": 92}]
     papers_ctx = SimpleNamespace(collection="papers_rag")
@@ -553,6 +554,48 @@ async def test_generate_correction_plan_invokes_streaming_with_state():
     assert call_kwargs["exercise_type"] == "squat"
     assert call_kwargs["analysis_id"] == state["analysis_id"]
     assert call_kwargs["pubsub_redis"] is pubsub_redis
+    # #225: lifter_sex threaded from state into the coaching service call.
+    assert call_kwargs["lifter_sex"] == "male"
+
+
+@pytest.mark.asyncio
+async def test_generate_correction_plan_threads_lifter_sex_none():
+    """generate_correction_plan passes lifter_sex=None when state has no sex
+    (FR-AICP-05 ext., issue #225) — behavior identical to today."""
+    state = make_initial_state(
+        analysis_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        exercise_type="squat",
+        exercise_variant="high_bar",
+        confidence_score=0.85,
+        lifter_sex=None,
+    )
+    state["rep_metrics"] = [{"rep_number": 1, "depth_angle": 92}]
+
+    expected = CoachingOutput(
+        summary="ok summary here.",
+        strengths=["good"],
+        correction_plan=["cue one"],
+        disclaimer=(
+            "This feedback is for educational purposes only and is not a "
+            "substitute for in-person coaching or medical advice."
+        ),
+        raw_prompt_tokens=1,
+        raw_completion_tokens=1,
+    )
+    coaching_svc = SimpleNamespace(
+        generate_coaching_streaming=AsyncMock(return_value=expected)
+    )
+
+    await generate_correction_plan(
+        state,
+        coaching_svc=coaching_svc,
+        thresholds=SimpleNamespace(),
+        pubsub_redis=SimpleNamespace(),
+    )
+
+    call_kwargs = coaching_svc.generate_coaching_streaming.await_args.kwargs
+    assert call_kwargs["lifter_sex"] is None
 
 
 @pytest.mark.asyncio
