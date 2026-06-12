@@ -45,9 +45,9 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
-## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, in progress)
+## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, stopped after #260 at user request)
 
-Queue: #260, #264, #216, #236, #235.
+Queue was #260, #264, #216, #236, #235 — run ended after #260; #264/#216/#236/#235 remain open.
 
 | ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
 |----|-------|--------|------|--------------------|--------|-------|
