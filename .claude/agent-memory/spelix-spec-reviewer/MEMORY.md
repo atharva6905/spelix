@@ -13,3 +13,5 @@
 - [or-idiom safety for QualityTier](feedback_or_idiom_safety.md) — `x or default` is safe for quality_tier; empty string not a valid DB value (#267)
 - [ChunkPayload construction](project_chunkpayload_construction.md) — constructed in exactly one place: ingestion.py _build_payloads (#267)
 - [Retrieval read-side fallback](project_retrieval_fallback.md) — retrieval.py:246 defaults to L3_observational; ingestion write-side defaults to L4_guideline (intentional asymmetry) (#267)
+- [Issue #260 review](review_issue_260.md) --- DUPLICATE_DOI 409 surfacing in ExpertPortalPage approve handler (FR-EXPV-06): PASS, 2026-06-12
+- [Reject handler verification](feedback_reject_handler_verification.md) --- always grep all reviewPaper call sites before accepting implementer's claim that a reject handler doesn't exist

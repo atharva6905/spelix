@@ -46,3 +46,7 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #231 / upload ownership guard (FR-EXPV-02, T2) (2026-06-11) → PASS (1 MEDIUM non-blocking)
 - [Upload ownership guard review](review_upload_ownership_guard.md) — inline-guard is the expert.py per-resource authz convention; guard ordering before destructive ops honored; predicate now triplicated (extract helper for future cancel/delete) = MEDIUM; sentinel-default factory refactor is non-weakening
+
+## Reviewed: issue #260 / DUPLICATE_DOI 409 surfacing in ExpertPortalPage (T1->T2) (2026-06-12) -> PASS (1 MEDIUM, deferred to #235)
+- [expertFetch error shape](expert_fetch_error_shape.md) - how expert.ts rejections unpack; what an apiErr cast can safely read
+- [Expert API error handling pattern](expert_api_error_pattern.md) - canonical 409/422 surfacing pattern; cast vs typed-error tradeoff (issue #235)

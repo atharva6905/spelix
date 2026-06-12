@@ -45,6 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, in progress)
+
+Queue: #260, #264, #216, #236, #235.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #260 | FR-EXPV-06 surface DUPLICATE_DOI on review 409 — `handleApprovePaper` catch now allowlists `status===409 && error?.code==="DUPLICATE_DOI"` → `setError(error.message ?? fallback)`, generic copy otherwise; issue's `handleRejectPaper` verified nonexistent (single `reviewPaper` call site). Tier escalated T1→T2 at PR time (user-facing fallback string). Spec/quality (1 MEDIUM: cast+string duplication deferred to #235)/security PASS; /code-review: 1 confirmed (same duplication), 2 refuted with evidence (`??` empty-string impossible from backend; mock shape matches expertFetch end-to-end); 409-only handling verified correct (review endpoint has no 422 INVALID_DOI path). Deploy verified (droplet `20ceaa5`, containers healthy); light prod E2E PASS (landing clean, /expert→/login guard). PR #278. | done | XS | T1→T2 | `20ceaa5` | `frontend/src/pages/ExpertPortalPage.tsx`, `frontend/src/pages/__tests__/ExpertPortalPage.test.tsx` |
+
 ## Completed — Sex-aware coaching — /ship-loop run 6: #221–#225 (2026-06-10/11)
 
 Kin-expert request: papers taggable by sex, coaching considers lifter sex. /design 2026-06-09 (spec/plan local-only); stacked-PR chain, every PR through the tier-scaled review chain; #225 (T3) additionally passed the `review-panel` workflow (12 confirmed findings — 3 fixed inline pre-merge: SRS Must scoping `4ead9ac`, restamp docstring/log `e9042b7`, LangSmith PII comment `2d7a73a`). All five merged human-authorized 2026-06-11, deploy verified per step, prod E2E PASS (profile sex round-trip; upload select → Female persisted; My Papers inline edit Female→Both persisted; retrieval filters match 17 squat points for female/male/unset). Migration `9fffb59ba45f` applied. Prod backfill ran with a discovery: papers_rag's 39 points are an orphaned old seed corpus (no matching rows) and all 12 expert rows have chunk_count=0 → stamped the 39 points in-place by title→tags + created `paper_id` keyword index; ingestion itself is broken on prod (Docling OCR PermissionError) → **#263**. Follow-ups filed: **#258** (restamp_failed flag + retry queue), **#259** (consent surface for profile sex), **#263** (prod ingestion). #226 (Coach Brain sex) remains needs-design.
