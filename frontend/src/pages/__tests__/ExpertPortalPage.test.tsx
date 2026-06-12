@@ -69,6 +69,7 @@ import { supabase } from "@/lib/supabase";
 import {
   getExpertQueue,
   listExpertPapers,
+  reviewPaper,
   updatePaperMetadata,
   type RagDocumentResponse,
 } from "@/api/expert";
@@ -345,6 +346,32 @@ describe("ExpertPortalPage", () => {
 
     await waitFor(() => expect(select).not.toBeDisabled());
     expect(select.value).toBe("female");
+  });
+
+  // --- Paper review 409 DUPLICATE_DOI (issue #260, FR-EXPV-06) ---
+
+  it("surfaces the DUPLICATE_DOI message when paper approval returns 409", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
+    vi.mocked(reviewPaper).mockRejectedValue({
+      status: 409,
+      error: {
+        code: "DUPLICATE_DOI",
+        message: "A paper with this DOI already exists.",
+      },
+    });
+
+    await openMyPapersTab();
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Ingest" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("A paper with this DOI already exists."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/failed to approve paper/i),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an error and keeps the old value when the metadata PATCH fails", async () => {
