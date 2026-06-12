@@ -43,3 +43,6 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #263 / Docling OCR writable artifacts_path (2026-06-11) → PASS (1 LOW non-blocking)
 - [Docling OCR artifacts review](review_docling_ocr_artifacts.md) — read-only-venv lazy-download crash class; pre-bake + env-pointer fix; worker shares image ENV; model bake = disk not RAM; to_thread offload preserved
+
+## Reviewed: issue #231 / upload ownership guard (FR-EXPV-02, T2) (2026-06-11) → PASS (1 MEDIUM non-blocking)
+- [Upload ownership guard review](review_upload_ownership_guard.md) — inline-guard is the expert.py per-resource authz convention; guard ordering before destructive ops honored; predicate now triplicated (extract helper for future cancel/delete) = MEDIUM; sentinel-default factory refactor is non-weakening
