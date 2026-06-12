@@ -449,7 +449,14 @@ export default function ExpertPortalPage() {
       );
     } catch (err) {
       console.error("Failed to approve paper", err);
-      setError("Failed to approve paper. Please try again.");
+      // Issue #260 (FR-EXPV-06): surface the backend's DUPLICATE_DOI 409
+      // message instead of the generic copy — mirrors ExpertPaperUploadPage.
+      const apiErr = err as { status?: number; error?: { code?: string; message?: string } };
+      if (apiErr.status === 409 && apiErr.error?.code === "DUPLICATE_DOI") {
+        setError(apiErr.error?.message ?? "A paper with this DOI already exists.");
+      } else {
+        setError("Failed to approve paper. Please try again.");
+      }
     } finally {
       setApproving(null);
     }
