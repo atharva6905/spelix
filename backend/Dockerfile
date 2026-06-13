@@ -80,11 +80,26 @@ RUN mkdir -p /app/models && \
 # EVERY ingest_paper task fail (all rag_documents ended with chunk_count=0).
 # See issue #263. DOCLING_ARTIFACTS_PATH points app/services/pdf_extraction.py
 # at this writable, pre-populated dir so no runtime download is ever attempted.
+#
+# Supply-chain integrity (issue #269): verify the HuggingFace-downloaded weights
+# against a committed sha256 manifest, mirroring the BlazePose `sha256sum -c`
+# step above. `sha256sum -c` exits non-zero on ANY mismatch, so a compromised
+# upstream or build-time MITM aborts the build instead of baking unverified
+# weights into the prod image. The manifest lists the 27 materialized model
+# artifacts (RapidOCR onnx/paddle/torch + layout/tableformer safetensors +
+# configs + OCR vocab + font); the HF local download cache (.cache/huggingface)
+# is intentionally excluded because it embeds non-deterministic timestamps/ETags
+# that would flake the build. The manifest is coupled to the docling version
+# pinned in uv.lock — a docling bump that changes model revisions will (by
+# design) break this step until the manifest is regenerated from a trusted run.
+COPY docling_models.sha256 ./docling_models.sha256
 ENV DOCLING_ARTIFACTS_PATH=/app/models/docling
 RUN mkdir -p /app/models/docling && \
     uv run --no-dev docling-tools models download \
         layout tableformer rapidocr \
-        -o /app/models/docling
+        -o /app/models/docling && \
+    cd /app/models/docling && \
+    sha256sum -c /app/docling_models.sha256
 
 # Create temp dir for video processing
 RUN mkdir -p /tmp/spelix

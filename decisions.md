@@ -136,6 +136,7 @@
 | ADR-INFRA-02 | Container healthchecks use `/app/.venv/bin/python` for dependency access (Ses... | Infra & Ops | Accepted |
 | ADR-STREAQ-TIMEOUT-01 | `process_analysis` per-task timeout 900 → 1800 s | Infra & Ops | Accepted |
 | ADR-BETA-OPS-01 | Orphaned analysis cleanup cron (Session 64) | Infra & Ops | Accepted |
+| ADR-DOCLING-WEIGHT-CHECKSUM | sha256 manifest verification of build-time Docling model weights | Infra & Ops | Accepted |
 | ADR-P2-021 | CSS-only Citation Tooltips — No shadcn/Radix Dependency (Session 18) | Frontend | Accepted |
 | ADR-033 | Realtime Hooks Must Fetch Initial State on Mount (Session 20) | Frontend | Accepted |
 | ADR-049 | Landing V1 Built by Adapting a Framer Template, V1/V2 Split (Session 29) | Frontend | Accepted |
@@ -1578,6 +1579,14 @@ The model's `default=gen_uuid` is kept for any other call site that doesn't over
 **Decision.** Add `cleanup_stuck_analyses` nightly cron at 03:30 UTC (between artifact cleanup at 03:00 and orphan-papers cleanup at 04:00). Queries analyses where `status IN ('queued', 'quality_gate_pending', 'processing') AND updated_at < NOW() - 2 hours`. Per-row UPDATE to `status='failed'` with descriptive `error_message`. Per-row commit with try/except — one DB failure doesn't block the rest.
 
 **Consequences.** 2-hour window matches the worst-case pipeline duration (long clip + CoVe retries). Legitimately long analyses won't be touched because `updated_at` advances through status transitions. The cron catches both current orphans and any future ones from worker crashes, deploys, or OOM kills.
+
+## ADR-DOCLING-WEIGHT-CHECKSUM: sha256 manifest verification of build-time Docling model weights
+
+**Context.** `backend/Dockerfile` pre-bakes Docling OCR/layout/tableformer model *weights* at build time via `docling-tools models download layout tableformer rapidocr` (issue #263). The docling *packages* are sha256-pinned in `uv.lock`, but the downloaded *weights* (pulled from HuggingFace at build time) had no integrity verification. This was asymmetric with the BlazePose download right above it in the same Dockerfile, which verifies via `echo "<sha256>  <file>" | sha256sum -c -`. A compromised upstream or a build-time MITM could land unverified weights in the prod image undetected. spelix-security-reviewer flagged this as a standing HIGH on PR #268 (origin issue #263); tracked as issue #269.
+
+**Decision.** Commit a `sha256sum` manifest (`backend/docling_models.sha256`) of the 27 materialized Docling artifacts — RapidOCR onnx/paddle/torch variants, layout + tableformer safetensors, configs, OCR vocab, and the bundled font — captured from the trusted production baseline (`/app/models/docling` in the live, deployed `spelix-worker-1` container). The Dockerfile `COPY`s the manifest into the image and appends `cd /app/models/docling && sha256sum -c /app/docling_models.sha256` to the download `RUN`; `sha256sum -c` exits non-zero on any mismatch, aborting the build. Because BlazePose uses a single inline `echo | sha256sum -c -` but Docling produces 27 files, a committed manifest is used instead of 27 echo lines. The HuggingFace local download cache (`*/.cache/huggingface/**`) is deliberately **excluded** from the manifest because those files embed download timestamps/ETags and are non-deterministic build-to-build — hashing them would flake the build. The manifest contains only the 27 conforming hash lines (no comments — `sha256sum -c` rejects non-conforming lines); the rationale lives in the Dockerfile comment. A static regression guard (`backend/tests/unit/test_docling_checksum_manifest.py`) asserts the manifest stays well-formed (27 lines, valid `sha256sum` format, no `.cache/` paths, critical weight files present) and that the Dockerfile keeps the COPY + ordered verify wiring; the real build is exercised by CI's Deploy step.
+
+**Consequences.** Build-time supply-chain integrity now matches BlazePose: a tampered or corrupted weight download fails the build loudly instead of shipping. The manifest is coupled to the docling version pinned in `uv.lock` — a docling bump that changes model revisions will (by design) break the build until the manifest is regenerated from a trusted run. That coupling is the intended forcing function, documented in the Dockerfile comment. Regenerate via `cd /app/models/docling && find . -type f -not -path '*/.cache/*' | sort | xargs sha256sum > docling_models.sha256` against a trusted, freshly-built image. The check adds negligible build time and zero runtime cost.
 
 # Frontend
 
