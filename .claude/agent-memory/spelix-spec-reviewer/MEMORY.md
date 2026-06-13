@@ -16,3 +16,4 @@
 - [Issue #260 review](review_issue_260.md) --- DUPLICATE_DOI 409 surfacing in ExpertPortalPage approve handler (FR-EXPV-06): PASS, 2026-06-12
 - [Reject handler verification](feedback_reject_handler_verification.md) --- always grep all reviewPaper call sites before accepting implementer's claim that a reject handler doesn't exist
 - [Issue #264 review](review_issue_264.md) --- seed review_status column + idempotency re-run (no-FR): PASS-WITH-NITS, 2026-06-12
+- [Issue #236 review](review_issue_236.md) --- expert upload hygiene (FieldError, fillForm hoist, resetForm, 409 hint): PASS-WITH-NITS, 2026-06-12

@@ -50,3 +50,6 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 ## Reviewed: issue #260 / DUPLICATE_DOI 409 surfacing in ExpertPortalPage (T1->T2) (2026-06-12) -> PASS (1 MEDIUM, deferred to #235)
 - [expertFetch error shape](expert_fetch_error_shape.md) - how expert.ts rejections unpack; what an apiErr cast can safely read
 - [Expert API error handling pattern](expert_api_error_pattern.md) - canonical 409/422 surfacing pattern; cast vs typed-error tradeoff (issue #235)
+
+## Reviewed: issue #236 / expert upload hygiene (FieldError, clearErrors, 409 hint, T2) (2026-06-13) -> PASS-WITH-NITS (all fixed in-loop)
+- [Upload hygiene review (#236)](review_upload_hygiene_236.md) - async-closure phase tracking via local `let`; vacuous-reset-test trap (Upload-Another only renders on success screen → error-clearing is non-observable defense-in-depth, assert the observable form reset instead; uncontrolled file-input caveat); shared FieldError is now canonical
