@@ -54,14 +54,6 @@ vi.mock("@/api/expert", () => ({
   listExpertPapers: vi.fn().mockResolvedValue([]),
   reviewPaper: vi.fn(),
   updatePaperMetadata: vi.fn(),
-  // Mirror the real guard's name + status duck-type (issue #235) so the page's
-  // approve catch can distinguish a real ExpertApiError throw from a legacy
-  // object literal.
-  isExpertApiError: (e: unknown): boolean =>
-    typeof e === "object" &&
-    e !== null &&
-    (e as { name?: unknown }).name === "ExpertApiError" &&
-    typeof (e as { status?: unknown }).status === "number",
   // Real const re-declared here: vi.mock replaces the whole module, and the
   // page imports these options alongside the mocked API functions.
   SEX_APPLICABILITY_OPTIONS: [
@@ -81,6 +73,15 @@ import {
   updatePaperMetadata,
   type RagDocumentResponse,
 } from "@/api/expert";
+import { buildApiError } from "@/api/errors";
+
+// Issue #283: the page reads the shared `isApiError` from `@/api/errors`, so
+// error fixtures throw the real typed `ApiError` (`name === "ApiError"`,
+// code/message at the TOP level) — the transitional legacy throw shape is gone.
+/** Build the real typed ApiError a structured backend failure produces. */
+function apiErr(status: number, code: string, message: string) {
+  return buildApiError(status, { detail: { error: { code, message } } });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -358,44 +359,18 @@ describe("ExpertPortalPage", () => {
 
   // --- Paper review 409 DUPLICATE_DOI (issue #260, FR-EXPV-06) ---
 
-  it("surfaces the DUPLICATE_DOI message when paper approval returns 409 (legacy throw shape)", async () => {
-    // Back-compat: a hand-rolled `{ status, error: {...} }` rejection still
-    // works via the catch's `legacy` fallback path.
+  it("surfaces the DUPLICATE_DOI message when approval throws a typed ApiError", async () => {
+    // Issue #283: reviewPaper -> expertFetch throws the shared typed ApiError
+    // exposing code/message at the TOP level (no `.error` nesting). This pins
+    // the page's catch to the actual transport shape (regression guard for the
+    // shared-throw-shape migration — the #282 regression left this consumer
+    // behind). The transitional legacy dual-path is gone, so the legacy
+    // `{ status, error }` literal case it used to guard is collapsed into this
+    // single typed-error case.
     vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
-    vi.mocked(reviewPaper).mockRejectedValue({
-      status: 409,
-      error: {
-        code: "DUPLICATE_DOI",
-        message: "A paper with this DOI already exists.",
-      },
-    });
-
-    await openMyPapersTab();
-
-    fireEvent.click(screen.getByRole("button", { name: "Approve & Ingest" }));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText("A paper with this DOI already exists."),
-      ).toBeInTheDocument(),
+    vi.mocked(reviewPaper).mockRejectedValue(
+      apiErr(409, "DUPLICATE_DOI", "A paper with this DOI already exists."),
     );
-    expect(
-      screen.queryByText(/failed to approve paper/i),
-    ).not.toBeInTheDocument();
-  });
-
-  it("surfaces the DUPLICATE_DOI message when approval throws a typed ExpertApiError", async () => {
-    // Issue #235: reviewPaper -> expertFetch now throws a real ExpertApiError
-    // that exposes code/message at the TOP level (no `.error` nesting). This
-    // pins the page's catch to the actual transport shape — it would fail
-    // against the pre-#235 `apiErr.error?.code` read (regression guard for the
-    // shared-throw-shape migration that left this consumer behind).
-    const apiErr = Object.assign(
-      new Error("A paper with this DOI already exists."),
-      { name: "ExpertApiError", status: 409, code: "DUPLICATE_DOI" },
-    );
-    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
-    vi.mocked(reviewPaper).mockRejectedValue(apiErr);
 
     await openMyPapersTab();
 
@@ -413,10 +388,9 @@ describe("ExpertPortalPage", () => {
 
   it("shows an error and keeps the old value when the metadata PATCH fails", async () => {
     vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
-    vi.mocked(updatePaperMetadata).mockRejectedValue({
-      status: 500,
-      error: { code: "INTERNAL", message: "boom" },
-    });
+    vi.mocked(updatePaperMetadata).mockRejectedValue(
+      apiErr(500, "INTERNAL", "boom"),
+    );
 
     await openMyPapersTab();
 

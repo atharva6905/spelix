@@ -19,9 +19,9 @@ import {
   requestPaperUploadUrl,
   uploadPaperFile,
   completePaperUpload,
-  isExpertApiError,
   SEX_APPLICABILITY_OPTIONS,
 } from "@/api/expert";
+import { isApiError } from "@/api/errors";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -266,33 +266,31 @@ export default function ExpertPaperUploadPage() {
 
       setUploadPhase("success");
     } catch (err) {
-      // Pin to the real transport shape via the guard (issue #235). Tolerate
-      // legacy hand-rolled `{ status, error: {...} }` rejections too, so the
-      // DOI special-case keeps working regardless of throw shape.
-      const isApiErr = isExpertApiError(err);
-      const legacy = err as { status?: number; error?: { code?: string; message?: string } };
-      const status = isApiErr ? err.status : legacy.status;
-      const code = isApiErr ? err.code : legacy.error?.code;
+      // Pin to the real transport shape via the shared guard (issue #283: all
+      // `@/api/expert` throws are now the typed ApiError, so the transitional
+      // legacy dual-path is gone).
+      const isApiErr = isApiError(err);
+      const status = isApiErr ? err.status : undefined;
+      const code = isApiErr ? err.code : undefined;
       if (
         (status === 409 && code === "DUPLICATE_DOI") ||
         (status === 422 && code === "INVALID_DOI")
       ) {
         const doiMessage = isApiErr
           ? err.message
-          : (legacy.error?.message ?? "A paper with this DOI already exists.");
+          : "A paper with this DOI already exists.";
         setDoiError(doiMessage);
         setUploadPhase("idle");
         return;
       }
       // Surface the structured backend message when available — fixes the bare
       // "Upload failed" for INVALID_FILENAME/INVALID_PDF/QUEUE_UNAVAILABLE/
-      // INVALID_STATE (issue #235 problem #2). isExpertApiError implies a real
-      // Error with a populated `message`.
+      // INVALID_STATE (issue #235 problem #2). isApiError implies a real Error
+      // with a populated `message`.
       let message =
-        legacy.error?.message ??
-        (isApiErr || err instanceof Error
+        isApiErr || err instanceof Error
           ? (err as Error).message
-          : "Upload failed");
+          : "Upload failed";
       // Complete-step 409 = race close-out: the backend deleted the uploaded
       // object + row before raising (issue #218), so the fully-uploaded file is
       // gone and a resubmit re-uploads from scratch. Tell the user (SaMD-safe).
