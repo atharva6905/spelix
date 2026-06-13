@@ -13,6 +13,14 @@ Usage (from backend/ directory):
     uv run python scripts/seed_research_papers.py
     uv run python scripts/seed_research_papers.py --dry-run
 
+Re-run behaviour (issue #264):
+    The script is idempotent. Before inserting each paper it checks whether a
+    live row with the same normalized DOI already exists
+    (uq_rag_documents_doi_live scope). Existing papers are skipped with a log
+    message; only new papers are inserted and ingested into Qdrant. Papers
+    without a DOI (doi=None) are always inserted, as they cannot be
+    deduplicated by DOI.
+
 Environment:
     DATABASE_URL, QDRANT_URL, QDRANT_API_KEY, COHERE_API_KEY
 """
@@ -32,6 +40,9 @@ from pathlib import Path
 _BACKEND_DIR = Path(__file__).parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
+
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from app.utils.doi import DoiValidationError, normalize_doi  # noqa: E402
 
@@ -854,9 +865,15 @@ SEED_PAPERS: list[SeedPaper] = [
 
 _INSERT_SQL = (
     "INSERT INTO rag_documents (id, title, source_url, document_type, "
-    "exercise_tags, doi, chunk_count, ingested_at, metadata, created_at, updated_at) "
+    "exercise_tags, doi, chunk_count, ingested_at, metadata, review_status, created_at, updated_at) "
     "VALUES (:id, :title, :source_url, :document_type, :exercise_tags, :doi, "
-    ":chunk_count, :ingested_at, :metadata, :created_at, :updated_at)"
+    ":chunk_count, :ingested_at, :metadata, :review_status, :created_at, :updated_at)"
+)
+
+# Plain DOI-equality check. The partial unique index (doi IS NOT NULL) lives on
+# the DB side; no application-level predicate is needed here.
+_DOI_EXISTS_SQL = (
+    "SELECT doi FROM rag_documents WHERE doi = :doi LIMIT 1"
 )
 
 
@@ -875,6 +892,16 @@ def validate_seed_dois(papers: list[SeedPaper]) -> None:
             raise DoiValidationError(
                 f"Seed entry '{paper.title}' has malformed DOI {paper.doi!r}: {exc}"
             ) from exc
+
+
+async def doi_exists_live(session: AsyncSession, normalized_doi: str) -> bool:
+    """Return True if *normalized_doi* already has a live row in rag_documents.
+
+    The *session* is a SQLAlchemy AsyncSession. Used by main() to make seed
+    re-runs idempotent (issue #264).
+    """
+    result = await session.execute(text(_DOI_EXISTS_SQL), {"doi": normalized_doi})
+    return result.scalar_one_or_none() is not None
 
 
 def build_rag_document_row(paper: SeedPaper, paper_id: str, now: datetime) -> dict[str, object]:
@@ -904,6 +931,7 @@ def build_rag_document_row(paper: SeedPaper, paper_id: str, now: datetime) -> di
                 "review_status": "reviewed_approved",
             }
         ),
+        "review_status": "reviewed_approved",  # issue #264: set column, not only metadata JSONB
         "created_at": now,
         "updated_at": now,
     }
@@ -912,9 +940,7 @@ def build_rag_document_row(paper: SeedPaper, paper_id: str, now: datetime) -> di
 async def main(dry_run: bool = False) -> None:
     from datetime import timezone
 
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.services.ingestion import DocumentMetadata, IngestionService
     from app.services.cohere_client import get_cohere_client
@@ -984,11 +1010,20 @@ async def main(dry_run: bool = False) -> None:
     now = datetime.now(timezone.utc)
     total_chunks = 0
 
+    skipped = 0
     async with session_factory() as session:
         for paper in SEED_PAPERS:
+            # Skip papers whose normalized DOI already exists in the DB
+            # (idempotent re-run — issue #264). Papers without a DOI are always
+            # inserted because they cannot be deduplicated by DOI.
+            if paper.doi is not None and await doi_exists_live(session, normalize_doi(paper.doi)):
+                print(f"  [skip] already exists: {paper.title[:60]}")
+                skipped += 1
+                continue
+
             paper_id = str(uuid.uuid4())
 
-            # Insert rag_documents row (doi column populated — issue #230)
+            # Insert rag_documents row (doi + review_status columns populated — issues #230, #264)
             await session.execute(
                 text(_INSERT_SQL),
                 build_rag_document_row(paper, paper_id, now),
@@ -1006,7 +1041,7 @@ async def main(dry_run: bool = False) -> None:
                 sex_applicability="both",
             )
 
-            result = await ingestion_svc.ingest_document(
+            ingest_result = await ingestion_svc.ingest_document(
                 paper_id=paper_id,
                 text=paper.text,
                 metadata=metadata,
@@ -1016,16 +1051,16 @@ async def main(dry_run: bool = False) -> None:
             # Update chunk_count
             await session.execute(
                 text("UPDATE rag_documents SET chunk_count = :count WHERE id = :id"),
-                {"count": result.chunk_count, "id": uuid.UUID(paper_id)},
+                {"count": ingest_result.chunk_count, "id": uuid.UUID(paper_id)},
             )
 
-            total_chunks += result.chunk_count
-            print(f"  [{paper.quality_tier}] {paper.title[:60]}... -> {result.chunk_count} chunks")
+            total_chunks += ingest_result.chunk_count
+            print(f"  [{paper.quality_tier}] {paper.title[:60]}... -> {ingest_result.chunk_count} chunks")
 
         await session.commit()
 
     print("\n[seed-papers] Summary:")
-    print(f"  Papers: {len(SEED_PAPERS)}")
+    print(f"  Papers: {len(SEED_PAPERS)} total, {skipped} skipped (already exist), {len(SEED_PAPERS) - skipped} inserted")
     print(f"  Chunks: {total_chunks}")
     for ex, count in sorted(exercise_counts.items()):
         print(f"  {ex}: {count} papers")
