@@ -50,3 +50,28 @@ export async function withLock(fn) {
 export function readState() { try { return JSON.parse(readFileSync(C.stateFile(), 'utf8')); } catch { return {}; } }
 export function writeState(s) { writeFileSync(C.stateFile(), JSON.stringify(s, null, 2)); }
 export function isFresh(ts) { return !!ts && (Date.now() - Date.parse(ts) < C.HEARTBEAT_STALE_MS); }
+
+export function tierRank(names) {
+  let best = null;
+  for (const n of names) if (n in C.TIER_RANK) best = best === null ? C.TIER_RANK[n] : Math.min(best, C.TIER_RANK[n]);
+  return best;
+}
+export function sizeRank(names) { for (const n of names) if (n in C.SIZE_RANK) return C.SIZE_RANK[n]; return 99; }
+export function claimOwner(names) {
+  const l = names.find((n) => n.startsWith(C.CLAIM_LABEL_PREFIX));
+  return l ? l.slice(C.CLAIM_LABEL_PREFIX.length) : null;
+}
+export async function readyQueue() {
+  const issues = await listOpenIssues();
+  const eligible = issues.filter((i) => {
+    const names = i.labels.map((l) => l.name);
+    if (tierRank(names) === null) return false;
+    if (names.some((n) => C.EXCLUDE_LABELS.includes(n))) return false;
+    return true;
+  });
+  eligible.sort((a, b) => {
+    const an = a.labels.map((l) => l.name), bn = b.labels.map((l) => l.name);
+    return (tierRank(an) - tierRank(bn)) || (sizeRank(an) - sizeRank(bn)) || (a.number - b.number);
+  });
+  return eligible;
+}

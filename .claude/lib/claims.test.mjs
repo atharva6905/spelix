@@ -93,3 +93,16 @@ test('state: read/write round-trips and isFresh respects the threshold', async (
   assert.ok(isFresh(new Date().toISOString()));
   assert.equal(isFresh(new Date(Date.now() - 40 * 60 * 1000).toISOString()), false);
 });
+
+test('readyQueue: filters by tier, excludes exclusion labels, orders tier→size→number', async () => {
+  harness({
+    '10': { number: 10, title: 'no tier', labels: ['size/S'] },
+    '11': { number: 11, title: 'excluded', labels: ['T0', 'needs-human'] },
+    '12': { number: 12, title: 'T1 big', labels: ['T1', 'size/L'] },
+    '13': { number: 13, title: 'T0 small', labels: ['T0', 'size/S'] },
+    '14': { number: 14, title: 'T1 small', labels: ['tier/T1', 'size/S'] },
+  });
+  const { readyQueue } = await import('./claims.mjs?ready=1');
+  const q = (await readyQueue()).map((i) => i.number);
+  assert.deepEqual(q, [13, 14, 12]);
+});
