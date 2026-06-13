@@ -33,6 +33,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!.claude/lib/
 lib64/
 parts/
 sdist/
@@ -314,3 +315,7 @@ backend/scripts/oneoff/verify_depth_frame_corruption.py
 .graphifyignore
 .mcp.json
 .vercel
+
+# ship-loop cross-session claim state (local-only, single-machine)
+.claude/.claims.json
+.claude/.claim.lock/
