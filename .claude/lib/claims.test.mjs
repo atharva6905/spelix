@@ -190,3 +190,17 @@ test('board: reports issue, sid, age, liveness', async () => {
   assert.equal(rows[0].title, 'Title 13');
   assert.equal(rows[0].live, true);
 });
+
+test('CLI: `board` subcommand prints JSON rows', () => {
+  const h = harness({ '13': { number: 13, title: 'T', labels: ['T0', 'claim:sl-a'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-a', ts: new Date().toISOString(), worktree: null } }));
+  const { execFileSync } = require('node:child_process');
+  const out = execFileSync(process.execPath, ['.claude/lib/claims.mjs', 'board'], {
+    encoding: 'utf8',
+    env: { ...process.env, CLAIMS_STATE_DIR: h.dir, CLAIMS_SHIM_DB: h.db,
+           CLAIMS_GH_MODULE: pathToFileURL(join(process.cwd(), '.claude/lib/claims.ghshim.mjs')).href },
+  });
+  const rows = JSON.parse(out);
+  assert.equal(rows[0].issue, 13);
+  assert.equal(rows[0].sid, 'sl-a');
+});

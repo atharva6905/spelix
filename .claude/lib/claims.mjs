@@ -164,3 +164,22 @@ export async function board() {
     worktreePresent: !!(e.worktree && existsSync(e.worktree)),
   }));
 }
+
+function parseArgs(argv) { const o = {}; for (let i = 0; i < argv.length; i += 2) o[argv[i].replace(/^--/, '')] = argv[i + 1]; return o; }
+
+const SUBCOMMANDS = {
+  claim: (a) => claim({ sid: a.sid }),
+  release: (a) => release({ sid: a.sid, issue: Number(a.issue), outcome: a.outcome }),
+  heartbeat: (a) => heartbeat({ sid: a.sid, issue: Number(a.issue) }),
+  'reclaim-stale': () => reclaimStale(),
+  'gc-labels': () => gcLabels(),
+  board: () => board(),
+  ready: async () => (await readyQueue()).map((i) => ({ number: i.number, title: i.title })),
+};
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [cmd, ...rest] = process.argv.slice(2);
+  const fn = SUBCOMMANDS[cmd];
+  if (!fn) { console.error(`claims: unknown subcommand '${cmd}'. Known: ${Object.keys(SUBCOMMANDS).join(', ')}`); process.exit(2); }
+  fn(parseArgs(rest)).then((r) => { console.log(JSON.stringify(r)); }).catch((e) => { console.error(e.message); process.exit(1); });
+}
