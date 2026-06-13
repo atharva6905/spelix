@@ -45,13 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
-## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, stopped after #260 at user request)
+## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, resumed 2026-06-13)
 
-Queue was #260, #264, #216, #236, #235 — run ended after #260; #264/#216/#236/#235 remain open.
+Queue: #260, #264, #216, #236, #235. Run paused after #260 at user request on 2026-06-12, resumed 2026-06-13 with `/ship-loop 264 216 236 235`.
 
 | ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
 |----|-------|--------|------|--------------------|--------|-------|
 | #260 | FR-EXPV-06 surface DUPLICATE_DOI on review 409 — `handleApprovePaper` catch now allowlists `status===409 && error?.code==="DUPLICATE_DOI"` → `setError(error.message ?? fallback)`, generic copy otherwise; issue's `handleRejectPaper` verified nonexistent (single `reviewPaper` call site). Tier escalated T1→T2 at PR time (user-facing fallback string). Spec/quality (1 MEDIUM: cast+string duplication deferred to #235)/security PASS; /code-review: 1 confirmed (same duplication), 2 refuted with evidence (`??` empty-string impossible from backend; mock shape matches expertFetch end-to-end); 409-only handling verified correct (review endpoint has no 422 INVALID_DOI path). Deploy verified (droplet `20ceaa5`, containers healthy); light prod E2E PASS (landing clean, /expert→/login guard). PR #278. | done | XS | T1→T2 | `20ceaa5` | `frontend/src/pages/ExpertPortalPage.tsx`, `frontend/src/pages/__tests__/ExpertPortalPage.test.tsx` |
+| #264 | Seed script `review_status` column + idempotent re-run (origin: /code-review PLAUSIBLE on PR #262). Fix 1: `_INSERT_SQL` + `build_rag_document_row` now write `review_status='reviewed_approved'` to the column (was metadata/Qdrant-only → seeded papers would land `'pending'` in the expert queue + audit divergence). Fix 2: `main()` skips papers whose normalized DOI already exists live via the async `doi_exists_live` helper (idempotent re-run; `doi=None` always inserted), skipped titles logged, script header documents behavior. Spec PASS-WITH-NITS (MEDIUM: helper was dead code / inline-duplicated → fixed `dd1ab0b`, helper made async + wired into `main()`, idempotency tests → `AsyncMock`); quality PASS (2 non-blocking LOW: docstring overstates idempotency for mid-run-crash; `main()` skip-loop not directly unit-tested — both accepted for an ops script). 23 seed tests pass; ruff clean; no new pyright errors. Ops script (no runtime/user-facing path) → no E2E. PR #279. | done | XS | T1→T1 | `1449992` | `backend/scripts/seed_research_papers.py`, `backend/tests/unit/test_seed_research_papers.py` |
 
 ## Completed — Sex-aware coaching — /ship-loop run 6: #221–#225 (2026-06-10/11)
 
