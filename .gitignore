@@ -33,6 +33,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!.claude/lib/
 lib64/
 parts/
 sdist/
