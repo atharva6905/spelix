@@ -56,6 +56,18 @@ def test_manifest_has_exactly_27_entries() -> None:
     assert len(_manifest_lines()) == _EXPECTED_ENTRY_COUNT
 
 
+def test_manifest_has_no_carriage_returns() -> None:
+    # The Linux Docker build runs `sha256sum -c` against this file. A CRLF line
+    # ending leaves a trailing "\r" on each path, so sha256sum looks for
+    # "./path\r" — which does not exist — and the build fails. The line-based
+    # checks above CANNOT catch this: splitting on "\n" leaves the "\r" attached,
+    # and the `\./.+$` regex happily matches it (".+" consumes the "\r"). Guard
+    # at the byte level so a CRLF re-commit (Windows core.autocrlf=true without
+    # the backend/.gitattributes `eol=lf` pin) trips this test, not CI's build.
+    raw = MANIFEST_PATH.read_bytes()
+    assert b"\r" not in raw, "manifest must use LF line endings (no carriage returns)"
+
+
 def test_no_manifest_path_is_in_huggingface_cache() -> None:
     # The HF local download cache (*/.cache/huggingface/**) embeds download
     # timestamps/ETags and is non-deterministic build-to-build; it is
