@@ -10,13 +10,6 @@ vi.mock("@/api/expert", () => ({
   requestPaperUploadUrl: (...a: unknown[]) => mockRequestUrl(...a),
   completePaperUpload: (...a: unknown[]) => mockCompleteUpload(...a),
   uploadPaperFile: (...a: unknown[]) => mockUploadFile(...a),
-  // Mirror the real guard's name + status duck-type so the page's catch can
-  // distinguish a real ExpertApiError throw from a legacy object literal.
-  isExpertApiError: (e: unknown): boolean =>
-    typeof e === "object" &&
-    e !== null &&
-    (e as { name?: unknown }).name === "ExpertApiError" &&
-    typeof (e as { status?: unknown }).status === "number",
   // Real const re-declared here: vi.mock replaces the whole module, and the
   // page imports these options alongside the mocked API functions.
   SEX_APPLICABILITY_OPTIONS: [
@@ -25,6 +18,17 @@ vi.mock("@/api/expert", () => ({
     { value: "both", label: "Both" },
   ],
 }));
+
+// Issue #283: the page now reads the shared `isApiError` from `@/api/errors`,
+// so error fixtures throw the real typed `ApiError` (`name === "ApiError"`,
+// code/message at the TOP level) — the transitional legacy `{ status, error }`
+// object literals are gone.
+import { buildApiError } from "@/api/errors";
+
+/** Build the real typed ApiError a structured backend failure produces. */
+function apiErr(status: number, code: string, message: string) {
+  return buildApiError(status, { detail: { error: { code, message } } });
+}
 
 vi.mock("@/lib/supabase", () => ({
   supabase: {
@@ -242,13 +246,9 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
   });
 
   it("renders inline DOI error on 409 DUPLICATE_DOI and returns form to editable state", async () => {
-    mockRequestUrl.mockRejectedValue({
-      status: 409,
-      error: {
-        code: "DUPLICATE_DOI",
-        message: "A paper with this DOI already exists: Existing Paper",
-      },
-    });
+    mockRequestUrl.mockRejectedValue(
+      apiErr(409, "DUPLICATE_DOI", "A paper with this DOI already exists: Existing Paper"),
+    );
 
     renderPage();
     await waitForForm();
@@ -277,13 +277,9 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
   });
 
   it("renders inline DOI error on 422 INVALID_DOI", async () => {
-    mockRequestUrl.mockRejectedValue({
-      status: 422,
-      error: {
-        code: "INVALID_DOI",
-        message: "DOI must match the 10.xxxx/suffix format.",
-      },
-    });
+    mockRequestUrl.mockRejectedValue(
+      apiErr(422, "INVALID_DOI", "DOI must match the 10.xxxx/suffix format."),
+    );
 
     renderPage();
     await waitForForm();
@@ -298,13 +294,9 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
   });
 
   it("clears a stale DOI error when a resubmit succeeds", async () => {
-    mockRequestUrl.mockRejectedValueOnce({
-      status: 409,
-      error: {
-        code: "DUPLICATE_DOI",
-        message: "A paper with this DOI already exists: Existing Paper",
-      },
-    });
+    mockRequestUrl.mockRejectedValueOnce(
+      apiErr(409, "DUPLICATE_DOI", "A paper with this DOI already exists: Existing Paper"),
+    );
     mockRequestUrl.mockResolvedValueOnce({
       id: "p-1",
       upload_url: "https://s/upload",
@@ -342,13 +334,9 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
   });
 
   it("clears the DOI error when the DOI value changes", async () => {
-    mockRequestUrl.mockRejectedValue({
-      status: 409,
-      error: {
-        code: "DUPLICATE_DOI",
-        message: "A paper with this DOI already exists: Existing Paper",
-      },
-    });
+    mockRequestUrl.mockRejectedValue(
+      apiErr(409, "DUPLICATE_DOI", "A paper with this DOI already exists: Existing Paper"),
+    );
 
     renderPage();
     await waitForForm();
@@ -507,10 +495,9 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
 
   it("appends the discard hint when the complete step returns 409", async () => {
     mockUploadReachesComplete();
-    mockCompleteUpload.mockRejectedValue({
-      status: 409,
-      error: { code: "PAPER_CONFLICT", message: "Conflict during finalize." },
-    });
+    mockCompleteUpload.mockRejectedValue(
+      apiErr(409, "PAPER_CONFLICT", "Conflict during finalize."),
+    );
 
     renderPage();
     await waitForForm();
@@ -528,10 +515,9 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
 
   it("surfaces a structured non-409 API error message from an upload phase", async () => {
     mockUploadReachesComplete();
-    mockCompleteUpload.mockRejectedValue({
-      status: 500,
-      error: { code: "SERVER_ERROR", message: "Server error, try again." },
-    });
+    mockCompleteUpload.mockRejectedValue(
+      apiErr(500, "SERVER_ERROR", "Server error, try again."),
+    );
 
     renderPage();
     await waitForForm();
@@ -547,10 +533,9 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
   });
 
   it("does NOT append the discard hint for a non-completing 409 (request phase)", async () => {
-    mockRequestUrl.mockRejectedValue({
-      status: 409,
-      error: { code: "PAPER_CONFLICT", message: "Conflict while requesting." },
-    });
+    mockRequestUrl.mockRejectedValue(
+      apiErr(409, "PAPER_CONFLICT", "Conflict while requesting."),
+    );
 
     renderPage();
     await waitForForm();
@@ -576,10 +561,9 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
       storage_path: "papers/p-1/x.pdf",
       expires_at: "2026-04-15T12:00:00Z",
     });
-    mockUploadFile.mockRejectedValue({
-      status: 409,
-      error: { code: "CONFLICT", message: "Conflict during upload." },
-    });
+    mockUploadFile.mockRejectedValue(
+      apiErr(409, "CONFLICT", "Conflict during upload."),
+    );
 
     renderPage();
     await waitForForm();
@@ -663,10 +647,9 @@ describe("ExpertPaperUploadPage — recoverable error phase (issue #235)", () =>
     // A non-DOI structured failure freezes the form in the error phase. The
     // "Try again" control must return it to idle WITHOUT wiping the entered
     // metadata or selected file (distinct from "Upload Another"'s full reset).
-    mockRequestUrl.mockRejectedValue({
-      status: 422,
-      error: { code: "INVALID_FILENAME", message: "Filename has invalid characters." },
-    });
+    mockRequestUrl.mockRejectedValue(
+      apiErr(422, "INVALID_FILENAME", "Filename has invalid characters."),
+    );
 
     renderPage();
     await waitForForm();
@@ -704,14 +687,12 @@ describe("ExpertPaperUploadPage — recoverable error phase (issue #235)", () =>
     expect(screen.getByRole("button", { name: /upload paper/i })).toBeEnabled();
   });
 
-  it("surfaces the message for a non-DOI structured error thrown as ExpertApiError", async () => {
-    // Replicates a real transport throw: an Error subclass carrying status+code.
-    const apiErr = Object.assign(new Error("Queue unavailable, retry shortly."), {
-      name: "ExpertApiError",
-      status: 503,
-      code: "QUEUE_UNAVAILABLE",
-    });
-    mockRequestUrl.mockRejectedValue(apiErr);
+  it("surfaces the message for a non-DOI structured error thrown as ApiError", async () => {
+    // Replicates a real transport throw: the shared typed ApiError carrying
+    // status+code (issue #283).
+    mockRequestUrl.mockRejectedValue(
+      apiErr(503, "QUEUE_UNAVAILABLE", "Queue unavailable, retry shortly."),
+    );
 
     renderPage();
     await waitForForm();

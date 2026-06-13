@@ -17,11 +17,11 @@ import {
   listExpertPapers,
   reviewPaper,
   updatePaperMetadata,
-  isExpertApiError,
   SEX_APPLICABILITY_OPTIONS,
   type ExpertQueueItem,
   type RagDocumentResponse,
 } from "@/api/expert";
+import { isApiError } from "@/api/errors";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -464,18 +464,16 @@ export default function ExpertPortalPage() {
       console.error("Failed to approve paper", err);
       // Issue #260 (FR-EXPV-06): surface the backend's DUPLICATE_DOI 409
       // message instead of the generic copy — mirrors ExpertPaperUploadPage.
-      // Issue #235: reviewPaper -> expertFetch now throws a typed ExpertApiError
-      // exposing code/message at the TOP level (not nested under `.error`); the
-      // guard reads the new shape, and the `legacy` cast keeps this working if a
-      // hand-rolled `{ status, error: {...} }` rejection is ever thrown.
-      const isApiErr = isExpertApiError(err);
-      const legacy = err as { status?: number; error?: { code?: string; message?: string } };
-      const status = isApiErr ? err.status : legacy.status;
-      const code = isApiErr ? err.code : legacy.error?.code;
+      // Issue #283: reviewPaper -> expertFetch throws the shared typed ApiError
+      // exposing code/message at the TOP level, so the guarded path is the only
+      // path (the transitional legacy dual-path from #282 is gone).
+      const isApiErr = isApiError(err);
+      const status = isApiErr ? err.status : undefined;
+      const code = isApiErr ? err.code : undefined;
       if (status === 409 && code === "DUPLICATE_DOI") {
         const message = isApiErr
           ? err.message
-          : (legacy.error?.message ?? "A paper with this DOI already exists.");
+          : "A paper with this DOI already exists.";
         setError(message);
       } else {
         setError("Failed to approve paper. Please try again.");

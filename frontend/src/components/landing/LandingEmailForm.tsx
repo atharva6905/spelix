@@ -3,6 +3,7 @@ import {
   type BetaRequestSource,
   requestBetaAccess,
 } from "@/api/beta";
+import { isApiError } from "@/api/errors";
 
 type Status = "idle" | "submitting" | "success" | "error-409" | "error";
 
@@ -36,9 +37,7 @@ export default function LandingEmailForm({
       setEmail("");
       setStatus("success");
     } catch (err: unknown) {
-      const apiErr = err as { status?: number };
-
-      if (apiErr.status === 409) {
+      if (isApiError(err) && err.status === 409) {
         setEmail("");
         setStatus("error-409");
       } else {

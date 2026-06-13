@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from "react";
 import { requestBetaAccess, type BetaRequestSource } from "@/api/beta";
+import { isApiError } from "@/api/errors";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -52,9 +53,8 @@ export default function EmailCaptureForm({
       setStatus("success");
       onSuccess?.(email);
     } catch (err) {
-      const errStatus = (err as { status?: number }).status ?? null;
-      const message =
-        (err as { error?: { message?: string } }).error?.message ?? "";
+      const errStatus = isApiError(err) ? err.status : null;
+      const message = isApiError(err) ? err.message : "";
       if (errStatus === 409) {
         setErrorMsg(
           message ||

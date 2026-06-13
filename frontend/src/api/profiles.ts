@@ -5,6 +5,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 export type Sex = "male" | "female" | "prefer_not_to_say";
 
@@ -49,8 +50,7 @@ export async function getProfile(): Promise<ProfileResponse> {
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const err = { status: resp.status, ...(body.detail ?? body) };
-    throw err;
+    throw buildApiError(resp.status, body);
   }
 
   return resp.json() as Promise<ProfileResponse>;
@@ -69,8 +69,7 @@ export async function updateProfile(data: ProfileUpdateRequest): Promise<Profile
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const err = { status: resp.status, ...(body.detail ?? body) };
-    throw err;
+    throw buildApiError(resp.status, body);
   }
 
   return resp.json() as Promise<ProfileResponse>;

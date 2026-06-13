@@ -5,6 +5,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 export interface AdminUser {
   user_id: string;
@@ -56,8 +57,7 @@ async function adminFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const err = { status: resp.status, ...(body.detail ?? body) };
-    throw err;
+    throw buildApiError(resp.status, body);
   }
 
   if (resp.status === 204) {
