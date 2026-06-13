@@ -54,6 +54,25 @@ logger = logging.getLogger(__name__)
 COLLECTION_PAPERS_RAG = "papers_rag"
 COLLECTION_COACH_BRAIN = "coach_brain"
 
+
+def paper_points_filter(paper_id: str) -> Any:
+    """Build the Qdrant Filter selecting all papers_rag points for one paper.
+
+    Hand-built in 3+ places (expert metadata PATCH, the restamp retry task,
+    the #222 backfill) — extracted here so the ``paper_id`` payload key stays
+    a single source of truth (issue #258, #251 /code-review LOW).
+    """
+    from qdrant_client import models as qdrant_models
+
+    return qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="paper_id",
+                match=qdrant_models.MatchValue(value=str(paper_id)),
+            )
+        ]
+    )
+
 # Vector dimensions — cross-cutting invariant from ADR-RAG-03
 _VECTOR_SIZE = 1024
 

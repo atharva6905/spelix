@@ -46,7 +46,7 @@ from app.schemas.threshold_flag import (
 )
 from app.services.expert import ExpertService
 from app.services.paper_storage import PaperStorageService
-from app.services.qdrant import get_qdrant_client
+from app.services.qdrant import get_qdrant_client, paper_points_filter
 from app.services.supabase_client import get_service_role_client
 from app.services.threshold_flag import (
     InvalidThresholdKey,
@@ -581,12 +581,12 @@ async def update_paper_metadata(
 
     Updates the rag_documents row, commits, then best-effort restamps the
     paper's existing papers_rag Qdrant points via set_payload — no re-embed
-    (issue #223). A restamp failure is logged and never fails the request.
-    NOTE: nothing automatically re-stamps already-ingested papers later (no
-    reconciliation job; re-ingestion runs only on approval/re-upload), so a
-    failed restamp leaves the Qdrant payload — which the retrieval hard
-    filter evaluates — stale until the edit is retried or the #222 backfill
-    script is re-run. The warning below is the operator's signal.
+    (issue #223). On restamp failure (Qdrant unavailable or set_payload raised)
+    the request STILL returns 200 (the DB write committed) but the response
+    carries ``restamp_failed=True`` AND a ``restamp_paper_payload`` retry task
+    is enqueued to reconcile the Qdrant payload — the value the retrieval hard
+    filter evaluates — back to the DB value with backoff (issue #258). The
+    retry re-reads the DB so it stays convergent under concurrent edits.
     """
     updated = await rag_repo.update_sex_applicability(
         doc_id, sex_applicability=body.sex_applicability
@@ -606,41 +606,61 @@ async def update_paper_metadata(
     # roll back the metadata edit.
     await db.commit()
 
+    restamp_failed = False
     try:
         qdrant = await get_qdrant_client()
         if qdrant is not None:
-            from qdrant_client import models as qdrant_models
-
             await qdrant.set_payload(
                 "papers_rag",
                 {"sex_applicability": body.sex_applicability},
-                qdrant_models.Filter(
-                    must=[
-                        qdrant_models.FieldCondition(
-                            key="paper_id",
-                            match=qdrant_models.MatchValue(value=str(doc_id)),
-                        )
-                    ]
-                ),
+                paper_points_filter(str(doc_id)),
             )
         else:
+            restamp_failed = True
             logger.warning(
                 "Qdrant unavailable — sex_applicability restamp skipped for %s;"
-                " DB and papers_rag payload now diverge until retried",
+                " enqueuing restamp retry (DB and payload diverge until retried)",
                 doc_id,
             )
     except Exception:
+        restamp_failed = True
         logger.warning(
             "Failed to restamp sex_applicability on papers_rag points for %s;"
-            " DB and papers_rag payload now diverge until retried",
+            " enqueuing restamp retry (DB and payload diverge until retried)",
             doc_id,
             exc_info=True,
         )
 
+    if restamp_failed:
+        # Enqueue the reconciliation retry task. Swallow enqueue failures as a
+        # warning — an enqueue miss must never 500 a PATCH whose DB write
+        # already committed (mirror _maybe_enqueue_distillation). The periodic
+        # nature of expert edits + #222 backfill remain the backstop.
+        try:
+            await _enqueue_restamp_retry(str(doc_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "restamp retry enqueue failed for %s (%s: %s)",
+                doc_id,
+                type(exc).__name__,
+                exc,
+            )
+
     return {
         "id": str(updated.id),
         "sex_applicability": updated.sex_applicability,
+        "restamp_failed": restamp_failed,
     }
+
+
+async def _enqueue_restamp_retry(paper_id: str) -> None:
+    """Enqueue the streaq restamp retry task (issue #258).
+
+    Lazy-imports the task wrapper to avoid an api.v1 → worker → api.v1 cycle.
+    """
+    from app.workers.streaq_worker import restamp_paper_payload as _task
+
+    await _task.enqueue(paper_id)
 
 
 # ---------------------------------------------------------------------------

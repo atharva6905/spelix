@@ -155,10 +155,11 @@ def _make_doc(doc_id, sex_applicability="both"):
 
 
 class TestPatchPaperMetadata:
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
     @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
     @patch("app.api.v1.expert.RagDocumentRepository")
     def test_patch_updates_row_and_restamps_qdrant(
-        self, MockRepo, mock_get_qdrant, client
+        self, MockRepo, mock_get_qdrant, mock_enqueue, client
     ):
         doc_id = uuid4()
         repo_instance = MockRepo.return_value
@@ -177,6 +178,9 @@ class TestPatchPaperMetadata:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["sex_applicability"] == "female"
+        # Success path: restamp applied, no retry enqueued.
+        assert resp.json()["restamp_failed"] is False
+        mock_enqueue.assert_not_awaited()
         repo_instance.update_sex_applicability.assert_awaited_once_with(
             doc_id, sex_applicability="female"
         )
@@ -189,10 +193,80 @@ class TestPatchPaperMetadata:
         assert points_filter.must[0].key == "paper_id"
         assert points_filter.must[0].match.value == str(doc_id)
 
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_qdrant_none_flags_failed_and_enqueues(
+        self, MockRepo, mock_get_qdrant, mock_enqueue, client
+    ):
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="female")
+        )
+        mock_get_qdrant.return_value = None
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["restamp_failed"] is True
+        mock_enqueue.assert_awaited_once_with(str(doc_id))
+
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_set_payload_raises_flags_failed_and_enqueues(
+        self, MockRepo, mock_get_qdrant, mock_enqueue, client
+    ):
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="female")
+        )
+        qdrant = MagicMock()
+        qdrant.set_payload = AsyncMock(side_effect=RuntimeError("qdrant down"))
+        mock_get_qdrant.return_value = qdrant
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["restamp_failed"] is True
+        mock_enqueue.assert_awaited_once_with(str(doc_id))
+
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
+    @patch("app.api.v1.expert.RagDocumentRepository")
+    def test_patch_enqueue_failure_does_not_fail_request(
+        self, MockRepo, mock_get_qdrant, mock_enqueue, client
+    ):
+        """An enqueue failure can never 500 the PATCH (swallow-as-warning)."""
+        doc_id = uuid4()
+        repo_instance = MockRepo.return_value
+        repo_instance.update_sex_applicability = AsyncMock(
+            return_value=_make_doc(doc_id, sex_applicability="female")
+        )
+        mock_get_qdrant.return_value = None
+        mock_enqueue.side_effect = RuntimeError("redis down")
+
+        resp = client.patch(
+            f"/api/v1/expert/papers/{doc_id}/metadata",
+            json={"sex_applicability": "female"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["restamp_failed"] is True
+
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
     @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
     @patch("app.api.v1.expert.RagDocumentRepository")
     def test_patch_commits_row_before_restamp(
-        self, MockRepo, mock_get_qdrant, expert_app, client
+        self, MockRepo, mock_get_qdrant, mock_enqueue, expert_app, client
     ):
         _, mock_db = expert_app
         doc_id = uuid4()
@@ -210,12 +284,13 @@ class TestPatchPaperMetadata:
         assert resp.status_code == 200, resp.text
         mock_db.commit.assert_awaited()
 
+    @patch("app.api.v1.expert._enqueue_restamp_retry", new_callable=AsyncMock)
     @patch("app.api.v1.expert.get_qdrant_client", new_callable=AsyncMock)
     @patch("app.api.v1.expert.RagDocumentRepository")
     def test_patch_qdrant_failure_does_not_fail_request(
-        self, MockRepo, mock_get_qdrant, client
+        self, MockRepo, mock_get_qdrant, mock_enqueue, client
     ):
-        """Restamp is best-effort: ingestion re-stamps on next re-embed."""
+        """Restamp is best-effort: a retry task reconciles later."""
         doc_id = uuid4()
         repo_instance = MockRepo.return_value
         repo_instance.update_sex_applicability = AsyncMock(
