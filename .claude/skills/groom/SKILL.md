@@ -53,9 +53,20 @@ commit) → file one issue per flaky test with the failure pattern.
   digest for manual pruning (note locked worktrees need `git worktree unlock` first).
   NEVER auto-remove a worktree. Compare against origin/main everywhere, never local main.
 
+### 6. Claims (ceiling: reclaim stale claim labels + GC orphan label defs; NEVER claim)
+Report the claim board into the digest: `node .claude/lib/claims.mjs board` (issue → sid →
+ageMin → live → worktreePresent). Then:
+- `node .claude/lib/claims.mjs reclaim-stale` — strips `claim:*` labels whose heartbeat is
+  stale (>30 min) AND whose worktree is gone, returning them to the ready pool. Report reclaimed.
+- `node .claude/lib/claims.mjs gc-labels` — deletes `claim:<sid>` label *definitions* applied to
+  no open issue. Report removed.
+groom NEVER auto-claims and its triage/label sweeps only ADD labels, so they never clobber a
+`claim:` label. This sweep is T0 and runs even in report-only mode (it is self-healing hygiene).
+
 ## Digest (always, last)
 Append to `.claude/groom-digest.md`: timestamp, per-sweep actions taken/skipped, merges
-(if any) with SHAs, stale worktrees flagged, open questions for the human. The digest
+(if any) with SHAs, stale worktrees flagged, claims (board snapshot + reclaimed + gc'd
+labels), open questions for the human. The digest
 write itself is T0 — commit it directly, never PR it; it is exempt from report-only.
 Post the same digest as the final message. Then ScheduleWakeup for the next cycle if
 running under /loop.
