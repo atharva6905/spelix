@@ -45,6 +45,14 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Harness: parallel ship-loop claim engine — /ship-loop run 9 (2026-06-13)
+
+Designed via `/design` → spec + plan (local-only `docs/internal/`) → issues #285 (engine) + #286 (skill wiring, depends on #285). Run 9 shipped #285 only; #286 is the dependent follow-up. Lets multiple `ship-loop --auto` sessions work a disjoint issue set: GitHub `claim:<sid>` labels = visible ownership, local lock dir + `.claude/.claims.json` heartbeat = atomicity + liveness (single-machine).
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #285 | Cross-session claim engine (`.claude/lib/claims.*`): constants, atomic `mkdir` lock w/ 60s force-break, gh adapter (mockable via `CLAIMS_GH_MODULE`), `.claims.json` heartbeat + 30-min liveness, ready-queue (tier→size→number, excludes needs-human/needs-design/parked/blocked/wontfix/duplicate), `claim`/`release`/`heartbeat`/`reclaimStale`/`gcLabels`/`board` + CLI dispatch; `.claude/rules/claims.md` protocol doc; `.gitignore` (`!.claude/lib/` negation un-hides engine from broad Python `lib/` pattern + claim-state ignores). 16 `node --test` cases (incl. 2-process lock-contention → exactly one winner, stale force-break, stale reclaim, each release transition, orphan-label GC) + smoke-test green. Governance-reviewer PASS (diff-only, independent T0 classification) → **T0 self-merge**. CI green (Deploy=skipping, `.claude`-only). PR #287. | done | M | T0→T0 | `c8ef829` | `.claude/lib/claims.{constants,ghshim,test}.mjs`, `.claude/lib/claims.mjs`, `.claude/rules/claims.md`, `.gitignore` |
+
 ## Completed — Post-L2 beta ops — /ship-loop run 8 (2026-06-12, resumed 2026-06-13)
 
 Queue: #260, #264, #216, #236, #235. Run paused after #260 at user request on 2026-06-12, resumed 2026-06-13 with `/ship-loop 264 216 236 235`.
