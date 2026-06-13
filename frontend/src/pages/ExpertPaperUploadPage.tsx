@@ -149,16 +149,23 @@ export default function ExpertPaperUploadPage() {
     setSelectedFile(file);
   }
 
-  // Single source of truth for returning the form to a clean idle state.
-  // Used by BOTH the submit-start path and the "Upload Another" button so
-  // neither can drift and forget an error setter (e.g. setDoiError).
-  function resetForm() {
-    setUploadPhase("idle");
-    setSelectedFile(null);
-    setUploadProgress(0);
+  // Single source of truth for clearing the three error states. Shared by BOTH
+  // the submit-start path and resetForm() so neither can drift and forget an
+  // error setter (e.g. setDoiError).
+  function clearErrors() {
     setUploadError(null);
     setFileError(null);
     setDoiError(null);
+  }
+
+  // Returns the form to a clean idle state. Used by the "Upload Another" button.
+  // Reuses clearErrors() for the error portion so error-clearing stays in sync
+  // with the submit-start path.
+  function resetForm() {
+    clearErrors();
+    setUploadPhase("idle");
+    setSelectedFile(null);
+    setUploadProgress(0);
     setForm(INITIAL_FORM);
   }
 
@@ -197,8 +204,7 @@ export default function ExpertPaperUploadPage() {
     }
 
     setUploadPhase("requesting");
-    setUploadError(null);
-    setDoiError(null);
+    clearErrors();
     setUploadProgress(0);
 
     // Track the in-flight phase locally — uploadPhase state is stale inside the

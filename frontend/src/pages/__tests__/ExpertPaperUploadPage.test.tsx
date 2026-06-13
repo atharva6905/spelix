@@ -519,6 +519,26 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
     );
   });
 
+  it("surfaces a structured non-409 API error message from an upload phase", async () => {
+    mockUploadReachesComplete();
+    mockCompleteUpload.mockRejectedValue({
+      status: 500,
+      error: { code: "SERVER_ERROR", message: "Server error, try again." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Server error, try again.");
+    // Not a completing-409, so the discard hint must NOT be appended.
+    expect(banner).not.toHaveTextContent("Your uploaded file was discarded");
+  });
+
   it("does NOT append the discard hint for a non-completing 409 (request phase)", async () => {
     mockRequestUrl.mockRejectedValue({
       status: 409,
