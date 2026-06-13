@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/api/beta", () => ({ requestBetaAccess: mocks.requestBetaAccess }));
 vi.mock("@/lib/posthog", () => ({ capture: mocks.capture }));
 
+import { buildApiError } from "@/api/errors";
+
 describe("Hero", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -73,7 +75,7 @@ describe("Hero", () => {
   });
 
   test("onError callback fires when submission fails", async () => {
-    mocks.requestBetaAccess.mockRejectedValue({ status: 500 });
+    mocks.requestBetaAccess.mockRejectedValue(buildApiError(500, {}));
 
     render(<Hero />);
 

@@ -8,6 +8,7 @@ vi.mock("@/api/beta", () => ({
 }));
 
 import { requestBetaAccess } from "@/api/beta";
+import { buildApiError } from "@/api/errors";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -64,13 +65,18 @@ describe("EmailCaptureForm", () => {
   });
 
   test("409 duplicate shows specific message", async () => {
-    vi.mocked(requestBetaAccess).mockRejectedValue({
-      status: 409,
-      error: {
-        code: "beta_request_duplicate",
-        message: "This email is already in our private-beta queue.",
-      },
-    });
+    // Real typed ApiError (issue #283): the page reads `err.message` via the
+    // `isApiError` guard, pinned to the actual transport shape.
+    vi.mocked(requestBetaAccess).mockRejectedValue(
+      buildApiError(409, {
+        detail: {
+          error: {
+            code: "beta_request_duplicate",
+            message: "This email is already in our private-beta queue.",
+          },
+        },
+      }),
+    );
     const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="hero" />);
     await user.type(screen.getByLabelText(/email/i), "dup@b.com");
@@ -84,7 +90,7 @@ describe("EmailCaptureForm", () => {
   });
 
   test("generic 500 shows fallback message", async () => {
-    vi.mocked(requestBetaAccess).mockRejectedValue({ status: 500 });
+    vi.mocked(requestBetaAccess).mockRejectedValue(buildApiError(500, {}));
     const user = userEvent.setup({ delay: null });
     render(<EmailCaptureForm source="final_cta" buttonLabel="Join the private beta" />);
     await user.type(screen.getByLabelText(/email/i), "a@b.com");

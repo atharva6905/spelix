@@ -8,6 +8,7 @@ vi.mock("@/api/beta", () => ({
 }));
 
 import { requestBetaAccess } from "@/api/beta";
+import { buildApiError } from "@/api/errors";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -48,7 +49,7 @@ describe("LandingEmailForm", () => {
   test(
     "409 duplicate shows message then auto-resets",
     async () => {
-      vi.mocked(requestBetaAccess).mockRejectedValue({ status: 409 });
+      vi.mocked(requestBetaAccess).mockRejectedValue(buildApiError(409, {}));
       const user = userEvent.setup({ delay: null });
       render(<LandingEmailForm source="final_cta" />);
 
@@ -75,7 +76,7 @@ describe("LandingEmailForm", () => {
   test(
     "generic error shows message then auto-resets",
     async () => {
-      vi.mocked(requestBetaAccess).mockRejectedValue({ status: 500 });
+      vi.mocked(requestBetaAccess).mockRejectedValue(buildApiError(500, {}));
       const user = userEvent.setup({ delay: null });
       render(<LandingEmailForm source="hero" />);
 
