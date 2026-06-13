@@ -8,6 +8,7 @@
 - [Issue #232 review](review_issue_232.md) --- DoiLink extraction (3 sites, testid fallback, children/aria justified): PASS, 2026-06-11
 - [Issue #234 review](review_issue_234.md) --- DOI optional for non-research-paper types (FR-EXPV-02, doc-type select): PASS, 2026-06-11
 - [Issue #263 review](review_issue_263.md) --- Docling OCR PermissionError fix (bake models + writable artifacts path, no-FR): PASS, 2026-06-11
+- [Issue #269 review](review_issue_269.md) --- Docling weight checksum manifest (supply-chain integrity, no-FR, T2): PASS, 2026-06-13
 - [decisions.md cross-link rule](feedback_decisions_crosslink.md) --- superseded ADRs must have a back-reference added (both ways); flag CRITICAL if missing
 - [Docling OCR fix pattern](docling_ocr_fix_pattern.md) — issue #263 fix: docling[rapidocr] extra pulls CPU onnxruntime; onnxruntime-gpu is NOT used
 - [or-idiom safety for QualityTier](feedback_or_idiom_safety.md) — `x or default` is safe for quality_tier; empty string not a valid DB value (#267)
@@ -17,8 +18,6 @@
 - [Reject handler verification](feedback_reject_handler_verification.md) --- always grep all reviewPaper call sites before accepting implementer's claim that a reject handler doesn't exist
 - [Issue #264 review](review_issue_264.md) --- seed review_status column + idempotency re-run (no-FR): PASS-WITH-NITS, 2026-06-12
 - [Issue #236 review](review_issue_236.md) --- expert upload hygiene (FieldError, fillForm hoist, resetForm, 409 hint): PASS-WITH-NITS, 2026-06-12
-- [Typed API error pattern (issue #235 → #283)](pattern-typed-api-error-235.md) — ApiError in @/api/errors; all modules+consumers migrated as of #283 (CLOSED)
+- [Typed API error pattern (issue #235)](pattern-typed-api-error-235.md) — ExpertApiError class + isExpertApiError guard; expert-only, beta/admin/profiles/analyses deferred w/ doc comment
 - [Vi.mock guard re-declaration is acceptable](pattern-vimock-guard-redeclare.md) — page tests may re-declare a mocked guard if it duck-types the real contract; the transport test is the real pin
-- [Issue #283 review](review_issue_283.md) --- shared ApiError migration (5 api modules, 3 consumers, legacy dual-path collapse, 2 helper branches): PASS, 2026-06-13
 - **Shared-throw-shape changes regress un-migrated consumers (issue #235, PR #282):** spec-review of the CHANGED files alone PASSED but MISSED a sibling consumer — changing `expertFetch`'s throw to top-level `code`/`message` broke `ExpertPortalPage.handleApprovePaper` (still read `apiErr.error?.code`), regressing DUPLICATE_DOI (FR-EXPV-06, #260). Only `/code-review`'s cross-file tracer caught it (fixed d1b7c93). LESSON: when a diff changes a SHARED transport/throw/return shape, grep + verify EVERY consumer of that function, not just files in the diff — same discipline as [[feedback_reject_handler_verification]].
-- **#283 consumer scan pattern:** for shared-module migrations, grep all page-level catch blocks for field reads beyond `.message`/`.status` — those are the break-risk reads. UploadPage reads only `err.message` (safe). AdminPage uses static fallbacks (safe). ProfilePage reads `err?.status` (safe — ApiError has status). The inline mock guard re-declaration pattern (vi.mock re-declares isExpertApiError) is now GONE — #283 tests import real `buildApiError` from `@/api/errors` directly (that module is not mocked), which is the stronger pattern.

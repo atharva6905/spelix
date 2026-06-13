@@ -70,6 +70,7 @@
 - 409 DUPLICATE_DOI still echoes existing.title+UUID (expert.py ~L286) — pre-existing #218 accepted risk, NOT regressed by this diff.
 
 ## Reviewed: issue #263 (Docling OCR artifacts_path + build-time pre-bake, T2, 2026-06-11) → PASS
+- **RESOLVED by #269 / PR #290 (2026-06-13, merge dbbb99c)**: the build-time docling weight download now has `sha256sum -c` against a committed 27-entry manifest (`backend/docling_models.sha256`, Dockerfile ~L95-102), mirroring BlazePose; CI Deploy build (the first real run of the verify) passed green. Standing HIGH CLOSED — do NOT re-report unless the verify clause is removed/reordered/made non-failing. See [[docling-weight-checksum]]. (Original flag text retained below for history.)
 - Standing HIGH (non-blocking, defense-in-depth): build-time docling model-weight download (Dockerfile ~L85, `docling-tools models download layout tableformer rapidocr`) has NO hash verification — asymmetric with the BlazePose `sha256sum -c` at ~L74. Packages are sha256-pinned in uv.lock; the downloaded WEIGHTS are not. Resolves when docling weights get the same checksum treatment. RE-REVIEW trigger: any future PR that changes the artifacts path, the chown surface, or routes user/request-controlled data into `_artifacts_path()`.
 - Clean dimensions: chown -R scoped to weights-data dir only (/app/models/docling — venv stays read-only/root-owned, non-root USER spelix preserved; no writable-executable-path risk, dir holds .onnx/weight data not import-path executables); `DOCLING_ARTIFACTS_PATH` is operator-env-only, never user/request-controlled (no traversal/injection surface); no secrets; no user-facing strings (SaMD-clean).
 
@@ -83,3 +84,6 @@
 
 ## Reviewed: issue #283 / shared ApiError + buildApiError across all api modules (T2) (2026-06-13) → PASS
 - [Shared ApiError #283](shared_apierror_283.md) - repo-wide ApiError/buildApiError verified PASS; curated-message-source invariant + general-surfacing re-flag triggers for every @/api module; ApiError.detail unrendered; SaMD-clean (no new copy, only re-routed curated messages)
+
+## Reviewed: issue #269 / PR #290 (Docling weight sha256 manifest, T2 deploy-infra, 2026-06-13) → PASS (final gate; RESOLVES the #263 standing HIGH)
+- [Docling weight checksum](docling_weight_checksum.md) — sha256 verify of build-time docling weights; verify clause not bypassable (last `&&` clause of download RUN, `cd` first, non-zero exit aborts build); TOFU trust-anchor caveat (hashes captured from current prod, an honest ratchet vs FUTURE substitution/MITM, not retroactive proof — documented in ADR); no secrets (hashes public); SaMD N/A; `.gitattributes` scoped to one file. CI Deploy build passed → manifest verified end-to-end against a real download. RE-REVIEW trigger: any docling-version-bump PR editing the manifest must regenerate from a TRUSTED freshly-built image, not a dev laptop.

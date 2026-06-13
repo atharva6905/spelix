@@ -64,3 +64,6 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #283 / shared ApiError + buildApiError across all api modules (T2) (2026-06-13) → PASS (1 LOW)
 - [Shared ApiError #283](shared-apierror-283.md) - three @/api error idioms census; expert.ts re-export shim is load-bearing (expert-upload.test.ts); legacy-dual-path collapse = correct; test-realism pattern (real buildApiError fixtures + don't re-declare guard in vi.mock — resolves the #235 trap); #282 consumer-census clean
+
+## Reviewed: issue #269 / Docling weight sha256 manifest (T2 deploy-infra) (2026-06-13) → PASS (1 MEDIUM + 1 LOW, BOTH fixed in-loop pre-merge, PR #290)
+- [Docling checksum review](review_docling_checksum_269.md) — COPY/WORKDIR/cd path-resolution verified; static-guard test is right tool but a `\n`-split + `.+$` regex MISSES a trailing `\r` that still breaks the Linux `sha256sum -c` (the MEDIUM); fix = `.gitattributes eol=lf` pin + byte-level `test_manifest_has_no_carriage_returns`; sha256sum -c extra-file gap = LOW (documented in ADR); mirrors BlazePose Dockerfile line 74

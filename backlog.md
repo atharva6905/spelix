@@ -45,6 +45,16 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 10 (2026-06-13)
+
+First multi-session parallel run on the new claim engine (#285/#286): three `ship-loop --auto` sessions live concurrently (`sl-3a30`, `sl-aa0c`, `sl-ff44`) working a disjoint set. This session = `sl-3a30`. #258 (`sl-aa0c`, PR #291) and the #283 ApiError refactor shipped in parallel.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #269 | Verify build-time Docling model weights via sha256 manifest (defense-in-depth supply-chain; resolves the spelix-security-reviewer standing HIGH from #263/#268). Mirrors the BlazePose `sha256sum -c` pattern but uses a committed 27-entry `sha256sum` manifest (`backend/docling_models.sha256`) + `cd /app/models/docling && sha256sum -c /app/docling_models.sha256` appended to the docling-download RUN — non-zero exit aborts the build. 27 hashes captured from the trusted prod baseline (`spelix-worker-1`); HF `.cache/` excluded (non-deterministic). `backend/.gitattributes` pins `eol=lf` (Windows-CRLF guard) + 7 static regression-guard tests (incl. byte-level no-`\r`). Full T2 review chain spec→quality→security all PASS (2 quality findings + 1 `/code-review` LOW all fixed pre-merge); human approval gate "tighten LOW then merge". **Deploy to Production green — first real `sha256sum -c` build passed → manifest verified end-to-end; droplet on `dbbb99c`, containers healthy.** ADR-DOCLING-WEIGHT-CHECKSUM. PR #290. | done | S | T2→T2 | `dbbb99c` | `backend/Dockerfile`, `backend/docling_models.sha256`, `backend/.gitattributes`, `backend/tests/unit/test_docling_checksum_manifest.py`, `decisions.md` |
+
+Also this run: **#272** ([R3b-C] bench bar-trajectory pipeline wiring) released `blocked` — its dependency **#271** ([R3b-B] `bar_tracking.py`) is still open and in-progress under `sl-ff44`; `bar_tracking` symbols don't exist on main yet. The claims engine surfaced it prematurely (the "Blocked by" dep is textual, not a GitHub `blocked_by` link). **Engine observations:** (1) `claim --issue N` ignores `--issue` and always picks next-by-ordering; (2) `heartbeat` only *refreshes an existing* `.claims.json` entry (returns false if the entry was wiped) — it can't recreate a claim; (3) mid-run the shared `.claims.json` was emptied + the `claim:sl-3a30` label gc'd while a fresh heartbeat existed (a parallel groom/gc race) — re-adding the label didn't restore liveness. None affected work integrity (the open PR + fast merge were the real protection). Candidate follow-ups for the claim engine.
+
 ## Completed — Harness: parallel ship-loop claim engine — /ship-loop run 9 (2026-06-13)
 
 Designed via `/design` → spec + plan (local-only `docs/internal/`) → issues #285 (engine) + #286 (skill wiring, depends on #285). Both shipped this session (#285 then #286). Lets multiple `ship-loop --auto` sessions work a disjoint issue set: GitHub `claim:<sid>` labels = visible ownership, local lock dir + `.claude/.claims.json` heartbeat = atomicity + liveness (single-machine).
