@@ -411,10 +411,13 @@ export const SEX_APPLICABILITY_OPTIONS = [
   label: string;
 }>;
 
+// `restamp_failed` is true when the DB write committed but the papers_rag
+// Qdrant payload restamp failed; the backend enqueues a retry task to
+// reconcile it (issue #258, FR-RAGK-05/FR-AICP-12 ext.).
 export async function updatePaperMetadata(
   docId: string,
   patch: PaperMetadataPatch,
-): Promise<{ id: string; sex_applicability: string }> {
+): Promise<{ id: string; sex_applicability: string; restamp_failed: boolean }> {
   return expertFetch(`/api/v1/expert/papers/${docId}/metadata`, {
     method: "PATCH",
     body: JSON.stringify(patch),

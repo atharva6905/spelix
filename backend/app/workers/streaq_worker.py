@@ -241,6 +241,23 @@ async def ingest_paper(
     return await _ingest(_adapt_ctx(context), paper_id)
 
 
+@worker.task(timeout=120, max_tries=4)
+async def restamp_paper_payload(
+    paper_id: str,
+    context: WorkerContext = WorkerDepends(),
+) -> dict[str, Any]:
+    """Restamp papers_rag sex_applicability after a failed inline restamp.
+
+    Enqueued by PATCH /expert/papers/{id}/metadata on restamp failure
+    (issue #258, FR-RAGK-05 ext.). Re-reads the DB value and set_payloads it.
+    streaq's native retry/backoff covers transient Qdrant outages.
+    """
+    # Lazy-imported to avoid api.v1 → worker → api.v1 cycle.
+    from app.workers.restamp_paper import restamp_paper_payload as _restamp
+
+    return await _restamp(_adapt_ctx(context), paper_id)
+
+
 @worker.task(timeout=300)
 async def distill_analysis(
     analysis_id: UUID,

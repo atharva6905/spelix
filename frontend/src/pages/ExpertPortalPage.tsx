@@ -236,9 +236,10 @@ interface PapersTableProps {
   approving: string | null;
   onSexApplicabilityChange: (paperId: string, value: string) => void;
   savingMeta: string | null;
+  restampPending: Set<string>;
 }
 
-function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving, onSexApplicabilityChange, savingMeta }: PapersTableProps) {
+function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApprove, approving, onSexApplicabilityChange, savingMeta, restampPending }: PapersTableProps) {
   if (loading) {
     return <p className="py-8 text-center text-sm text-gray-500">Loading papers...</p>;
   }
@@ -333,6 +334,14 @@ function PapersTable({ papers, loading, error, offset, onPrevious, onNext, onApp
                         <option key={value} value={value}>{label}</option>
                       ))}
                     </select>
+                    {restampPending.has(paper.id) ? (
+                      <p
+                        role="status"
+                        className="mt-1 text-xs text-amber-600"
+                      >
+                        Saved — search index update pending retry
+                      </p>
+                    ) : null}
                   </td>
                   <td className="py-3 pr-4">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusInfo.className}`}>
@@ -401,6 +410,9 @@ export default function ExpertPortalPage() {
   const [offset, setOffset] = useState(0);
   const [approving, setApproving] = useState<string | null>(null);
   const [savingMeta, setSavingMeta] = useState<string | null>(null);
+  // Paper IDs whose papers_rag restamp failed and is pending a backend retry
+  // (issue #258). Non-blocking — the DB edit already committed.
+  const [restampPending, setRestampPending] = useState<Set<string>>(new Set());
 
   // Role check — FR-EXPV-01
   useEffect(() => {
@@ -476,15 +488,28 @@ export default function ExpertPortalPage() {
   // Issue #223 (FR-RAGK-05 ext.): inline edit of a paper's applicable
   // population. State updates only after the PATCH succeeds — on failure the
   // select keeps the old value and an error banner is shown.
+  // Issue #258 (FR-RAGK-05/FR-AICP-12 ext.): when the PATCH returns
+  // restamp_failed, the DB committed so the select STILL updates, but a
+  // non-blocking per-paper warning signals the search-index update is pending
+  // a backend retry — distinct from the red hard-error banner.
   async function handleSexApplicabilityChange(paperId: string, value: string) {
     setSavingMeta(paperId);
     try {
-      await updatePaperMetadata(paperId, {
+      const result = await updatePaperMetadata(paperId, {
         sex_applicability: value as "male" | "female" | "both",
       });
       setPapers((prev) =>
         prev.map((p) => (p.id === paperId ? { ...p, sex_applicability: value } : p))
       );
+      setRestampPending((prev) => {
+        const next = new Set(prev);
+        if (result.restamp_failed) {
+          next.add(paperId);
+        } else {
+          next.delete(paperId);
+        }
+        return next;
+      });
     } catch (err) {
       console.error("Failed to update applicable population", err);
       setError("Failed to update applicable population. Please try again.");
@@ -579,6 +604,7 @@ export default function ExpertPortalPage() {
               approving={approving}
               onSexApplicabilityChange={handleSexApplicabilityChange}
               savingMeta={savingMeta}
+              restampPending={restampPending}
             />
           ) : (
             <QueueTable

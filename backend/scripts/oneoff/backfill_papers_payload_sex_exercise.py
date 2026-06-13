@@ -21,16 +21,20 @@ Environment: DATABASE_URL, QDRANT_URL, QDRANT_API_KEY
 import asyncio
 import os
 import sys
+from pathlib import Path
 
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.http.models import (
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PayloadSchemaType,
-)
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+# Ensure backend/ is on sys.path for app.* imports when run outside the
+# container (mirrors the sibling oneoff scripts).
+_BACKEND_DIR = Path(__file__).parent.parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
+from qdrant_client import AsyncQdrantClient  # noqa: E402
+from qdrant_client.http.models import PayloadSchemaType  # noqa: E402
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+
+from app.services.qdrant import paper_points_filter  # noqa: E402
 
 _COLLECTION = "papers_rag"
 
@@ -91,13 +95,7 @@ async def main() -> int:
             exercise_tags = list(row.exercise_tags) if row.exercise_tags else []
             sex_applicability = row.sex_applicability or "both"
 
-            points_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="paper_id", match=MatchValue(value=paper_id)
-                    )
-                ]
-            )
+            points_filter = paper_points_filter(paper_id)
 
             await client.set_payload(
                 collection_name=_COLLECTION,
