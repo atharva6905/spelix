@@ -152,6 +152,115 @@ async function getAuthToken(): Promise<string> {
   return token;
 }
 
+// ---------------------------------------------------------------------------
+// Typed transport error (issue #235)
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed error thrown by {@link expertFetch} for every non-ok response. A real
+ * `Error` subclass (not a hand-rolled object literal) so consumers can use
+ * `instanceof Error`/`err.message` and the {@link isExpertApiError} guard
+ * pins them to the actual transport shape — hand-mocked rejections used to
+ * hide drift from both tsc and vitest (PR #233 review finding #1).
+ *
+ * NOTE (follow-up, issue #235 4th bullet): `beta.ts`, `admin.ts`,
+ * `profiles.ts`, and `analyses.ts` still hand-roll the `{ status, ...detail }`
+ * throw shape and should migrate to this class. `analyses.ts:263` additionally
+ * diverges on spread precedence (`body.error ?? body.detail ?? body`); aligning
+ * it touches the core user analysis path and is deferred to that follow-up to
+ * keep this PR's blast radius confined to the expert upload surface.
+ */
+export class ExpertApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly detail?: unknown;
+
+  constructor(args: { status: number; message: string; code?: string; detail?: unknown }) {
+    super(args.message);
+    this.name = "ExpertApiError";
+    this.status = args.status;
+    this.code = args.code;
+    this.detail = args.detail;
+  }
+}
+
+/**
+ * Type guard for {@link ExpertApiError}. Uses `instanceof` first, then
+ * duck-types on `name === "ExpertApiError"` so the guard survives any
+ * transpile/realm boundary where `instanceof` could fail.
+ */
+export function isExpertApiError(e: unknown): e is ExpertApiError {
+  if (e instanceof ExpertApiError) return true;
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { name?: unknown }).name === "ExpertApiError" &&
+    typeof (e as { status?: unknown }).status === "number"
+  );
+}
+
+/**
+ * Build an {@link ExpertApiError} from a parsed error body. Never throws from
+ * the error path itself — every unexpected shape falls back to a safe message.
+ */
+function buildExpertApiError(status: number, body: unknown): ExpertApiError {
+  const fallback = `Request failed (HTTP ${status}).`;
+  const detail =
+    typeof body === "object" && body !== null
+      ? (body as { detail?: unknown }).detail
+      : undefined;
+
+  // FastAPI structured error: { detail: { error: { code, message } } }
+  if (typeof detail === "object" && detail !== null && !Array.isArray(detail)) {
+    const errObj = (detail as { error?: unknown }).error;
+    if (typeof errObj === "object" && errObj !== null) {
+      const code = (errObj as { code?: unknown }).code;
+      const message = (errObj as { message?: unknown }).message;
+      return new ExpertApiError({
+        status,
+        code: typeof code === "string" ? code : undefined,
+        message: typeof message === "string" ? message : fallback,
+        detail,
+      });
+    }
+    // Plain detail object (e.g. { detail: { code: "NOT_FOUND" } }).
+    const code = (detail as { code?: unknown }).code;
+    const message = (detail as { message?: unknown }).message;
+    return new ExpertApiError({
+      status,
+      code: typeof code === "string" ? code : undefined,
+      message: typeof message === "string" ? message : fallback,
+      detail,
+    });
+  }
+
+  // Pydantic validation: detail is an array of {loc, msg, type}. No code.
+  if (Array.isArray(detail)) {
+    const first = detail[0] as { msg?: unknown } | undefined;
+    const msg = first && typeof first.msg === "string" ? first.msg : fallback;
+    return new ExpertApiError({ status, message: msg, detail });
+  }
+
+  // Plain string detail.
+  if (typeof detail === "string") {
+    return new ExpertApiError({ status, message: detail, detail });
+  }
+
+  // No detail field: fall back to a top-level message/code if the body has one,
+  // else the safe fallback. Preserves the pre-#235 top-level-spread behaviour.
+  if (typeof body === "object" && body !== null) {
+    const code = (body as { code?: unknown }).code;
+    const message = (body as { message?: unknown }).message;
+    return new ExpertApiError({
+      status,
+      code: typeof code === "string" ? code : undefined,
+      message: typeof message === "string" ? message : fallback,
+    });
+  }
+
+  return new ExpertApiError({ status, message: fallback });
+}
+
 async function expertFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = await getAuthToken();
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -165,8 +274,7 @@ async function expertFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const err = { status: resp.status, ...(body.detail ?? body) };
-    throw err;
+    throw buildExpertApiError(resp.status, body);
   }
 
   if (resp.status === 204) return undefined as unknown as T;

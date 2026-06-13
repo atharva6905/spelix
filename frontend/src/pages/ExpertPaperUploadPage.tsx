@@ -19,6 +19,7 @@ import {
   requestPaperUploadUrl,
   uploadPaperFile,
   completePaperUpload,
+  isExpertApiError,
   SEX_APPLICABILITY_OPTIONS,
 } from "@/api/expert";
 
@@ -169,6 +170,16 @@ export default function ExpertPaperUploadPage() {
     setForm(INITIAL_FORM);
   }
 
+  // Recovers from the unrecoverable error phase (issue #235): clears the error
+  // banner, re-enables inputs (phase → idle), and resets progress — WITHOUT
+  // touching `form` or `selectedFile`, so the user keeps their entered metadata
+  // and selected file. Distinct from resetForm()'s full wipe.
+  function retryFromError() {
+    clearErrors();
+    setUploadPhase("idle");
+    setUploadProgress(0);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedFile) return;
@@ -255,22 +266,37 @@ export default function ExpertPaperUploadPage() {
 
       setUploadPhase("success");
     } catch (err) {
-      const apiErr = err as { status?: number; error?: { code?: string; message?: string } };
+      // Pin to the real transport shape via the guard (issue #235). Tolerate
+      // legacy hand-rolled `{ status, error: {...} }` rejections too, so the
+      // DOI special-case keeps working regardless of throw shape.
+      const isApiErr = isExpertApiError(err);
+      const legacy = err as { status?: number; error?: { code?: string; message?: string } };
+      const status = isApiErr ? err.status : legacy.status;
+      const code = isApiErr ? err.code : legacy.error?.code;
       if (
-        (apiErr.status === 409 && apiErr.error?.code === "DUPLICATE_DOI") ||
-        (apiErr.status === 422 && apiErr.error?.code === "INVALID_DOI")
+        (status === 409 && code === "DUPLICATE_DOI") ||
+        (status === 422 && code === "INVALID_DOI")
       ) {
-        setDoiError(apiErr.error?.message ?? "A paper with this DOI already exists.");
+        const doiMessage = isApiErr
+          ? err.message
+          : (legacy.error?.message ?? "A paper with this DOI already exists.");
+        setDoiError(doiMessage);
         setUploadPhase("idle");
         return;
       }
+      // Surface the structured backend message when available — fixes the bare
+      // "Upload failed" for INVALID_FILENAME/INVALID_PDF/QUEUE_UNAVAILABLE/
+      // INVALID_STATE (issue #235 problem #2). isExpertApiError implies a real
+      // Error with a populated `message`.
       let message =
-        apiErr.error?.message ??
-        (err instanceof Error ? err.message : "Upload failed");
+        legacy.error?.message ??
+        (isApiErr || err instanceof Error
+          ? (err as Error).message
+          : "Upload failed");
       // Complete-step 409 = race close-out: the backend deleted the uploaded
       // object + row before raising (issue #218), so the fully-uploaded file is
       // gone and a resubmit re-uploads from scratch. Tell the user (SaMD-safe).
-      if (apiErr.status === 409 && failingPhase === "completing") {
+      if (status === 409 && failingPhase === "completing") {
         message = `${message} Your uploaded file was discarded; submitting again will re-upload it.`;
       }
       setUploadError(message);
@@ -569,6 +595,17 @@ export default function ExpertPaperUploadPage() {
                             ? "Finalizing..."
                             : "Upload Paper"}
                     </button>
+                    {/* Recover from the error dead-end (issue #235): re-enable
+                        inputs while keeping all entered metadata + the file. */}
+                    {uploadPhase === "error" && (
+                      <button
+                        type="button"
+                        onClick={retryFromError}
+                        className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        Try again
+                      </button>
+                    )}
                     <Link
                       to="/expert"
                       className="text-sm text-gray-500 hover:text-gray-700"
