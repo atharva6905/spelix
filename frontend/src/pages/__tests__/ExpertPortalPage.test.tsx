@@ -54,6 +54,14 @@ vi.mock("@/api/expert", () => ({
   listExpertPapers: vi.fn().mockResolvedValue([]),
   reviewPaper: vi.fn(),
   updatePaperMetadata: vi.fn(),
+  // Mirror the real guard's name + status duck-type (issue #235) so the page's
+  // approve catch can distinguish a real ExpertApiError throw from a legacy
+  // object literal.
+  isExpertApiError: (e: unknown): boolean =>
+    typeof e === "object" &&
+    e !== null &&
+    (e as { name?: unknown }).name === "ExpertApiError" &&
+    typeof (e as { status?: unknown }).status === "number",
   // Real const re-declared here: vi.mock replaces the whole module, and the
   // page imports these options alongside the mocked API functions.
   SEX_APPLICABILITY_OPTIONS: [
@@ -350,7 +358,9 @@ describe("ExpertPortalPage", () => {
 
   // --- Paper review 409 DUPLICATE_DOI (issue #260, FR-EXPV-06) ---
 
-  it("surfaces the DUPLICATE_DOI message when paper approval returns 409", async () => {
+  it("surfaces the DUPLICATE_DOI message when paper approval returns 409 (legacy throw shape)", async () => {
+    // Back-compat: a hand-rolled `{ status, error: {...} }` rejection still
+    // works via the catch's `legacy` fallback path.
     vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
     vi.mocked(reviewPaper).mockRejectedValue({
       status: 409,
@@ -359,6 +369,33 @@ describe("ExpertPortalPage", () => {
         message: "A paper with this DOI already exists.",
       },
     });
+
+    await openMyPapersTab();
+
+    fireEvent.click(screen.getByRole("button", { name: "Approve & Ingest" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("A paper with this DOI already exists."),
+      ).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByText(/failed to approve paper/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces the DUPLICATE_DOI message when approval throws a typed ExpertApiError", async () => {
+    // Issue #235: reviewPaper -> expertFetch now throws a real ExpertApiError
+    // that exposes code/message at the TOP level (no `.error` nesting). This
+    // pins the page's catch to the actual transport shape — it would fail
+    // against the pre-#235 `apiErr.error?.code` read (regression guard for the
+    // shared-throw-shape migration that left this consumer behind).
+    const apiErr = Object.assign(
+      new Error("A paper with this DOI already exists."),
+      { name: "ExpertApiError", status: 409, code: "DUPLICATE_DOI" },
+    );
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
+    vi.mocked(reviewPaper).mockRejectedValue(apiErr);
 
     await openMyPapersTab();
 

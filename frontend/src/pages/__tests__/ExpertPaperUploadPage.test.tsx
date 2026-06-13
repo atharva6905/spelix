@@ -10,6 +10,13 @@ vi.mock("@/api/expert", () => ({
   requestPaperUploadUrl: (...a: unknown[]) => mockRequestUrl(...a),
   completePaperUpload: (...a: unknown[]) => mockCompleteUpload(...a),
   uploadPaperFile: (...a: unknown[]) => mockUploadFile(...a),
+  // Mirror the real guard's name + status duck-type so the page's catch can
+  // distinguish a real ExpertApiError throw from a legacy object literal.
+  isExpertApiError: (e: unknown): boolean =>
+    typeof e === "object" &&
+    e !== null &&
+    (e as { name?: unknown }).name === "ExpertApiError" &&
+    typeof (e as { status?: unknown }).status === "number",
   // Real const re-declared here: vi.mock replaces the whole module, and the
   // page imports these options alongside the mocked API functions.
   SEX_APPLICABILITY_OPTIONS: [
@@ -646,6 +653,75 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
     expect(
       screen.getByRole("button", { name: /upload paper/i }),
     ).toBeDisabled();
+  });
+});
+
+describe("ExpertPaperUploadPage — recoverable error phase (issue #235)", () => {
+  beforeEach(resetApiMocks);
+
+  it("Try again returns the error phase to idle, re-enables inputs, preserves form values", async () => {
+    // A non-DOI structured failure freezes the form in the error phase. The
+    // "Try again" control must return it to idle WITHOUT wiping the entered
+    // metadata or selected file (distinct from "Upload Another"'s full reset).
+    mockRequestUrl.mockRejectedValue({
+      status: 422,
+      error: { code: "INVALID_FILENAME", message: "Filename has invalid characters." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ title: "Paper T", doi: "10.1000/abc123" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    // Error banner is shown with the surfaced backend message.
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Filename has invalid characters.");
+
+    // While in error phase, inputs are disabled (frozen form).
+    expect(screen.getByLabelText(/title/i)).toBeDisabled();
+
+    // Click "Try again".
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    });
+
+    // Banner cleared, inputs re-enabled.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const titleInput = screen.getByLabelText(/title/i) as HTMLInputElement;
+    expect(titleInput).not.toBeDisabled();
+
+    // Form VALUES preserved (this is the distinction from Upload Another).
+    expect(titleInput.value).toBe("Paper T");
+    expect((screen.getByLabelText(/doi/i) as HTMLInputElement).value).toBe(
+      "10.1000/abc123",
+    );
+    // Selected file preserved: the "<name> (<size> MB)" summary still renders.
+    expect(screen.getByText(/x\.pdf \(/i)).toBeInTheDocument();
+
+    // Submit re-enabled (all required fields still satisfied).
+    expect(screen.getByRole("button", { name: /upload paper/i })).toBeEnabled();
+  });
+
+  it("surfaces the message for a non-DOI structured error thrown as ExpertApiError", async () => {
+    // Replicates a real transport throw: an Error subclass carrying status+code.
+    const apiErr = Object.assign(new Error("Queue unavailable, retry shortly."), {
+      name: "ExpertApiError",
+      status: 503,
+      code: "QUEUE_UNAVAILABLE",
+    });
+    mockRequestUrl.mockRejectedValue(apiErr);
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Queue unavailable, retry shortly.");
   });
 });
 

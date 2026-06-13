@@ -16,6 +16,8 @@ import {
   completePaperUpload,
   requestPaperUploadUrl,
   uploadPaperFile,
+  ExpertApiError,
+  isExpertApiError,
 } from "@/api/expert";
 
 interface MockXhr {
@@ -163,6 +165,98 @@ describe("uploadPaperFile", () => {
     lastXhr._triggerLoad(403);
 
     await expect(p).rejects.toThrow(/HTTP 403/);
+  });
+});
+
+describe("expertFetch — ExpertApiError unwrap (issue #235)", () => {
+  it("unwraps FastAPI {detail:{error:{code,message}}} into a real ExpertApiError", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          detail: { error: { code: "INVALID_PDF", message: "Not a valid PDF." } },
+        }),
+        { status: 422, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const err = await completePaperUpload("p-1").then(
+      () => null,
+      (e) => e,
+    );
+
+    // It is a real thrown Error, not a hand-rolled object literal.
+    expect(err).toBeInstanceOf(ExpertApiError);
+    expect(err).toBeInstanceOf(Error);
+    expect(isExpertApiError(err)).toBe(true);
+    expect(err.status).toBe(422);
+    expect(err.code).toBe("INVALID_PDF");
+    expect(err.message).toBe("Not a valid PDF.");
+    expect(err.detail).toEqual({ error: { code: "INVALID_PDF", message: "Not a valid PDF." } });
+  });
+
+  it("synthesizes a message from a Pydantic array detail (code undefined)", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          detail: [
+            { loc: ["body", "doi"], msg: "field required", type: "value_error.missing" },
+          ],
+        }),
+        { status: 422, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const err = await completePaperUpload("p-1").then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(isExpertApiError(err)).toBe(true);
+    expect(err.status).toBe(422);
+    expect(err.code).toBeUndefined();
+    // First element's msg is surfaced.
+    expect(err.message).toContain("field required");
+    expect(err.detail).toEqual([
+      { loc: ["body", "doi"], msg: "field required", type: "value_error.missing" },
+    ]);
+  });
+
+  it("uses a string detail directly as the message", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "Queue unavailable, retry shortly." }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const err = await completePaperUpload("p-1").then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(isExpertApiError(err)).toBe(true);
+    expect(err.status).toBe(503);
+    expect(err.code).toBeUndefined();
+    expect(err.message).toBe("Queue unavailable, retry shortly.");
+  });
+
+  it("falls back to a safe message on an empty/unparseable body", async () => {
+    mockFetch.mockResolvedValueOnce(new Response("not json", { status: 500 }));
+
+    const err = await completePaperUpload("p-1").then(
+      () => null,
+      (e) => e,
+    );
+
+    expect(isExpertApiError(err)).toBe(true);
+    expect(err.status).toBe(500);
+    expect(typeof err.message).toBe("string");
+    expect(err.message.length).toBeGreaterThan(0);
+  });
+
+  it("isExpertApiError returns false for a bare object literal (drift guard)", () => {
+    expect(isExpertApiError({ status: 409, error: { code: "X" } })).toBe(false);
+    expect(isExpertApiError(new Error("plain"))).toBe(false);
   });
 });
 
