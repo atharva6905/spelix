@@ -8,6 +8,7 @@
 - [Issue #232 review](review_issue_232.md) --- DoiLink extraction (3 sites, testid fallback, children/aria justified): PASS, 2026-06-11
 - [Issue #234 review](review_issue_234.md) --- DOI optional for non-research-paper types (FR-EXPV-02, doc-type select): PASS, 2026-06-11
 - [Issue #263 review](review_issue_263.md) --- Docling OCR PermissionError fix (bake models + writable artifacts path, no-FR): PASS, 2026-06-11
+- [Issue #269 review](review_issue_269.md) --- Docling weight checksum manifest (supply-chain integrity, no-FR, T2): PASS, 2026-06-13
 - [decisions.md cross-link rule](feedback_decisions_crosslink.md) --- superseded ADRs must have a back-reference added (both ways); flag CRITICAL if missing
 - [Docling OCR fix pattern](docling_ocr_fix_pattern.md) — issue #263 fix: docling[rapidocr] extra pulls CPU onnxruntime; onnxruntime-gpu is NOT used
 - [or-idiom safety for QualityTier](feedback_or_idiom_safety.md) — `x or default` is safe for quality_tier; empty string not a valid DB value (#267)
