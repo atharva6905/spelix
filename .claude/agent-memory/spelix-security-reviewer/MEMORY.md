@@ -80,3 +80,6 @@
 - Accepted (non-blocking): 404-before-403 ordering lets a non-owning expert distinguish exists-not-owned (403) from nonexistent (404). OK at single-partner scale, UUIDv4 IDs, generic 403 — same posture as #218. RE-FLAG (switch to uniform 404-for-non-owners) if expert role opens to multiple untrusted partners.
 - [Error-surfacing allowlist](error_surfacing_allowlist.md) - approved pattern for rendering backend error.message behind status+code allowlist; ExpertPortalPage baseline (PR #278, 2026-06-12)
 - [Issue #258 restamp retry](issue_258_restamp_retry.md) — PATCH metadata restamp-retry task + paper_points_filter helper, corpus-not-tenant RLS, server-derived restamp_failed → T2 PASS
+
+## Reviewed: issue #283 / shared ApiError + buildApiError across all api modules (T2) (2026-06-13) → PASS
+- [Shared ApiError #283](shared_apierror_283.md) - repo-wide ApiError/buildApiError verified PASS; curated-message-source invariant + general-surfacing re-flag triggers for every @/api module; ApiError.detail unrendered; SaMD-clean (no new copy, only re-routed curated messages)
