@@ -58,9 +58,10 @@ COLLECTION_COACH_BRAIN = "coach_brain"
 def paper_points_filter(paper_id: str) -> Any:
     """Build the Qdrant Filter selecting all papers_rag points for one paper.
 
-    Hand-built in 3+ places (expert metadata PATCH, the restamp retry task,
-    the #222 backfill) — extracted here so the ``paper_id`` payload key stays
-    a single source of truth (issue #258, #251 /code-review LOW).
+    Single source of truth for the 3 call sites that select a paper's points:
+    the expert metadata PATCH, the restamp retry task, and the #222 payload
+    backfill script — so the ``paper_id`` payload key never drifts between them
+    (issue #258, #251 /code-review LOW).
     """
     from qdrant_client import models as qdrant_models
 

@@ -119,3 +119,31 @@ async def test_restamp_raises_when_qdrant_unavailable(monkeypatch):
         await restamp_paper_payload(
             _make_ctx(_session_maker_for(session)), str(doc_id)
         )
+
+
+@pytest.mark.asyncio
+async def test_restamp_propagates_set_payload_error(monkeypatch):
+    """A transient set_payload failure (Qdrant reachable) must propagate so
+    streaq's max_tries backoff retries — the body wraps no try/except."""
+    doc_id = uuid4()
+    session = AsyncMock()
+
+    repo = MagicMock()
+    repo.get_by_id = AsyncMock(return_value=_doc(doc_id, "female"))
+    monkeypatch.setattr(
+        "app.workers.restamp_paper.RagDocumentRepository",
+        MagicMock(return_value=repo),
+    )
+
+    qdrant = MagicMock()
+    qdrant.set_payload = AsyncMock(side_effect=RuntimeError("transient network"))
+    monkeypatch.setattr(
+        "app.workers.restamp_paper.get_qdrant_client",
+        AsyncMock(return_value=qdrant),
+    )
+
+    with pytest.raises(RuntimeError, match="transient network"):
+        await restamp_paper_payload(
+            _make_ctx(_session_maker_for(session)), str(doc_id)
+        )
+    qdrant.set_payload.assert_awaited_once()
