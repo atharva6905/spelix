@@ -14,6 +14,7 @@
 import { useState, useEffect } from "react";
 import { Link, Navigate } from "react-router";
 import { supabase } from "@/lib/supabase";
+import { FieldError } from "@/components/FieldError";
 import {
   requestPaperUploadUrl,
   uploadPaperFile,
@@ -148,6 +149,19 @@ export default function ExpertPaperUploadPage() {
     setSelectedFile(file);
   }
 
+  // Single source of truth for returning the form to a clean idle state.
+  // Used by BOTH the submit-start path and the "Upload Another" button so
+  // neither can drift and forget an error setter (e.g. setDoiError).
+  function resetForm() {
+    setUploadPhase("idle");
+    setSelectedFile(null);
+    setUploadProgress(0);
+    setUploadError(null);
+    setFileError(null);
+    setDoiError(null);
+    setForm(INITIAL_FORM);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedFile) return;
@@ -187,6 +201,10 @@ export default function ExpertPaperUploadPage() {
     setDoiError(null);
     setUploadProgress(0);
 
+    // Track the in-flight phase locally — uploadPhase state is stale inside the
+    // async closure, so we cannot read it in the catch handler.
+    let failingPhase: "requesting" | "uploading" | "completing" = "requesting";
+
     try {
       const signed = await requestPaperUploadUrl({
         title: form.title.trim(),
@@ -221,9 +239,11 @@ export default function ExpertPaperUploadPage() {
         file_size_bytes: selectedFile.size,
       });
 
+      failingPhase = "uploading";
       setUploadPhase("uploading");
       await uploadPaperFile(signed.upload_url, selectedFile, setUploadProgress);
 
+      failingPhase = "completing";
       setUploadPhase("completing");
       await completePaperUpload(signed.id);
 
@@ -238,7 +258,16 @@ export default function ExpertPaperUploadPage() {
         setUploadPhase("idle");
         return;
       }
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      let message =
+        apiErr.error?.message ??
+        (err instanceof Error ? err.message : "Upload failed");
+      // Complete-step 409 = race close-out: the backend deleted the uploaded
+      // object + row before raising (issue #218), so the fully-uploaded file is
+      // gone and a resubmit re-uploads from scratch. Tell the user (SaMD-safe).
+      if (apiErr.status === 409 && failingPhase === "completing") {
+        message = `${message} Your uploaded file was discarded; submitting again will re-upload it.`;
+      }
+      setUploadError(message);
       setUploadPhase("error");
     }
   }
@@ -375,9 +404,7 @@ export default function ExpertPaperUploadPage() {
                   disabled={uploadPhase !== "idle"}
                   className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm text-gray-700 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
                 />
-                {doiError && (
-                  <p role="alert" className="mt-1 text-sm text-red-600">{doiError}</p>
-                )}
+                <FieldError className="mt-1">{doiError}</FieldError>
               </div>
 
               {/* Exercise tags */}
@@ -473,9 +500,7 @@ export default function ExpertPaperUploadPage() {
                     {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
                   </p>
                 )}
-                {fileError && (
-                  <p className="text-sm text-destructive mt-1">{fileError}</p>
-                )}
+                <FieldError className="mt-1">{fileError}</FieldError>
               </div>
 
               {/* Upload progress */}
@@ -506,14 +531,7 @@ export default function ExpertPaperUploadPage() {
                   <>
                     <button
                       type="button"
-                      onClick={() => {
-                        setUploadPhase("idle");
-                        setSelectedFile(null);
-                        setUploadProgress(0);
-                        setUploadError(null);
-                        setFileError(null);
-                        setForm(INITIAL_FORM);
-                      }}
+                      onClick={resetForm}
                       className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
                     >
                       Upload Another

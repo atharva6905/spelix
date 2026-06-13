@@ -23,6 +23,7 @@ import {
   type ExerciseType,
   type ExerciseVariant,
 } from "@/api/analyses";
+import { FieldError } from "@/components/FieldError";
 
 // FR-XDET-01, FR-XDET-02: barbell exercises only, with allowed variants
 const EXERCISE_VARIANTS: Record<ExerciseType, ExerciseVariant[]> = {
@@ -379,16 +380,8 @@ export default function UploadPage() {
             {selectedFile.name} — {formatBytes(selectedFile.size)}
           </p>
         )}
-        {fileSizeError && (
-          <p className="mt-1 text-xs text-red-600" role="alert">
-            {fileSizeError}
-          </p>
-        )}
-        {durationError && (
-          <p className="mt-1 text-xs text-red-600" role="alert">
-            {durationError}
-          </p>
-        )}
+        <FieldError className="mt-1">{fileSizeError}</FieldError>
+        <FieldError className="mt-1">{durationError}</FieldError>
         {durationWarning && (
           <p className="mt-1 text-xs text-amber-600" role="status">
             {durationWarning}
