@@ -23,6 +23,7 @@ from scripts.seed_research_papers import (  # noqa: E402
     SEED_PAPERS,
     SeedPaper,
     build_rag_document_row,
+    doi_exists_live,
     validate_seed_dois,
 )
 
@@ -149,3 +150,49 @@ class TestSeedDoiColumn:
         for p in SEED_PAPERS:
             if p.doi is not None:
                 assert normalize_doi(p.doi)
+
+    def test_insert_sql_includes_review_status_column(self) -> None:
+        """Issue #264 — review_status must be in the INSERT so rows land as
+        reviewed_approved, not the server default 'pending'."""
+        assert "review_status," in _INSERT_SQL or ", review_status" in _INSERT_SQL
+        assert ":review_status" in _INSERT_SQL
+
+    def test_row_review_status_is_reviewed_approved(self) -> None:
+        """Issue #264 — build_rag_document_row must set review_status=reviewed_approved."""
+        from datetime import datetime, timezone
+
+        paper = _make_paper("10.1519/JSC.0b013e3182a1fbd2")
+        row = build_rag_document_row(
+            paper, str(__import__("uuid").uuid4()), datetime.now(timezone.utc)
+        )
+        assert row["review_status"] == "reviewed_approved"
+
+
+class TestSeedIdempotency:
+    """Issue #264 — re-running the seed script must skip existing DOIs."""
+
+    def test_doi_exists_live_returns_true_when_doi_found(self) -> None:
+        """doi_exists_live returns True when the normalized DOI exists in the
+        result set returned by the mock session query."""
+        from unittest.mock import MagicMock
+
+        normalized = "10.1519/jsc.0b013e3182a1fbd2"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = normalized
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value = mock_result
+
+        assert doi_exists_live(mock_session, normalized) is True
+
+    def test_doi_exists_live_returns_false_when_not_found(self) -> None:
+        """doi_exists_live returns False when no matching DOI exists."""
+        from unittest.mock import MagicMock
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+
+        mock_session = MagicMock()
+        mock_session.execute.return_value = mock_result
+
+        assert doi_exists_live(mock_session, "10.0000/nonexistent") is False
