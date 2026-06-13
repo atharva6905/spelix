@@ -46,3 +46,7 @@ export async function withLock(fn) {
   try { return await fn(); }
   finally { try { rmSync(C.lockDir(), { recursive: true, force: true }); } catch { /* already gone */ } }
 }
+
+export function readState() { try { return JSON.parse(readFileSync(C.stateFile(), 'utf8')); } catch { return {}; } }
+export function writeState(s) { writeFileSync(C.stateFile(), JSON.stringify(s, null, 2)); }
+export function isFresh(ts) { return !!ts && (Date.now() - Date.parse(ts) < C.HEARTBEAT_STALE_MS); }

@@ -83,3 +83,13 @@ test('lock: a stale lock dir (older than LOCK_STALE_MS) is force-broken', async 
   await withLock(async () => { ran = true; });
   assert.ok(ran);
 });
+
+test('state: read/write round-trips and isFresh respects the threshold', async () => {
+  harness();
+  const { readState, writeState, isFresh } = await import('./claims.mjs?state=1');
+  assert.deepEqual(readState(), {});
+  writeState({ 5: { sid: 'sl-a', ts: new Date().toISOString(), worktree: null } });
+  assert.equal(readState()[5].sid, 'sl-a');
+  assert.ok(isFresh(new Date().toISOString()));
+  assert.equal(isFresh(new Date(Date.now() - 40 * 60 * 1000).toISOString()), false);
+});
