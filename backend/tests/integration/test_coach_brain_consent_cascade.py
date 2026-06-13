@@ -11,8 +11,18 @@ does NOT prove row selection. This test proves row selection against real Postgr
 ADR-BRAIN-12: seed entries ship source_analysis_ids=[] and must never be tombstoned.
 ADR-BRAIN-08: cascade is scoped to status='active' only.
 
-No rollback fixture exists in this project — rows are committed and cleaned up via
-DELETE in finally: (same pattern as test_beta_request_repository.py).
+Transaction boundaries (IMPORTANT — the sweep is table-wide):
+soft_delete_empty_unconfirmed() is an UNSCOPED table-wide UPDATE (no ID filter —
+see app/repositories/coach_brain.py). Committing it would persistently tombstone
+REAL coach_brain_entries rows that happen to match (active + empty + count<3),
+which the finally: DELETE-by-our-IDs cleanup would NOT restore. So:
+- INSERTED test rows follow the harness convention: committed up front and cleaned
+  up via DELETE in finally: (same pattern as test_beta_request_repository.py).
+- The destructive SWEEP is run UNCOMMITTED and rolled back: we call the repo
+  method, verify its effect within the same open transaction (expire_all + select
+  by captured ID), then rollback() to discard the table-wide UPDATE so it never
+  persists against the shared DB. The committed inserts survive the rollback
+  (they were a prior, already-committed transaction).
 Unique content strings (UUID-prefixed) prevent collision on repeated runs.
 """
 
@@ -161,19 +171,40 @@ async def test_soft_delete_empty_unconfirmed_row_selection(
     all_entries = [seed, active_empty_low, active_empty_conf, active_nonempty, deprecated_empty]
     # collect IDs for cleanup (populated after flush)
     inserted_ids: list[uuid.UUID] = []
+    # Capture PKs into plain uuid.UUID vars BEFORE any expire_all() so the
+    # verification + cleanup never lazy-load .id off an expired ORM object
+    # (that raises MissingGreenlet in SQLAlchemy 2.0 async sessions).
+    seed_id: uuid.UUID
+    active_empty_low_id: uuid.UUID
+    active_empty_conf_id: uuid.UUID
+    active_nonempty_id: uuid.UUID
+    deprecated_empty_id: uuid.UUID
 
     try:
-        # Insert all rows
+        # --- Insert phase (COMMITTED, per harness convention) ---
         for entry in all_entries:
             db_session.add(entry)
         await db_session.flush()
-        inserted_ids = [e.id for e in all_entries]
+        seed_id = seed.id
+        active_empty_low_id = active_empty_low.id
+        active_empty_conf_id = active_empty_conf.id
+        active_nonempty_id = active_nonempty.id
+        deprecated_empty_id = deprecated_empty.id
+        inserted_ids = [
+            seed_id,
+            active_empty_low_id,
+            active_empty_conf_id,
+            active_nonempty_id,
+            deprecated_empty_id,
+        ]
         await db_session.commit()
 
-        # Run the cascade predicate under test
+        # --- Sweep phase (NOT committed) ---
+        # Run the table-wide cascade predicate but do NOT commit: within this
+        # same open transaction the UPDATE is visible, and a later rollback()
+        # discards it so no real row is persistently tombstoned.
         repo = CoachBrainRepository(db_session)
         tombstoned_count = await repo.soft_delete_empty_unconfirmed()
-        await db_session.commit()
 
         # Reload all rows so we see the post-update state.
         # expire_all() is required: soft_delete_empty_unconfirmed() uses an ORM-level
@@ -190,13 +221,17 @@ async def test_soft_delete_empty_unconfirmed_row_selection(
         )
         rows_by_id = {r.id: r for r in result.scalars().all()}
 
-        # --- Primary assertion: exactly 1 row tombstoned ---
-        assert tombstoned_count == 1, (
-            f"Expected exactly 1 tombstone, got {tombstoned_count}"
+        # --- Primary assertion: at least our 1 row tombstoned ---
+        # soft_delete_empty_unconfirmed() returns a GLOBAL rowcount; in a shared
+        # DB other (committed) rows may legitimately also match the predicate, so
+        # this is not deterministically 1. The per-row assertions below are the
+        # precise correctness check; this only guards against a zero-effect sweep.
+        assert tombstoned_count >= 1, (
+            f"Expected at least 1 tombstone, got {tombstoned_count}"
         )
 
         # --- active_empty_low: MUST be tombstoned ---
-        tombstoned = rows_by_id[active_empty_low.id]
+        tombstoned = rows_by_id[active_empty_low_id]
         assert tombstoned.status == "deprecated", (
             f"active_empty_low: expected status='deprecated', got {tombstoned.status!r}"
         )
@@ -205,7 +240,7 @@ async def test_soft_delete_empty_unconfirmed_row_selection(
         )
 
         # --- seed: MUST be untouched (ADR-BRAIN-12) ---
-        seed_row = rows_by_id[seed.id]
+        seed_row = rows_by_id[seed_id]
         assert seed_row.status == "seed", (
             f"seed: expected status='seed', got {seed_row.status!r} — ADR-BRAIN-12 violated"
         )
@@ -214,19 +249,19 @@ async def test_soft_delete_empty_unconfirmed_row_selection(
         )
 
         # --- active_empty_conf: MUST be untouched (confirmation_count >= 3) ---
-        conf_row = rows_by_id[active_empty_conf.id]
+        conf_row = rows_by_id[active_empty_conf_id]
         assert conf_row.status == "active", (
             f"active_empty_conf: expected status='active', got {conf_row.status!r}"
         )
 
         # --- active_nonempty: MUST be untouched (non-empty array) ---
-        nonempty_row = rows_by_id[active_nonempty.id]
+        nonempty_row = rows_by_id[active_nonempty_id]
         assert nonempty_row.status == "active", (
             f"active_nonempty: expected status='active', got {nonempty_row.status!r}"
         )
 
         # --- deprecated_empty: MUST be untouched (already deprecated) ---
-        deprecated_row = rows_by_id[deprecated_empty.id]
+        deprecated_row = rows_by_id[deprecated_empty_id]
         assert deprecated_row.status == "deprecated", (
             f"deprecated_empty: expected status='deprecated' unchanged, got {deprecated_row.status!r}"
         )
@@ -234,8 +269,15 @@ async def test_soft_delete_empty_unconfirmed_row_selection(
             "deprecated_empty: rejected_reason must not appear for pre-existing deprecated row"
         )
 
+        # --- Discard the sweep ---
+        # Roll back the uncommitted table-wide UPDATE so no real coach_brain_entries
+        # row is persistently tombstoned. The committed inserts above survive this
+        # (they were a prior, already-committed transaction).
+        await db_session.rollback()
+
     finally:
-        # Clean up test rows — always runs regardless of assertion outcome
+        # Clean up test rows — always runs regardless of assertion outcome.
+        # Use the captured plain-UUID vars (inserted_ids), never expired ORM .id.
         if inserted_ids:
             from sqlalchemy import delete
 
@@ -289,15 +331,21 @@ async def test_cascade_array_remove_then_tombstone(
 
         repo = CoachBrainRepository(db_session)
 
-        # Step 1: strip the analysis ID from the entry
+        # --- Sweep phase (NOT committed) ---
+        # Run both cascade steps within one open transaction without committing,
+        # so the destructive table-wide UPDATE in step 2 can be rolled back below
+        # and never persists against the shared DB.
+
+        # Step 1: strip the analysis ID from the entry. This UPDATE is scoped to a
+        # unique random UUID (target_analysis_id), so the rowcount is exactly 1.
         modified = await repo.remove_analysis_ids_for_user([target_analysis_id])
-        await db_session.commit()
         assert modified == 1, f"Expected 1 modified entry, got {modified}"
 
-        # Step 2: tombstone the now-empty entry
+        # Step 2: tombstone the now-empty entry. soft_delete_empty_unconfirmed()
+        # returns a GLOBAL rowcount; other (committed) rows in a shared DB may also
+        # match, so assert >= 1 and rely on the per-row checks below for correctness.
         deleted = await repo.soft_delete_empty_unconfirmed()
-        await db_session.commit()
-        assert deleted == 1, f"Expected 1 tombstoned entry, got {deleted}"
+        assert deleted >= 1, f"Expected at least 1 tombstoned entry, got {deleted}"
 
         # Reload and verify final state.
         # expire_all() is required: both remove_analysis_ids_for_user() and
@@ -326,7 +374,14 @@ async def test_cascade_array_remove_then_tombstone(
             f"Expected empty source_analysis_ids after array_remove, got {row.source_analysis_ids!r}"
         )
 
+        # --- Discard the sweep ---
+        # Roll back the uncommitted UPDATEs (both the array_remove and the
+        # table-wide tombstone) so nothing from this test persists beyond the
+        # committed insert. The committed insert survives this rollback.
+        await db_session.rollback()
+
     finally:
+        # Use the captured plain-UUID var (entry_id), never expired ORM .id.
         if inserted_ids:
             from sqlalchemy import delete
 
