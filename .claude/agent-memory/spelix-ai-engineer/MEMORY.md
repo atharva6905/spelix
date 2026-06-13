@@ -5,3 +5,4 @@
 - [quality_tier NULL floor](insight-quality-tier-null-floor.md) — #267: NULL tier flows end-to-end; floor None->L4_guideline at ingestion; NO L5_expert_opinion literal exists
 - [Coach Brain integration test](insight-coach-brain-integration-test.md) — #216: expire_all() + PK-before-expiry pattern; CoachBrainEntry column map; tombstone reason string
 - [Uncommitted-sweep integration tests](insight-uncommitted-sweep-integration-test.md) — #216: table-wide destructive UPDATEs run uncommitted + rollback in shared-DB integration tests, never commit the sweep
+- [Restamp retry reconciliation](insight-restamp-retry-reconciliation.md) — #258: re-read-from-DB convergent retry task, shared paper_points_filter, restamp_failed surfacing; worktree frontend needs npm ci
