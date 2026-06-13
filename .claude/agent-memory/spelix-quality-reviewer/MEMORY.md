@@ -58,3 +58,9 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 - [Expert API error patterns](frontend-expert-api-error.md) - expert.ts ExpertApiError/guard/unwrap-ladder design notes + test-coverage traps (issue #235)
 - [Frontend gotcha checklist](frontend-gotcha-checklist.md) - fast pass/fail list for frontend diffs (imports, use-client, fetch, SaMD copy, supabase mock)
 - **Blast-radius miss caught downstream:** quality-review (like spec) cleared only the changed files and MISSED that `expertFetch`'s new top-level-`code` throw shape regressed `ExpertPortalPage.handleApprovePaper` (DUPLICATE_DOI, FR-EXPV-06/#260) — it still read `apiErr.error?.code`. `/code-review`'s cross-file tracer caught it; fixed in d1b7c93 + regression test. LESSON: for a diff that changes a SHARED error/throw/return shape, audit ALL consumers of that function (grep the symbol), not just the diff's files — the "two untested branches" finding is minor next to an unmigrated sibling consumer.
+
+## Reviewed: issue #258 / restamp retry task (T2) (2026-06-13) -> PASS (2 non-blocking MEDIUM observations)
+- [Restamp retry review (#258)](review_restamp_retry_258.md) - streaq thin-wrapper pattern; session-closed-before-Qdrant ordering is correct+superior; paper_points_filter de-dups only 2 of 3 claimed sites (backfill script left behind); retry-task set_payload-raises path untested (inline path covered)
+
+## Reviewed: issue #283 / shared ApiError + buildApiError across all api modules (T2) (2026-06-13) → PASS (1 LOW)
+- [Shared ApiError #283](shared-apierror-283.md) - three @/api error idioms census; expert.ts re-export shim is load-bearing (expert-upload.test.ts); legacy-dual-path collapse = correct; test-realism pattern (real buildApiError fixtures + don't re-declare guard in vi.mock — resolves the #235 trap); #282 consumer-census clean
