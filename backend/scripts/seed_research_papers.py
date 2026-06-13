@@ -41,6 +41,9 @@ _BACKEND_DIR = Path(__file__).parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
+from sqlalchemy import text  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
 from app.utils.doi import DoiValidationError, normalize_doi  # noqa: E402
 
 _BACKEND_ENV = _BACKEND_DIR / ".env"
@@ -867,8 +870,8 @@ _INSERT_SQL = (
     ":chunk_count, :ingested_at, :metadata, :review_status, :created_at, :updated_at)"
 )
 
-# Sync SELECT helper used by main() to skip papers already present in the DB.
-# Operates on the uq_rag_documents_doi_live partial-index scope (doi IS NOT NULL).
+# Plain DOI-equality check. The partial unique index (doi IS NOT NULL) lives on
+# the DB side; no application-level predicate is needed here.
 _DOI_EXISTS_SQL = (
     "SELECT doi FROM rag_documents WHERE doi = :doi LIMIT 1"
 )
@@ -891,19 +894,13 @@ def validate_seed_dois(papers: list[SeedPaper]) -> None:
             ) from exc
 
 
-def doi_exists_live(session: object, normalized_doi: str) -> bool:
+async def doi_exists_live(session: AsyncSession, normalized_doi: str) -> bool:
     """Return True if *normalized_doi* already has a live row in rag_documents.
 
-    Operates within the uq_rag_documents_doi_live partial-index scope
-    (doi IS NOT NULL). The *session* is a synchronous SQLAlchemy Session
-    (or any object with an ``execute`` method returning a result with
-    ``scalar_one_or_none``).
-
-    Used by main() to make seed re-runs idempotent (issue #264).
+    The *session* is a SQLAlchemy AsyncSession. Used by main() to make seed
+    re-runs idempotent (issue #264).
     """
-    from sqlalchemy import text  # noqa: PLC0415 — deferred for script-level import hygiene
-
-    result = session.execute(text(_DOI_EXISTS_SQL), {"doi": normalized_doi})  # type: ignore[union-attr]
+    result = await session.execute(text(_DOI_EXISTS_SQL), {"doi": normalized_doi})
     return result.scalar_one_or_none() is not None
 
 
@@ -943,9 +940,7 @@ def build_rag_document_row(paper: SeedPaper, paper_id: str, now: datetime) -> di
 async def main(dry_run: bool = False) -> None:
     from datetime import timezone
 
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from app.services.ingestion import DocumentMetadata, IngestionService
     from app.services.cohere_client import get_cohere_client
@@ -1021,15 +1016,10 @@ async def main(dry_run: bool = False) -> None:
             # Skip papers whose normalized DOI already exists in the DB
             # (idempotent re-run — issue #264). Papers without a DOI are always
             # inserted because they cannot be deduplicated by DOI.
-            if paper.doi is not None:
-                norm = normalize_doi(paper.doi)
-                result_check = await session.execute(
-                    text(_DOI_EXISTS_SQL), {"doi": norm}
-                )
-                if result_check.scalar_one_or_none() is not None:
-                    print(f"  [skip] already exists: {paper.title[:60]}")
-                    skipped += 1
-                    continue
+            if paper.doi is not None and await doi_exists_live(session, normalize_doi(paper.doi)):
+                print(f"  [skip] already exists: {paper.title[:60]}")
+                skipped += 1
+                continue
 
             paper_id = str(uuid.uuid4())
 

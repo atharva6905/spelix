@@ -171,28 +171,30 @@ class TestSeedDoiColumn:
 class TestSeedIdempotency:
     """Issue #264 — re-running the seed script must skip existing DOIs."""
 
-    def test_doi_exists_live_returns_true_when_doi_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_doi_exists_live_returns_true_when_doi_found(self) -> None:
         """doi_exists_live returns True when the normalized DOI exists in the
-        result set returned by the mock session query."""
-        from unittest.mock import MagicMock
+        result set returned by the async mock session query."""
+        from unittest.mock import AsyncMock, MagicMock
 
         normalized = "10.1519/jsc.0b013e3182a1fbd2"
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = normalized
 
         mock_session = MagicMock()
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
 
-        assert doi_exists_live(mock_session, normalized) is True
+        assert await doi_exists_live(mock_session, normalized) is True
 
-    def test_doi_exists_live_returns_false_when_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_doi_exists_live_returns_false_when_not_found(self) -> None:
         """doi_exists_live returns False when no matching DOI exists."""
-        from unittest.mock import MagicMock
+        from unittest.mock import AsyncMock, MagicMock
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
 
         mock_session = MagicMock()
-        mock_session.execute.return_value = mock_result
+        mock_session.execute = AsyncMock(return_value=mock_result)
 
-        assert doi_exists_live(mock_session, "10.0000/nonexistent") is False
+        assert await doi_exists_live(mock_session, "10.0000/nonexistent") is False
