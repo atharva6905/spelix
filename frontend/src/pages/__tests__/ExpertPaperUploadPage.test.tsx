@@ -51,12 +51,47 @@ async function waitForForm() {
   await waitFor(() => screen.getByLabelText(/pdf file/i));
 }
 
-describe("ExpertPaperUploadPage — file upload", () => {
-  beforeEach(() => {
-    mockRequestUrl.mockReset();
-    mockCompleteUpload.mockReset();
-    mockUploadFile.mockReset();
+/** Reset all mocked @/api/expert functions. Shared across every describe block. */
+function resetApiMocks() {
+  mockRequestUrl.mockReset();
+  mockCompleteUpload.mockReset();
+  mockUploadFile.mockReset();
+}
+
+interface FillFormOptions {
+  /** Title text (default "Paper T"). */
+  title?: string;
+  /**
+   * DOI value. Pass a string to type it; omit (undefined) to leave the DOI
+   * field untouched — used by the DOI-required and DOI-optional cases.
+   */
+  doi?: string;
+  /** Uploaded file (default a 1 KB application/pdf). */
+  file?: File;
+}
+
+/** Fill title + (optional) DOI + PDF file so the form is submittable. */
+async function fillForm({ title = "Paper T", doi, file }: FillFormOptions = {}) {
+  const titleInput = screen.getByLabelText(/title/i);
+  await act(async () => {
+    fireEvent.change(titleInput, { target: { value: title } });
   });
+  if (doi !== undefined) {
+    const doiInput = screen.getByLabelText(/doi/i);
+    await act(async () => {
+      fireEvent.change(doiInput, { target: { value: doi } });
+    });
+  }
+  const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
+  const pdf =
+    file ?? new File([new Uint8Array(1024)], "x.pdf", { type: "application/pdf" });
+  await act(async () => {
+    fireEvent.change(fileInput, { target: { files: [pdf] } });
+  });
+}
+
+describe("ExpertPaperUploadPage — file upload", () => {
+  beforeEach(resetApiMocks);
 
   it("rejects non-PDF files client-side", async () => {
     renderPage();
@@ -103,21 +138,7 @@ describe("ExpertPaperUploadPage — file upload", () => {
 
     renderPage();
     await waitForForm();
-    const titleInput = screen.getByLabelText(/title/i);
-    await act(async () => {
-      fireEvent.change(titleInput, { target: { value: "Paper T" } });
-    });
-    const doiInput = screen.getByLabelText(/doi/i);
-    await act(async () => {
-      fireEvent.change(doiInput, { target: { value: "10.1000/abc123" } });
-    });
-    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
-    const file = new File([new Uint8Array(1024)], "x.pdf", {
-      type: "application/pdf",
-    });
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-    });
+    await fillForm({ doi: "10.1000/abc123" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -139,22 +160,7 @@ describe("ExpertPaperUploadPage — file upload", () => {
 
     renderPage();
     await waitForForm();
-    const titleInput = screen.getByLabelText(/title/i);
-    await act(async () => {
-      fireEvent.change(titleInput, { target: { value: "X" } });
-    });
-    const doiInput = screen.getByLabelText(/doi/i);
-    await act(async () => {
-      fireEvent.change(doiInput, { target: { value: "10.1000/xyz" } });
-    });
-    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
-    await act(async () => {
-      fireEvent.change(fileInput, {
-        target: {
-          files: [new File(["a"], "x.pdf", { type: "application/pdf" })],
-        },
-      });
-    });
+    await fillForm({ title: "X", doi: "10.1000/xyz" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -175,32 +181,7 @@ describe("ExpertPaperUploadPage — file upload", () => {
 });
 
 describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
-  beforeEach(() => {
-    mockRequestUrl.mockReset();
-    mockCompleteUpload.mockReset();
-    mockUploadFile.mockReset();
-  });
-
-  /** Fill title + PDF file (leaves DOI alone unless provided) */
-  async function fillForm(doi?: string) {
-    const titleInput = screen.getByLabelText(/title/i);
-    await act(async () => {
-      fireEvent.change(titleInput, { target: { value: "Paper T" } });
-    });
-    if (doi !== undefined) {
-      const doiInput = screen.getByLabelText(/doi/i);
-      await act(async () => {
-        fireEvent.change(doiInput, { target: { value: doi } });
-      });
-    }
-    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
-    const file = new File([new Uint8Array(1024)], "x.pdf", {
-      type: "application/pdf",
-    });
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-    });
-  }
+  beforeEach(resetApiMocks);
 
   it("disables submit until DOI is filled", async () => {
     renderPage();
@@ -264,7 +245,7 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
 
     renderPage();
     await waitForForm();
-    await fillForm("10.1000/dup");
+    await fillForm({ doi: "10.1000/dup" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -299,7 +280,7 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
 
     renderPage();
     await waitForForm();
-    await fillForm("not-a-doi");
+    await fillForm({ doi: "not-a-doi" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -332,7 +313,7 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
 
     renderPage();
     await waitForForm();
-    await fillForm("10.1000/dup");
+    await fillForm({ doi: "10.1000/dup" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -364,7 +345,7 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
 
     renderPage();
     await waitForForm();
-    await fillForm("10.1000/dup");
+    await fillForm({ doi: "10.1000/dup" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
@@ -379,26 +360,10 @@ describe("ExpertPaperUploadPage — DOI required + duplicate handling", () => {
 });
 
 describe("ExpertPaperUploadPage — DOI optional by document type (issue #234)", () => {
-  beforeEach(() => {
-    mockRequestUrl.mockReset();
-    mockCompleteUpload.mockReset();
-    mockUploadFile.mockReset();
-  });
+  beforeEach(resetApiMocks);
 
-  /** Fill title + PDF file (DOI deliberately left empty) */
-  async function fillFormNoDoi() {
-    const titleInput = screen.getByLabelText(/title/i);
-    await act(async () => {
-      fireEvent.change(titleInput, { target: { value: "Textbook Chapter" } });
-    });
-    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
-    const file = new File([new Uint8Array(1024)], "x.pdf", {
-      type: "application/pdf",
-    });
-    await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
-    });
-  }
+  /** Fill title + PDF file with DOI deliberately left empty. */
+  const fillFormNoDoi = () => fillForm({ title: "Textbook Chapter" });
 
   async function selectDocumentType(value: string) {
     const select = screen.getByLabelText(/document type/i);
@@ -520,31 +485,172 @@ describe("ExpertPaperUploadPage — DOI optional by document type (issue #234)",
   });
 });
 
-describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", () => {
-  beforeEach(() => {
-    mockRequestUrl.mockReset();
-    mockCompleteUpload.mockReset();
-    mockUploadFile.mockReset();
+describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #236)", () => {
+  beforeEach(resetApiMocks);
+
+  function mockUploadReachesComplete() {
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+  }
+
+  it("appends the discard hint when the complete step returns 409", async () => {
+    mockUploadReachesComplete();
+    mockCompleteUpload.mockRejectedValue({
+      status: 409,
+      error: { code: "PAPER_CONFLICT", message: "Conflict during finalize." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Conflict during finalize.");
+    expect(banner).toHaveTextContent(
+      "Your uploaded file was discarded; submitting again will re-upload it.",
+    );
   });
 
-  /** Fill title + DOI + PDF file so the form is submittable */
-  async function fillForm(doi = "10.1000/abc123") {
-    const titleInput = screen.getByLabelText(/title/i);
+  it("surfaces a structured non-409 API error message from an upload phase", async () => {
+    mockUploadReachesComplete();
+    mockCompleteUpload.mockRejectedValue({
+      status: 500,
+      error: { code: "SERVER_ERROR", message: "Server error, try again." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
     await act(async () => {
-      fireEvent.change(titleInput, { target: { value: "Paper T" } });
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
-    const doiInput = screen.getByLabelText(/doi/i);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Server error, try again.");
+    // Not a completing-409, so the discard hint must NOT be appended.
+    expect(banner).not.toHaveTextContent("Your uploaded file was discarded");
+  });
+
+  it("does NOT append the discard hint for a non-completing 409 (request phase)", async () => {
+    mockRequestUrl.mockRejectedValue({
+      status: 409,
+      error: { code: "PAPER_CONFLICT", message: "Conflict while requesting." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
     await act(async () => {
-      fireEvent.change(doiInput, { target: { value: doi } });
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
-    const fileInput = screen.getByLabelText(/pdf file/i) as HTMLInputElement;
-    const file = new File([new Uint8Array(1024)], "x.pdf", {
-      type: "application/pdf",
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Conflict while requesting.");
+    expect(banner).not.toHaveTextContent(
+      "Your uploaded file was discarded; submitting again will re-upload it.",
+    );
+  });
+
+  it("does NOT append the discard hint for a non-completing 409 (upload phase)", async () => {
+    // request phase succeeds, but the direct-to-storage PUT (upload phase)
+    // returns 409. The failing phase is "uploading", not "completing", so the
+    // discard hint must NOT be appended — nothing has been finalized/discarded.
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
     });
+    mockUploadFile.mockRejectedValue({
+      status: 409,
+      error: { code: "CONFLICT", message: "Conflict during upload." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
     await act(async () => {
-      fireEvent.change(fileInput, { target: { files: [file] } });
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
-  }
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Conflict during upload.");
+    expect(banner).not.toHaveTextContent(
+      "Your uploaded file was discarded; submitting again will re-upload it.",
+    );
+    // The completing phase never ran, so finalize was never attempted.
+    expect(mockCompleteUpload).not.toHaveBeenCalled();
+  });
+
+  it("Upload Another resets to a fresh empty form", async () => {
+    // After a successful upload the success screen is shown. Clicking
+    // "Upload Another" must return the user to a FRESH form: the success
+    // banner is gone, the form is rendered again, and the inputs are reset to
+    // their initial values (empty title, no file selected).
+    //
+    // Note: resetForm() also calls clearErrors() (which nulls doiError), but
+    // that error-clearing is intentional defense-in-depth and is NOT separately
+    // observable here — errors never coexist with the success screen, so the
+    // load-bearing assertion below is the observable form reset, not error state.
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockResolvedValue(undefined);
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ title: "Paper T", doi: "10.1000/dup" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+    await screen.findByText(/uploaded and queued/i);
+
+    // Sanity: while on the success screen, the form-mode submit button is gone.
+    expect(
+      screen.queryByRole("button", { name: /upload paper/i }),
+    ).not.toBeInTheDocument();
+
+    // Click "Upload Another"
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload another/i }));
+    });
+
+    // Success screen is gone and the editable form is rendered again.
+    expect(screen.queryByText(/uploaded and queued/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /upload paper/i }),
+    ).toBeInTheDocument();
+
+    // Inputs reset to initial: empty title, and the selected-file state cleared
+    // (the "<name> (<size> MB)" summary line that only renders when
+    // selectedFile is set is gone — the React-observable signal of reset).
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/x\.pdf \(/i)).not.toBeInTheDocument();
+    // A fresh form with empty title + no selected file leaves submit disabled.
+    expect(
+      screen.getByRole("button", { name: /upload paper/i }),
+    ).toBeDisabled();
+  });
+});
+
+describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", () => {
+  beforeEach(resetApiMocks);
 
   function mockSuccessfulUpload() {
     mockRequestUrl.mockResolvedValue({
@@ -578,7 +684,7 @@ describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", ()
 
     renderPage();
     await waitForForm();
-    await fillForm();
+    await fillForm({ doi: "10.1000/abc123" });
 
     const select = screen.getByLabelText(/applicable population/i);
     await act(async () => {
@@ -599,7 +705,7 @@ describe("ExpertPaperUploadPage — Applicable population (FR-EXPV-05 ext.)", ()
 
     renderPage();
     await waitForForm();
-    await fillForm();
+    await fillForm({ doi: "10.1000/abc123" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
