@@ -4,6 +4,7 @@
  */
 
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 export type BetaRequestSource = "hero" | "final_cta" | "reddit" | "dm" | "other";
 
@@ -40,11 +41,7 @@ export async function requestBetaAccess(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const err = {
-      status: resp.status,
-      ...(body.detail ?? body),
-    };
-    throw err;
+    throw buildApiError(resp.status, body);
   }
 
   return resp.json() as Promise<BetaRequestResponse>;

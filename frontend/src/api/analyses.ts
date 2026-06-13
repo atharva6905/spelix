@@ -5,6 +5,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 /**
  * Convention: strings thrown from fetch functions below are surfaced directly
@@ -259,9 +260,12 @@ export async function createAnalysis(
   });
 
   if (!resp.ok) {
+    // Issue #283: aligned to the shared `buildApiError`. The pre-#283 spread
+    // diverged as `body.error ?? body.detail ?? body`, surfacing a top-level
+    // `body.error.{code,message}` as `.message`; `buildApiError` preserves that
+    // top-level-`error` precedence so consumers keep reading `.message`.
     const body = await resp.json().catch(() => ({}));
-    const err = { status: resp.status, ...(body.error ?? body.detail ?? body) };
-    throw err;
+    throw buildApiError(resp.status, body);
   }
 
   return resp.json() as Promise<CreateAnalysisResponse>;
