@@ -305,6 +305,7 @@ describe("ExpertPortalPage", () => {
     vi.mocked(updatePaperMetadata).mockResolvedValue({
       id: "bbbbbbbb-1111-2222-3333-444444444444",
       sex_applicability: "female",
+      restamp_failed: false,
     });
 
     await openMyPapersTab();
@@ -327,7 +328,11 @@ describe("ExpertPortalPage", () => {
 
   it("disables the select while the metadata PATCH is in flight", async () => {
     vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
-    let resolvePatch!: (v: { id: string; sex_applicability: string }) => void;
+    let resolvePatch!: (v: {
+      id: string;
+      sex_applicability: string;
+      restamp_failed: boolean;
+    }) => void;
     vi.mocked(updatePaperMetadata).mockImplementation(
       () =>
         new Promise((res) => {
@@ -349,6 +354,7 @@ describe("ExpertPortalPage", () => {
       resolvePatch({
         id: "bbbbbbbb-1111-2222-3333-444444444444",
         sex_applicability: "female",
+        restamp_failed: false,
       });
     });
 
@@ -431,5 +437,57 @@ describe("ExpertPortalPage", () => {
       ).toBeInTheDocument(),
     );
     expect(select.value).toBe("both");
+  });
+
+  // --- restamp_failed warning (issue #258, FR-RAGK-05/FR-AICP-12 ext.) ---
+
+  it("shows a non-blocking pending-retry warning when restamp_failed is true", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
+    vi.mocked(updatePaperMetadata).mockResolvedValue({
+      id: "bbbbbbbb-1111-2222-3333-444444444444",
+      sex_applicability: "female",
+      restamp_failed: true,
+    });
+
+    await openMyPapersTab();
+
+    const select = screen.getByLabelText(
+      /applicable population for squat depth study/i,
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "female" } });
+
+    // DB committed → the select STILL updates to the new value.
+    await waitFor(() => expect(select.value).toBe("female"));
+    // ...but a non-blocking warning signals the index update is pending retry.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/search index update pending retry/i),
+      ).toBeInTheDocument(),
+    );
+    // It is NOT the red hard-error banner.
+    expect(
+      screen.queryByText(/failed to update applicable population/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows no pending-retry warning on a clean save", async () => {
+    vi.mocked(listExpertPapers).mockResolvedValue([makePaper()]);
+    vi.mocked(updatePaperMetadata).mockResolvedValue({
+      id: "bbbbbbbb-1111-2222-3333-444444444444",
+      sex_applicability: "female",
+      restamp_failed: false,
+    });
+
+    await openMyPapersTab();
+
+    const select = screen.getByLabelText(
+      /applicable population for squat depth study/i,
+    ) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "female" } });
+
+    await waitFor(() => expect(select.value).toBe("female"));
+    expect(
+      screen.queryByText(/search index update pending retry/i),
+    ).not.toBeInTheDocument();
   });
 });
