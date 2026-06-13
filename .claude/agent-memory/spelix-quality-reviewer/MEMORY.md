@@ -53,3 +53,8 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #236 / expert upload hygiene (FieldError, clearErrors, 409 hint, T2) (2026-06-13) -> PASS-WITH-NITS (all fixed in-loop)
 - [Upload hygiene review (#236)](review_upload_hygiene_236.md) - async-closure phase tracking via local `let`; vacuous-reset-test trap (Upload-Another only renders on success screen → error-clearing is non-observable defense-in-depth, assert the observable form reset instead; uncontrolled file-input caveat); shared FieldError is now canonical
+
+## Reviewed: issue #235 / typed ExpertApiError + recoverable upload error phase (T2) (2026-06-13) → PASS (3 non-blocking)
+- [Expert API error patterns](frontend-expert-api-error.md) - expert.ts ExpertApiError/guard/unwrap-ladder design notes + test-coverage traps (issue #235)
+- [Frontend gotcha checklist](frontend-gotcha-checklist.md) - fast pass/fail list for frontend diffs (imports, use-client, fetch, SaMD copy, supabase mock)
+- **Blast-radius miss caught downstream:** quality-review (like spec) cleared only the changed files and MISSED that `expertFetch`'s new top-level-`code` throw shape regressed `ExpertPortalPage.handleApprovePaper` (DUPLICATE_DOI, FR-EXPV-06/#260) — it still read `apiErr.error?.code`. `/code-review`'s cross-file tracer caught it; fixed in d1b7c93 + regression test. LESSON: for a diff that changes a SHARED error/throw/return shape, audit ALL consumers of that function (grep the symbol), not just the diff's files — the "two untested branches" finding is minor next to an unmigrated sibling consumer.
