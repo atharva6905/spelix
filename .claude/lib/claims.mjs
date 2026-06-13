@@ -75,3 +75,32 @@ export async function readyQueue() {
   });
   return eligible;
 }
+
+function isLiveClaim(issueNum, ownerSid, state) {
+  const e = state[issueNum];
+  return !!(e && e.sid === ownerSid && isFresh(e.ts));
+}
+
+export async function claim({ sid }) {
+  const chosen = await withLock(async () => {
+    const state = readState();
+    for (const c of await readyQueue()) {
+      const names = await issueLabelNames(c.number);
+      const owner = claimOwner(names);
+      if (owner) {
+        if (isLiveClaim(c.number, owner, state)) continue;
+        await removeLabel(c.number, C.CLAIM_LABEL_PREFIX + owner);
+        delete state[c.number];
+      }
+      const myLabel = C.CLAIM_LABEL_PREFIX + sid;
+      await ensureLabel(myLabel);
+      await addLabel(c.number, myLabel);
+      state[c.number] = { sid, ts: new Date().toISOString(), worktree: process.env.CLAIMS_WORKTREE || null };
+      writeState(state);
+      return { number: c.number, title: c.title, sid };
+    }
+    return null;
+  });
+  if (chosen) { try { await comment(chosen.number, `${C.MARKER_SENTINEL} ${sid} @ ${new Date().toISOString()}`); } catch { /* best effort */ } }
+  return chosen;
+}

@@ -106,3 +106,34 @@ test('readyQueue: filters by tier, excludes exclusion labels, orders tier→size
   const q = (await readyQueue()).map((i) => i.number);
   assert.deepEqual(q, [13, 14, 12]);
 });
+
+test('claim: takes the top eligible issue, labels it, records heartbeat', async () => {
+  const h = harness({
+    '13': { number: 13, title: 'T0 small', labels: ['T0', 'size/S'] },
+    '12': { number: 12, title: 'T1 big', labels: ['T1', 'size/L'] },
+  });
+  const { claim } = await import('./claims.mjs?claim=1');
+  const got = await claim({ sid: 'sl-a' });
+  assert.equal(got.number, 13);
+  assert.ok(h.read().issues['13'].labels.includes('claim:sl-a'));
+  assert.ok(h.read().comments.some((c) => c.n === '13' && c.body.includes('claimed by sl-a')));
+});
+
+test('claim: skips an issue with a LIVE claim by another session', async () => {
+  const h = harness({ '13': { number: 13, title: 'x', labels: ['T0', 'size/S', 'claim:sl-b'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-b', ts: new Date().toISOString() } }));
+  const { claim } = await import('./claims.mjs?claim=2');
+  const got = await claim({ sid: 'sl-a' });
+  assert.equal(got, null);
+});
+
+test('claim: reclaims an issue whose claim heartbeat is STALE', async () => {
+  const h = harness({ '13': { number: 13, title: 'x', labels: ['T0', 'size/S', 'claim:sl-b'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-b', ts: new Date(Date.now() - 45 * 60 * 1000).toISOString() } }));
+  const { claim } = await import('./claims.mjs?claim=3');
+  const got = await claim({ sid: 'sl-a' });
+  assert.equal(got.number, 13);
+  const labels = h.read().issues['13'].labels;
+  assert.ok(labels.includes('claim:sl-a'));
+  assert.ok(!labels.includes('claim:sl-b'));
+});
