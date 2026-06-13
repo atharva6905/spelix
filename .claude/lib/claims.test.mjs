@@ -45,3 +45,41 @@ test('gh adapter: listOpenIssues parses the shim DB', async () => {
   assert.equal(issues[0].number, 5);
   assert.deepEqual(issues[0].labels.map((l) => l.name), ['T1', 'size/S']);
 });
+
+test('lock: two processes incrementing under withLock never interleave', () => {
+  const h = harness();
+  const counter = join(h.dir, 'counter.txt');
+  wf(counter, '0');
+  const cpath = counter.replace(/\\/g, '/');
+  const claimsUrl = pathToFileURL(join(process.cwd(), '.claude/lib/claims.mjs')).href;
+  const worker = `
+    import { withLock } from '${claimsUrl}';
+    import { readFileSync, writeFileSync } from 'node:fs';
+    await withLock(async () => {
+      const v = Number(readFileSync('${cpath}', 'utf8'));
+      await new Promise((r) => setTimeout(r, 200));
+      writeFileSync('${cpath}', String(v + 1));
+    });
+  `;
+  const { spawn } = require('node:child_process');
+  const env = { ...process.env };
+  const p1 = spawn(process.execPath, ['--input-type=module', '-e', worker], { env });
+  const p2 = spawn(process.execPath, ['--input-type=module', '-e', worker], { env });
+  return new Promise((resolve) => {
+    let done = 0;
+    const fin = () => { if (++done === 2) { assert.equal(readFileSync(counter, 'utf8'), '2'); resolve(); } };
+    p1.on('exit', fin); p2.on('exit', fin);
+  });
+});
+
+test('lock: a stale lock dir (older than LOCK_STALE_MS) is force-broken', async () => {
+  const h = harness();
+  const { withLock } = await import('./claims.mjs?lock=1');
+  const { mkdirSync, utimesSync } = await import('node:fs');
+  mkdirSync(`${h.dir}/.claim.lock`);
+  const past = (Date.now() - 5 * 60 * 1000) / 1000;
+  utimesSync(`${h.dir}/.claim.lock`, past, past);
+  let ran = false;
+  await withLock(async () => { ran = true; });
+  assert.ok(ran);
+});

@@ -26,3 +26,23 @@ async function ensureLabel(name) {
 async function addLabel(n, name) { await gh(['issue', 'edit', String(n), '--add-label', name]); }
 async function removeLabel(n, name) { await gh(['issue', 'edit', String(n), '--remove-label', name]); }
 async function comment(n, body) { await gh(['issue', 'comment', String(n), '--body', body]); }
+
+function lockAgeMs() { try { return Date.now() - statSync(C.lockDir()).mtimeMs; } catch { return Infinity; } }
+
+export async function withLock(fn) {
+  const start = Date.now();
+  for (;;) {
+    try {
+      mkdirSync(C.lockDir());
+      writeFileSync(`${C.lockDir()}/owner`, `${process.pid} ${new Date().toISOString()}`);
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      if (lockAgeMs() >= C.LOCK_STALE_MS) { try { rmSync(C.lockDir(), { recursive: true, force: true }); } catch { /* race */ } continue; }
+      if (Date.now() - start > C.LOCK_STALE_MS * 2) throw new Error('claims: lock acquisition timed out');
+      await sleep(150);
+    }
+  }
+  try { return await fn(); }
+  finally { try { rmSync(C.lockDir(), { recursive: true, force: true }); } catch { /* already gone */ } }
+}
