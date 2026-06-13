@@ -559,10 +559,47 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
     );
   });
 
-  it("clears a stale DOI error when 'Upload Another' is clicked after success", async () => {
-    // First submit: complete-step 409 leaves a DOI error visible, then the
-    // user corrects course and a subsequent submit succeeds. The reset button
-    // must clear every error including doiError.
+  it("does NOT append the discard hint for a non-completing 409 (upload phase)", async () => {
+    // request phase succeeds, but the direct-to-storage PUT (upload phase)
+    // returns 409. The failing phase is "uploading", not "completing", so the
+    // discard hint must NOT be appended — nothing has been finalized/discarded.
+    mockRequestUrl.mockResolvedValue({
+      id: "p-1",
+      upload_url: "https://s/upload",
+      storage_path: "papers/p-1/x.pdf",
+      expires_at: "2026-04-15T12:00:00Z",
+    });
+    mockUploadFile.mockRejectedValue({
+      status: 409,
+      error: { code: "CONFLICT", message: "Conflict during upload." },
+    });
+
+    renderPage();
+    await waitForForm();
+    await fillForm({ doi: "10.1000/abc123" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Conflict during upload.");
+    expect(banner).not.toHaveTextContent(
+      "Your uploaded file was discarded; submitting again will re-upload it.",
+    );
+    // The completing phase never ran, so finalize was never attempted.
+    expect(mockCompleteUpload).not.toHaveBeenCalled();
+  });
+
+  it("Upload Another resets to a fresh empty form", async () => {
+    // After a successful upload the success screen is shown. Clicking
+    // "Upload Another" must return the user to a FRESH form: the success
+    // banner is gone, the form is rendered again, and the inputs are reset to
+    // their initial values (empty title, no file selected).
+    //
+    // Note: resetForm() also calls clearErrors() (which nulls doiError), but
+    // that error-clearing is intentional defense-in-depth and is NOT separately
+    // observable here — errors never coexist with the success screen, so the
+    // load-bearing assertion below is the observable form reset, not error state.
     mockRequestUrl.mockResolvedValue({
       id: "p-1",
       upload_url: "https://s/upload",
@@ -570,45 +607,45 @@ describe("ExpertPaperUploadPage — complete-step 409 + reset hygiene (issue #23
       expires_at: "2026-04-15T12:00:00Z",
     });
     mockUploadFile.mockResolvedValue(undefined);
-    // First complete call fails with a DOI conflict (sets doiError), second succeeds.
-    mockCompleteUpload
-      .mockRejectedValueOnce({
-        status: 409,
-        error: {
-          code: "DUPLICATE_DOI",
-          message: "A paper with this DOI already exists: Existing Paper",
-        },
-      })
-      .mockResolvedValueOnce({
-        id: "p-1",
-        review_status: "pending",
-        storage_path: "papers/p-1/x.pdf",
-      });
+    mockCompleteUpload.mockResolvedValue({
+      id: "p-1",
+      review_status: "pending",
+      storage_path: "papers/p-1/x.pdf",
+    });
 
     renderPage();
     await waitForForm();
-    await fillForm({ doi: "10.1000/dup" });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /upload/i }));
-    });
-    // DOI error from the duplicate is shown
-    await screen.findByText(/already exists: Existing Paper/);
-
-    // Resubmit succeeds
+    await fillForm({ title: "Paper T", doi: "10.1000/dup" });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload/i }));
     });
     await screen.findByText(/uploaded and queued/i);
 
-    // Now click "Upload Another" — every error, including any stale DOI error, clears
+    // Sanity: while on the success screen, the form-mode submit button is gone.
+    expect(
+      screen.queryByRole("button", { name: /upload paper/i }),
+    ).not.toBeInTheDocument();
+
+    // Click "Upload Another"
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /upload another/i }));
     });
 
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    // Success screen is gone and the editable form is rendered again.
+    expect(screen.queryByText(/uploaded and queued/i)).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/already exists: Existing Paper/),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /upload paper/i }),
+    ).toBeInTheDocument();
+
+    // Inputs reset to initial: empty title, and the selected-file state cleared
+    // (the "<name> (<size> MB)" summary line that only renders when
+    // selectedFile is set is gone — the React-observable signal of reset).
+    expect((screen.getByLabelText(/title/i) as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText(/x\.pdf \(/i)).not.toBeInTheDocument();
+    // A fresh form with empty title + no selected file leaves submit disabled.
+    expect(
+      screen.getByRole("button", { name: /upload paper/i }),
+    ).toBeDisabled();
   });
 });
 
