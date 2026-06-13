@@ -101,13 +101,18 @@ def test_dockerfile_copies_and_verifies_the_manifest() -> None:
     copy_re = re.compile(r"^COPY\s+.*docling_models\.sha256.*$", re.MULTILINE)
     assert copy_re.search(content), "no COPY line for docling_models.sha256"
 
-    # The verification runs sha256sum -c against the copied manifest. Match the
-    # actual check *command* (referencing the manifest path), not an incidental
+    # The verification runs sha256sum -c against the copied manifest. Pin the
+    # EXACT verified path: a loose `\S*docling_models\.sha256` would still pass
+    # if someone pointed the check at a wrong absolute path (e.g.
+    # /tmp/docling_models.sha256), so require the /app/ location explicitly.
+    assert "sha256sum -c /app/docling_models.sha256" in content, (
+        "verify step must run `sha256sum -c /app/docling_models.sha256`"
+    )
+    # Anchor the ordering check below to this exact command, not an incidental
     # "sha256sum -c" mention in the surrounding comment block.
-    assert "sha256sum -c" in content, "no sha256sum -c verification step"
-    check_re = re.compile(r"sha256sum -c\s+\S*docling_models\.sha256")
+    check_re = re.compile(r"sha256sum -c\s+/app/docling_models\.sha256")
     check_match = check_re.search(content)
-    assert check_match, "sha256sum -c does not reference docling_models.sha256"
+    assert check_match, "sha256sum -c does not reference /app/docling_models.sha256"
 
     # The check must run from the model dir so the ./-relative paths resolve.
     # Compare against the real check command's position (check_match), not the
