@@ -1,5 +1,61 @@
 # Groom Digest
 
+## 2026-06-13 cycle 3 — quiet/healthy steady state; ship-loop PRs all merged
+
+Mode: REPORT-ONLY, /loop cycle 3. `reclaim-stale` still stood down (#293).
+- **PRs:** 0 open — #290 (#269), #291 (#258), #292 (#283) all **merged**; origin/main → `dbbb99c`. CI all green (no flaky).
+- **Claims:** board `[]` (no live claims); `gc-labels` removed orphan `claim:sl-3a30` def. Empty + clean.
+- **No-harm note:** despite cycle-1/2 reclaim-stale stripping the #258/#269/#283 claims, all three still merged cleanly — the #293 bug was a latent risk that wasn't exploited this run. Fix still warranted.
+- **Worktrees:** the 3 just-merged branches (`feat+issue-258-restamp-retry`, `fix+issue-269-docling-checksum-verify`, `refactor+issue-283-shared-apierror`) are now also prunable (~15 merged total). Full rescan deferred — cycle-1 list + these 3 stands.
+- Sweeps 1/3/4 nominal (no new unlabeled issues beyond my #293; deps cadence-skip; flaky none).
+
+## 2026-06-13 cycle 2 — claims bug CONFIRMED + issue #293 filed; reclaim-stale stood down
+
+Mode: REPORT-ONLY, /loop cycle 2 (~25min after cycle 1). 3 parallel ship-loops now at PR stage.
+
+- **Sweep 2 (PRs):** 3 new open PRs, **all T2**, all from the parallel ship-loops — **#290** docling weight checksums (#269, sl-3a30), **#291** restamp reliability (#258, sl-aa0c), **#292** shared ApiError (#283, sl-ff44). All fresh (<30min), all T2 → groom never touches T2 / never merges T1+ → **report-only, no action.** The ship-loop sessions own these.
+- **Sweep 6 (claims) — BUG CONFIRMED:** this cycle reclaim-stale stripped `claim:sl-3a30` from #269 **while sl-3a30 was alive and had just opened PR #290** (same pattern as cycle 1's #258/#283 → PRs #291/#292). Read `.claude/lib/claims.mjs`: claims store `worktree: CLAIMS_WORKTREE||null` (ship-loop claims in step-0 *before* the worktree exists → null); `heartbeat()` never backfills it; so `reclaimStale()`'s `worktreeGone` is **always true** and the guard degrades to heartbeat-staleness only. `readyQueue()` doesn't exclude open-PR issues, so a premature reclaim → duplicate-implementation risk. **Filed as issue #293** (bug/tech-debt/infra/size/S, deliberately NO tier label so a ship-loop won't auto-grab a claim-engine change).
+- **DECISION:** for the remainder of this groom session, **STOP running `reclaim-stale`** (it is actively stripping live claims). Continue `board` (read) + `gc-labels` (harmless) only. `.claims.json` is now `{}`.
+- Sweeps 1/3/4/5 unchanged from cycle 1 (no new issues; deps cadence-skip; flaky none; worktrees same 12 prunable).
+
+## 2026-06-13 — REPORT-ONLY run alongside active ship-loops (no --merge, sweeps 1–6, /loop dynamic)
+
+Mode: REPORT-ONLY. Zero merges, zero PRs, zero Tier 2 paths touched. Run **simultaneously with ~17 active parallel ship-loop sessions** (per user) — non-interference prioritized: no commits/pushes to main, digest written locally only.
+
+### Sweep 1 — Issue triage
+- **Actions taken:** none.
+- **Findings:** 21 open issues, **all already labeled** (type + `size/*`; tier where a diff exists). No new/unlabeled issues, no missing-type labels. Older issues #180–#226 lack `T*` tier labels by design — tier is computed from the actual diff at PR time, so triage does not fabricate them. `needs-design`/`designed`/`blocked` already applied where appropriate (#259, #226, #270–#273). **Clean no-op.**
+
+### Sweep 2 — Stale-PR babysitting
+- **Actions taken:** none.
+- **Findings:** **0 open PRs** (list_pull_requests state=open → empty). Clean no-op.
+
+### Sweep 3 — Dep bumps (weekly cadence)
+- **Actions taken:** none. **SKIPPED on cadence:** `87a593f chore(config): bump ruff 0.15.9 → 0.15.16` merged within the trailing 6-day window → cadence not due, candidate enumeration deferred to next eligible run.
+
+### Sweep 4 — Flaky-test detection
+- **Actions taken:** none.
+- **Findings:** last 30 CI runs all `success`. No same-SHA fail→pass. **No flaky pattern → no issue filed.**
+
+### Sweep 5 — Hygiene
+- **handoff.md:** stamp is today (2026-06-13) → fresh, no refresh.
+- **backlog.md / decisions.md:** NOT audited/edited this run — ship-loop release path owns its own backlog rows at merge, and 17 sessions are actively merging; editing now would race. Deferred to a quiet run. (Open question 2.)
+- **Stale worktrees (REPORT only — never auto-removed):** **12 merged branches still have worktrees**, prunable manually (none locked):
+  `worktree-agent-a22a7e9c531c25af6`, `fix/issue-204-account-storage-purge`, `fix/issue-203-brain16-cascade-predicate`, `feat/issue-220-doi-columns`, `worktree-agent-a4dc10706163c08a4`, `worktree-agent-ad64e71e910a52b60`, `feat/issue-219-doi-required-form`, `fix/issue-205-pdf-confidence-label`, `feat/issue-218-doi-dedup`, `feat/issue-225-sex-retrieval`, `fix/issue-263-docling-ocr-models`, `feat/landing-page`.
+  17 worktrees still active (5 locked). `feat/landing-page` is the external spelix-landing dir — verify before pruning.
+
+### Sweep 6 — Claims (self-healing hygiene; NEVER claims)
+- **Board snapshot:** #258 (sl-aa0c, 50min, stale), #269 (sl-3a30, 11min, **live**), #283 (sl-ff44, 41min, stale).
+- **reclaim-stale:** reclaimed **#258** and **#283** (heartbeat >30min) → returned to ready pool.
+- **gc-labels:** nothing to delete (no orphan `claim:*` label definitions).
+- ⚠️ **Possible bug:** board reported `worktreePresent:false` for **all three** claims, including the live #269 — yet the OS `git worktree list` shows worktrees present for all three (`feat+issue-258-restamp-retry`, `fix+issue-269-docling-checksum-verify`, `refactor+issue-283-shared-apierror`). If `worktreePresent` always returns false, the reclaim-stale "AND worktree gone" guard is effectively a no-op and reclaim runs on heartbeat staleness alone — more aggressive than the protocol intends. **Open question 1.**
+
+### Open questions for the human
+1. **claims.mjs `worktreePresent` detection** appears to universally return false (path-matching mismatch between stored `.claims.json` worktree path and actual worktree path on Windows?). Verify and fix, or the "worktree gone" reclaim guard is bypassed.
+2. **backlog/decisions hygiene** deferred to avoid racing the 17 active ship-loop sessions. Run a quiet groom (or let each ship-loop's release handle its own rows) to confirm the recently-merged issues (#203/#204/#205/#218/#219/#220/#225/#263) have archive rows.
+3. **12 merged worktrees** ready for manual prune (`git worktree remove <path>`).
+4. **Digest not committed** this run (non-interference with parallel main pushes). Fold into the next clean commit point.
+
 ## 2026-06-09 — REPORT-ONLY validation run (no --merge, all 5 sweeps)
 
 Mode: REPORT-ONLY. Zero merges, zero PRs created, zero Tier 2 paths touched. Not run under /loop (no ScheduleWakeup).
