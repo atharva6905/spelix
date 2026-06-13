@@ -137,3 +137,56 @@ test('claim: reclaims an issue whose claim heartbeat is STALE', async () => {
   assert.ok(labels.includes('claim:sl-a'));
   assert.ok(!labels.includes('claim:sl-b'));
 });
+
+test('release: merged drops the claim label and heartbeat; blocked relabels', async () => {
+  const h = harness({ '13': { number: 13, title: 'x', labels: ['T0', 'claim:sl-a'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-a', ts: new Date().toISOString() } }));
+  const { release, readState } = await import('./claims.mjs?rel=1');
+  await release({ sid: 'sl-a', issue: 13, outcome: 'merged' });
+  assert.ok(!h.read().issues['13'].labels.includes('claim:sl-a'));
+  assert.equal(readState()[13], undefined);
+  wf(join(h.dir, 'db.json'), JSON.stringify({ issues: { '14': { number: 14, title: 'y', labels: ['T1', 'claim:sl-a'] } }, labels: [], comments: [] }));
+  await release({ sid: 'sl-a', issue: 14, outcome: 'blocked' });
+  assert.ok(h.read().issues['14'].labels.includes('blocked'));
+  assert.ok(!h.read().issues['14'].labels.includes('claim:sl-a'));
+});
+
+test('heartbeat: refreshes ts only for the owning sid', async () => {
+  const h = harness();
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-a', ts: new Date(Date.now() - 10 * 60 * 1000).toISOString() } }));
+  const { heartbeat, readState } = await import('./claims.mjs?hb=1');
+  assert.equal(await heartbeat({ sid: 'sl-b', issue: 13 }), false);
+  assert.equal(await heartbeat({ sid: 'sl-a', issue: 13 }), true);
+  assert.ok(Date.now() - Date.parse(readState()[13].ts) < 60 * 1000);
+});
+
+test('reclaimStale: reclaims only stale claims whose worktree is gone', async () => {
+  const h = harness({ '13': { number: 13, title: 'x', labels: ['T0', 'claim:sl-a'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({
+    13: { sid: 'sl-a', ts: new Date(Date.now() - 45 * 60 * 1000).toISOString(), worktree: '/does/not/exist' },
+  }));
+  const { reclaimStale } = await import('./claims.mjs?rs=1');
+  const out = await reclaimStale();
+  assert.deepEqual(out, [{ issue: 13, sid: 'sl-a' }]);
+  assert.ok(!h.read().issues['13'].labels.includes('claim:sl-a'));
+});
+
+test('gcLabels: deletes claim label defs not applied to any open issue', async () => {
+  const h = harness({ '13': { number: 13, title: 'x', labels: ['T0', 'claim:sl-a'] } }, ['claim:sl-a', 'claim:sl-OLD']);
+  const { gcLabels } = await import('./claims.mjs?gc=1');
+  const removed = await gcLabels();
+  assert.deepEqual(removed, ['claim:sl-OLD']);
+  assert.ok(!h.read().labels.includes('claim:sl-OLD'));
+  assert.ok(h.read().labels.includes('claim:sl-a'));
+});
+
+test('board: reports issue, sid, age, liveness', async () => {
+  const h = harness({ '13': { number: 13, title: 'Title 13', labels: ['T0', 'claim:sl-a'] } });
+  wf(join(h.dir, '.claims.json'), JSON.stringify({ 13: { sid: 'sl-a', ts: new Date().toISOString(), worktree: null } }));
+  const { board } = await import('./claims.mjs?bd=1');
+  const rows = await board();
+  assert.equal(rows[0].issue, 13);
+  assert.equal(rows[0].sid, 'sl-a');
+  assert.equal(rows[0].title, 'Title 13');
+  assert.equal(rows[0].live, true);
+});

@@ -104,3 +104,63 @@ export async function claim({ sid }) {
   if (chosen) { try { await comment(chosen.number, `${C.MARKER_SENTINEL} ${sid} @ ${new Date().toISOString()}`); } catch { /* best effort */ } }
   return chosen;
 }
+
+export async function release({ sid, issue, outcome }) {
+  return withLock(async () => {
+    const state = readState();
+    try { await removeLabel(issue, C.CLAIM_LABEL_PREFIX + sid); } catch { /* already gone */ }
+    if (outcome === 'blocked') await addLabel(issue, 'blocked');
+    else if (outcome === 'needs-human') await addLabel(issue, 'needs-human');
+    delete state[issue];
+    writeState(state);
+    return { issue, outcome };
+  });
+}
+
+export async function heartbeat({ sid, issue }) {
+  return withLock(async () => {
+    const state = readState();
+    if (state[issue] && state[issue].sid === sid) { state[issue].ts = new Date().toISOString(); writeState(state); return true; }
+    return false;
+  });
+}
+
+export async function reclaimStale() {
+  return withLock(async () => {
+    const state = readState();
+    const reclaimed = [];
+    for (const [issue, e] of Object.entries(state)) {
+      const worktreeGone = !e.worktree || !existsSync(e.worktree);
+      if (!isFresh(e.ts) && worktreeGone) {
+        try { await removeLabel(issue, C.CLAIM_LABEL_PREFIX + e.sid); } catch { /* gone */ }
+        delete state[issue];
+        reclaimed.push({ issue: Number(issue), sid: e.sid });
+      }
+    }
+    writeState(state);
+    return reclaimed;
+  });
+}
+
+export async function gcLabels() {
+  const defs = JSON.parse(await gh(['label', 'list', '--json', 'name', '--limit', '200']))
+    .map((d) => d.name).filter((n) => n.startsWith(C.CLAIM_LABEL_PREFIX));
+  const inUse = new Set();
+  for (const i of await listOpenIssues()) for (const l of i.labels) if (l.name.startsWith(C.CLAIM_LABEL_PREFIX)) inUse.add(l.name);
+  const removed = [];
+  for (const d of defs) if (!inUse.has(d)) { try { await gh(['label', 'delete', d, '--yes']); removed.push(d); } catch { /* race */ } }
+  return removed;
+}
+
+export async function board() {
+  const state = readState();
+  const byNum = Object.fromEntries((await listOpenIssues()).map((i) => [i.number, i]));
+  return Object.entries(state).map(([issue, e]) => ({
+    issue: Number(issue),
+    sid: e.sid,
+    title: byNum[Number(issue)]?.title ?? '(closed/unknown)',
+    ageMin: Math.round((Date.now() - Date.parse(e.ts)) / 60000),
+    live: isFresh(e.ts),
+    worktreePresent: !!(e.worktree && existsSync(e.worktree)),
+  }));
+}
