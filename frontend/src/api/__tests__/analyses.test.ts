@@ -10,6 +10,7 @@ import {
   sendChatMessage,
   authHeaders,
 } from "@/api/analyses";
+import { isApiError } from "@/api/errors";
 
 // Mock supabase so getAuthToken returns a deterministic token without
 // hitting the real client.
@@ -151,6 +152,19 @@ describe("getAnalysisDetail — 404 error coercion regression", () => {
       getAnalysisDetail("abc"),
     ).rejects.toThrow("Failed to fetch analysis");
   });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying the status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(getAnalysisDetail("abc")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 404 && e.message === "Not found",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -240,6 +254,19 @@ describe("startAnalysis", () => {
     );
     await expect(startAnalysis("a1")).rejects.toThrow("Failed to start analysis");
   });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying the status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { message: "Analysis not found" } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(startAnalysis("a1")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 404 && e.message === "Analysis not found",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -281,6 +308,19 @@ describe("getAnalysisStatus", () => {
       new Response(JSON.stringify({}), { status: 500, headers: { "Content-Type": "application/json" } }),
     );
     await expect(getAnalysisStatus("a1")).rejects.toThrow("Failed to fetch status");
+  });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying the status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ detail: "Not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(getAnalysisStatus("a1")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 404 && e.message === "Not found",
+    );
   });
 });
 
@@ -369,6 +409,19 @@ describe("getChatHistory", () => {
     );
     await expect(getChatHistory("a1")).rejects.toThrow("Failed to fetch chat history");
   });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying the status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Chat not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(getChatHistory("a1")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 404 && e.message === "Chat not found",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -401,5 +454,18 @@ describe("sendChatMessage", () => {
       new Response(JSON.stringify({}), { status: 500, headers: { "Content-Type": "application/json" } }),
     );
     await expect(sendChatMessage("a1", "Hello")).rejects.toThrow("Failed to send message");
+  });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying the status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Rate limited" }), {
+        status: 429,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(sendChatMessage("a1", "Hello")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 429 && e.message === "Rate limited",
+    );
   });
 });

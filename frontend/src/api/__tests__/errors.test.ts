@@ -117,4 +117,46 @@ describe("buildApiError", () => {
     expect(err.message.length).toBeGreaterThan(0);
     expect(err.message).not.toMatch(/\[object Object\]/);
   });
+
+  // Issue #294: per-surface fallback override. Modules migrating off the bare
+  // `new Error("Failed to fetch X")` idiom must preserve their exact
+  // user-facing fallback string when the body yields no usable message. The
+  // optional third arg replaces the generic `Request failed (HTTP N).` default.
+  describe("fallback override (issue #294)", () => {
+    it("uses the provided fallback when the body has no usable message", () => {
+      const err = buildApiError(500, {}, "Failed to fetch consent status");
+      expect(err.status).toBe(500);
+      expect(err.message).toBe("Failed to fetch consent status");
+    });
+
+    it("uses the provided fallback for a non-object body", () => {
+      const err = buildApiError(503, "boom", "Failed to grant consent");
+      expect(err.status).toBe(503);
+      expect(err.message).toBe("Failed to grant consent");
+    });
+
+    it("prefers a real body message over the fallback override", () => {
+      const err = buildApiError(
+        404,
+        { detail: "Not found" },
+        "Failed to fetch status",
+      );
+      expect(err.message).toBe("Not found");
+    });
+
+    it("prefers a top-level error.message over the fallback override", () => {
+      const err = buildApiError(
+        400,
+        { error: { code: "LIMIT", message: "File too large" } },
+        "Failed to start analysis",
+      );
+      expect(err.message).toBe("File too large");
+      expect(err.code).toBe("LIMIT");
+    });
+
+    it("retains the generic fallback when no override is supplied", () => {
+      const err = buildApiError(500, {});
+      expect(err.message).toBe("Request failed (HTTP 500).");
+    });
+  });
 });

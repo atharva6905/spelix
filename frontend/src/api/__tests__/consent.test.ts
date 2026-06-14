@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi, beforeEach } from "vitest";
 import { getConsents, grantConsent, withdrawConsent } from "@/api/consent";
+import { isApiError } from "@/api/errors";
 
 // Mock supabase
 const mockGetSession = vi.fn();
@@ -85,6 +86,19 @@ describe("getConsents", () => {
     await expect(getConsents()).rejects.toThrow("Not authenticated");
   });
 
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying message + status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(getConsents()).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 401 && e.message === "Unauthorized",
+    );
+  });
+
   test("sends Authorization header with token", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify([]), {
@@ -168,6 +182,19 @@ describe("grantConsent", () => {
     );
   });
 
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying message + status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "Grant failed" } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(grantConsent("analytics", "1.0")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 400 && e.message === "Grant failed",
+    );
+  });
+
   test("sends POST with correct body", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -246,6 +273,19 @@ describe("withdrawConsent", () => {
     mockGetSession.mockResolvedValue({ data: { session: null } });
 
     await expect(withdrawConsent("analytics")).rejects.toThrow("Not authenticated");
+  });
+
+  // Issue #294: migrated to the shared ApiError idiom. Message + status preserved.
+  test("throws an ApiError carrying message + status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Withdraw detail error" }), {
+        status: 422,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(withdrawConsent("analytics")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 422 && e.message === "Withdraw detail error",
+    );
   });
 
   test("sends POST to withdraw endpoint with correct body", async () => {

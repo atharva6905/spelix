@@ -284,8 +284,8 @@ export async function startAnalysis(
     headers: await authHeaders(),
   });
   if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message ?? "Failed to start analysis");
+    const body = await response.json().catch(() => ({}));
+    throw buildApiError(response.status, body, "Failed to start analysis");
   }
   return response.json() as Promise<{ id: string; status: string }>;
 }
@@ -305,10 +305,7 @@ export async function getAnalysisStatus(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const raw = body.error?.message ?? body.detail;
-    const message =
-      typeof raw === "string" ? raw : "Failed to fetch status";
-    throw new Error(message);
+    throw buildApiError(resp.status, body, "Failed to fetch status");
   }
 
   return resp.json() as Promise<AnalysisStatusResponse>;
@@ -329,10 +326,7 @@ export async function getAnalysisDetail(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const raw = body.error?.message ?? body.detail;
-    const message =
-      typeof raw === "string" ? raw : "Failed to fetch analysis";
-    throw new Error(message);
+    throw buildApiError(resp.status, body, "Failed to fetch analysis");
   }
 
   return resp.json() as Promise<AnalysisDetail>;
@@ -412,7 +406,7 @@ export async function getChatHistory(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Failed to fetch chat history");
+    throw buildApiError(resp.status, body, "Failed to fetch chat history");
   }
 
   return resp.json() as Promise<ChatHistoryResponse>;
@@ -437,7 +431,7 @@ export async function sendChatMessage(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Failed to send message");
+    throw buildApiError(resp.status, body, "Failed to send message");
   }
 
   return resp.json() as Promise<ChatMessage>;

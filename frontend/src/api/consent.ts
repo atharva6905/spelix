@@ -10,6 +10,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -79,9 +80,7 @@ export async function getConsents(): Promise<ConsentStatusResponse> {
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch consent status";
-    throw new Error(message);
+    throw buildApiError(resp.status, body, "Failed to fetch consent status");
   }
 
   return resp.json() as Promise<ConsentStatusResponse>;
@@ -108,9 +107,7 @@ export async function grantConsent(
 
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
-    const message =
-      errBody.error?.message ?? errBody.detail ?? "Failed to grant consent";
-    throw new Error(message);
+    throw buildApiError(resp.status, errBody, "Failed to grant consent");
   }
 
   return resp.json() as Promise<ConsentRecord>;
@@ -136,9 +133,7 @@ export async function withdrawConsent(
 
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
-    const message =
-      errBody.error?.message ?? errBody.detail ?? "Failed to withdraw consent";
-    throw new Error(message);
+    throw buildApiError(resp.status, errBody, "Failed to withdraw consent");
   }
 
   return resp.json() as Promise<ConsentRecord>;

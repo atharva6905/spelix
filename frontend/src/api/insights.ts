@@ -8,6 +8,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { API_BASE } from "@/api/config";
+import { buildApiError } from "@/api/errors";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,11 +61,7 @@ export async function getExerciseInsights(
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch exercise insights";
-    const err = new Error(message) as Error & { status: number };
-    err.status = resp.status;
-    throw err;
+    throw buildApiError(resp.status, body, "Failed to fetch exercise insights");
   }
 
   return resp.json() as Promise<ExerciseInsights>;
@@ -82,11 +79,7 @@ export async function getGlobalInsights(): Promise<GlobalInsights> {
 
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    const message =
-      body.error?.message ?? body.detail ?? "Failed to fetch global insights";
-    const err = new Error(message) as Error & { status: number };
-    err.status = resp.status;
-    throw err;
+    throw buildApiError(resp.status, body, "Failed to fetch global insights");
   }
 
   return resp.json() as Promise<GlobalInsights>;
