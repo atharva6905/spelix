@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi, beforeEach } from "vitest";
 import { getExerciseInsights, getGlobalInsights } from "@/api/insights";
+import { isApiError } from "@/api/errors";
 
 // Mock supabase
 const mockGetSession = vi.fn();
@@ -103,6 +104,19 @@ describe("getExerciseInsights", () => {
     }
   });
 
+  // Issue #294: migrated from the hand-rolled `Error & {status}` to ApiError.
+  test("throws an ApiError carrying message + status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(getExerciseInsights("squat", "high_bar")).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 404 && e.message === "Not found",
+    );
+  });
+
   test("URL-encodes type and variant", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -204,6 +218,19 @@ describe("getGlobalInsights", () => {
     } catch (err) {
       expect((err as Error & { status: number }).status).toBe(404);
     }
+  });
+
+  // Issue #294: migrated from the hand-rolled `Error & {status}` to ApiError.
+  test("throws an ApiError carrying message + status (issue #294)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "Global insights error" } }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await expect(getGlobalInsights()).rejects.toSatisfy(
+      (e) => isApiError(e) && e.status === 500 && e.message === "Global insights error",
+    );
   });
 
   test("sends Authorization header with token", async () => {

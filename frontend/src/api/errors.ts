@@ -59,9 +59,20 @@ function asString(v: unknown): string | undefined {
  *      (the `analyses.ts` core-path divergence — `body.error` first)
  *   6. Top-level `{ code, message }`
  *   7. Safe fallback
+ *
+ * `fallbackMessage` (issue #294): per-surface user-facing fallback string used
+ * only when the body yields no usable message (cases 1/2/3/5/6 with a missing
+ * message, or case 7). Modules migrating off the bare
+ * `new Error("Failed to fetch X")` idiom pass their original string here so the
+ * user-facing copy is unchanged. Omit it to keep the generic
+ * `Request failed (HTTP N).` default.
  */
-export function buildApiError(status: number, body: unknown): ApiError {
-  const fallback = `Request failed (HTTP ${status}).`;
+export function buildApiError(
+  status: number,
+  body: unknown,
+  fallbackMessage?: string,
+): ApiError {
+  const fallback = fallbackMessage ?? `Request failed (HTTP ${status}).`;
   const isObj = typeof body === "object" && body !== null;
   const detail = isObj ? (body as { detail?: unknown }).detail : undefined;
 
