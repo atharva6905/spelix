@@ -68,3 +68,6 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 ## Reviewed: issue #269 / Docling weight sha256 manifest (T2 deploy-infra) (2026-06-13) → PASS (1 MEDIUM + 1 LOW, BOTH fixed in-loop pre-merge, PR #290)
 - [Docling checksum review](review_docling_checksum_269.md) — COPY/WORKDIR/cd path-resolution verified; static-guard test is right tool but a `\n`-split + `.+$` regex MISSES a trailing `\r` that still breaks the Linux `sha256sum -c` (the MEDIUM); fix = `.gitattributes eol=lf` pin + byte-level `test_manifest_has_no_carriage_returns`; sha256sum -c extra-file gap = LOW (documented in ADR); mirrors BlazePose Dockerfile line 74
 - [ApiError unify #294](apierror-unify-294.md) — #283 LOW executed; fallbackMessage 3rd-arg; #235/#282 branch gaps now closed; listAnalyses sole straggler
+
+## Reviewed: issue #275 / deploy SSH command_timeout 30m (T2 CI deploy) (2026-06-14) → PASS (1 non-blocking observation)
+- [Deploy SSH timeout review (#275)](review_deploy_ssh_timeout_275.md) — 30m is sane (3x headroom, under 6h runner default, no job-level timeout-minutes); shared-budget rollback gap = follow-up, not this PR; provenance via commit msg sufficient

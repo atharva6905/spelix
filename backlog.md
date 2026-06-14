@@ -45,6 +45,18 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Completed — Post-L2 beta ops — /ship-loop run 11 (2026-06-14)
+
+Single-session `--auto --watch` run (`sl-1b05`). One ship + one correct pre-implementation filter.
+
+| ID | Title | Status | Size | Tier (prov→actual) | Commit | Files |
+|----|-------|--------|------|--------------------|--------|-------|
+| #275 | Raise deploy SSH `command_timeout` to 30m for cold image rebuilds. The `appleboy/ssh-action@v1` "Deploy via SSH" step defaulted to ~10m `command_timeout`; the #274 lockfile change forced a cold rebuild incl. the #263 docling model-bake layer (`exporting layers` ~7min on the 4GB droplet), so the timeout fired before `docker compose up -d` ran → prod left on the old image (genuine deploy miss, run 27379273732). Fix = one line `command_timeout: 30m` in the `with:` block; connection `timeout` untouched; optional build/restart step-split deliberately NOT done (scope held). Full T2 chain spec→quality→security all PASS; `/code-review` 0 findings; human approval gate "Approve & merge". **Deploy to Production green — first deploy under the new 30m budget passed; droplet on `954c4aa`, containers healthy.** PR #297. | done | XS | T2→T2 | `954c4aa` | `.github/workflows/ci.yml` |
+
+Also this run: **#273** ([R3b-D] flip bench bar-path into `PathBalanceScore`) was surfaced by the claim engine but released `blocked` without code — its body carries a `DO NOT SCHEDULE until` guard (≥2 weeks or ≥10 bench analyses of #272's labels on prod, whichever later) and its dependency **#272** is still open + `blocked`, so the observation window has not even started. The claims eligibility check reads labels, not body-text guards — a known gap; the `blocked` label now keeps it out of the ready queue.
+
+Backlog debt cleared from run 10 (deferred to avoid re-diverging main at the time): **#258** restamp-retry reliability → PR #291 (`6fcbdb6`); **#294** `buildApiError` unification → PR #296 (`ecd48e0`). Both closed + on prod.
+
 ## Completed — Post-L2 beta ops — /ship-loop run 10 (2026-06-13)
 
 First multi-session parallel run on the new claim engine (#285/#286): three `ship-loop --auto` sessions live concurrently (`sl-3a30`, `sl-aa0c`, `sl-ff44`) working a disjoint set. This session = `sl-3a30`. #258 (`sl-aa0c`, PR #291) and the #283 ApiError refactor shipped in parallel.
