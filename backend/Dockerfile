@@ -63,6 +63,14 @@ RUN uv sync --frozen --no-dev
 # Copy application source only (no tests, no scripts — excluded via .dockerignore)
 COPY app/ ./app/
 
+# Copy Alembic config + migrations so `alembic upgrade head` can run in the
+# prod container (issue #311). These live inside the build context (backend/),
+# unlike config/ + reports/ which are bind-mounted because they sit at the repo
+# root. COPY runs before `USER spelix`, so files are root-owned + world-readable;
+# `alembic upgrade` only reads them.
+COPY alembic.ini ./
+COPY alembic/ ./alembic/
+
 # Download MediaPipe BlazePose Heavy task model. The Linux x86_64 wheel
 # for mediapipe 0.10.x does NOT ship the legacy ``solutions`` API, so
 # pose extraction uses the Tasks API which requires this .task file.
