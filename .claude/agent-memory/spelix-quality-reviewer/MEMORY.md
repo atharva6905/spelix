@@ -71,3 +71,9 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #275 / deploy SSH command_timeout 30m (T2 CI deploy) (2026-06-14) → PASS (1 non-blocking observation)
 - [Deploy SSH timeout review (#275)](review_deploy_ssh_timeout_275.md) — 30m is sane (3x headroom, under 6h runner default, no job-level timeout-minutes); shared-budget rollback gap = follow-up, not this PR; provenance via commit msg sufficient
+
+## Reviewed: issue #300 / pin appleboy/ssh-action to SHA (T2 CI) (2026-06-14) → PASS (0 blocking, follow-up observation)
+- [SSH action pin review (#300)](review_ssh_action_pin_300.md) — @<sha> # vX.Y.Z mirrors trufflehog convention; tag==SHA so zero behavior change; partial-pin scope boundary is sound (pin secret-bearing action, defer first-party/setup-uv); command_timeout 30m untouched
+
+## Reviewed: issue #299 / bound deploy build so rollback retains budget (T2 CI) (2026-06-14) → PASS (0 blocking, 2 pre-existing observations)
+- [Deploy rollback budget #299](review_deploy_rollback_budget_299.md) — **appleboy/ssh-action runs WITHOUT set -e** (load-bearing for all deploy-script reviews); the `if timeout 1320` wrapper CAPTURES build status (doesn't suppress errexit); converts the old command_timeout session-kill into an in-script rollback w/ ~8m budget; OBS-1 (alembic-fail-doesn't-rollback, pre-existing) filed as #303
