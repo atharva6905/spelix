@@ -74,3 +74,7 @@ def test_deploy_has_migrate_retry_then_gate() -> None:
     assert "ROLLING BACK" in text and 'git checkout "$PREVIOUS_SHA"' in text, (
         "deploy must roll back to the previous SHA on failure"
     )
+    assert re.search(r"^\s*exit 1\b", text, re.MULTILINE), (
+        "rollback path must terminate the deploy with `exit 1` (fail red), "
+        "else a swallowed failure reports the deploy green"
+    )
