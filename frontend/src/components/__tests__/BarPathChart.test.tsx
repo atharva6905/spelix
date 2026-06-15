@@ -64,6 +64,35 @@ describe("BarPathChart", () => {
     expect(screen.getByTestId("bar-path-empty")).toBeInTheDocument();
   });
 
+  it("renders the chart without a misleading 0% when path_consistency is absent", () => {
+    const noConsistency = {
+      centroids: [
+        [0.5, 0.2],
+        [0.5, 0.9],
+      ],
+    } as unknown as BarPath;
+    const { container } = render(
+      <BarPathChart barPath={noConsistency} exerciseType="squat" />,
+    );
+    expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("0%");
+  });
+
+  it("renders the chart without a misleading 0% when path_consistency is NaN", () => {
+    const nanConsistency: BarPath = {
+      centroids: [
+        [0.5, 0.2],
+        [0.5, 0.9],
+      ],
+      path_consistency: NaN,
+    };
+    const { container } = render(
+      <BarPathChart barPath={nanConsistency} exerciseType="deadlift" />,
+    );
+    expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("0%");
+  });
+
   it("uses plain movement language, never medical framing", () => {
     const { container } = render(
       <BarPathChart barPath={SAMPLE_BAR_PATH} exerciseType="squat" />,

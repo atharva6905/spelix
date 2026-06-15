@@ -218,7 +218,28 @@ export interface BarPath {
   path_consistency: number;
 }
 
-/** Narrow summary_json.bar_path to BarPath | null without trusting the cast. */
+/** Narrow summary_json.bar_path to BarPath | null without trusting the cast.
+ *
+ * Hardened (#206): any malformed centroid element (non-numeric, NaN/Infinity,
+ * wrong arity) makes the whole record corrupt → null, so bad data degrades to
+ * the empty state instead of reaching Recharts. An empty `centroids` array is
+ * valid — it flows to the chart's `centroids.length === 0` empty state.
+ *
+ * `path_consistency` is NOT validated for rejection: a valid trajectory is
+ * useful on its own, so a missing/non-finite consistency keeps the record and
+ * the chart simply omits the consistency label (decision (b)).
+ */
+function isValidCentroid(c: unknown): c is [number, number] {
+  return (
+    Array.isArray(c) &&
+    c.length === 2 &&
+    typeof c[0] === "number" &&
+    Number.isFinite(c[0]) &&
+    typeof c[1] === "number" &&
+    Number.isFinite(c[1])
+  );
+}
+
 export function extractBarPath(
   summaryJson: Record<string, unknown> | null | undefined,
 ): BarPath | null {
@@ -228,6 +249,9 @@ export function extractBarPath(
   }
   const candidate = raw as Partial<BarPath>;
   if (!Array.isArray(candidate.centroids)) {
+    return null;
+  }
+  if (!candidate.centroids.every(isValidCentroid)) {
     return null;
   }
   return candidate as BarPath;

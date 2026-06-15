@@ -66,12 +66,17 @@ export default function BarPathChart({
   // large y. Reverse the Y axis so the chart reads bottom-up like the lifter.
   const data: BarPathPoint[] = centroids.map(([x, y]) => ({ x, y }));
 
-  const consistencyPct = Math.round((barPath?.path_consistency ?? 0) * 100);
+  const rawConsistency = barPath?.path_consistency;
+  const hasConsistency =
+    typeof rawConsistency === "number" && Number.isFinite(rawConsistency);
+  const consistencyLabel = hasConsistency
+    ? `Bar Path · Path Consistency: ${Math.round(rawConsistency * 100)}%`
+    : "Bar Path";
 
   return (
     <div data-testid="bar-path-chart">
       <p className="mb-1 text-xs font-medium text-gray-600">
-        Bar Path · Path Consistency: {consistencyPct}%
+        {consistencyLabel}
       </p>
       <ResponsiveContainer width="100%" height={320}>
         <LineChart
@@ -110,7 +115,7 @@ export default function BarPathChart({
             }
           />
           <Line
-            type="monotone"
+            type="linear"
             dataKey="y"
             stroke="#3b82f6"
             strokeWidth={2}
