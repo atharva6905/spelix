@@ -45,6 +45,12 @@ The sections below are in reverse-chronological build order. Group by phase:
 - **Phase 1** (5-tier confidence, 4-dimension scoring, keyframes, PDF, production hardening).
 - **Phase 0** (core build B-001..B-093, audit fixes).
 
+## Post-L2 beta ops — /ship-loop run 12 (2026-06-15, `sl-2e0a`) — #303 attempt + REVERT (prod incident)
+
+Post-compaction continuation of run 11. Worked **#303** (deploy: roll back on alembic migration failure) through full `/design` → `/implement` → T2 chain (spec/quality/security all PASS) → human approval → merged **PR #305** (`fbac6a6`). **The #305 deploy then FALSE-ROLLED-BACK on the happy path**: the new inner `if … alembic upgrade head; then …` gate runs immediately after `up -d`, before the backend is ready, so a post-`up -d` readiness race made the gate non-zero → "Migration failed — ROLLING BACK" → rollback to `324a296` (prod stayed healthy, no outage, but main's deploy script then failed every deploy). **Recovered by reverting #305 via PR #306 (`7de82b0`)** — the revert's own deploy ran the restored good script and reconciled prod to `7de82b0` (verified: droplet SHA + healthy + `/health`=200). **#303 reopened `needs-design`** for a corrected approach (migrate readiness-retry + real-deploy validation).
+
+**LESSON (now in reviewer memory + a candidate ADR):** deploy-script control-flow changes pass inspection + CI but can only be validated on a REAL deploy — gating a backend-readiness-dependent command (migrate/exec/DB-connect) right after `up -d` false-rollbacks on the readiness race; the old bare line "worked" only because `appleboy/ssh-action` runs without `set -e` and the 6×10s health-retry covered the transient.
+
 ## Completed — Post-L2 beta ops — /ship-loop run 11 (2026-06-14)
 
 Single-session `--auto --watch` run (`sl-1b05`). **Three ships** (#275, #300, #299), one full `/design` (#299), one correct pre-implementation filter (#273). Follow-ups filed: #299, #300, #303. All three ships are CI-deploy-step (`.github/workflows/ci.yml`) T2 changes, each verified green on prod with droplet SHA + container-health checks.
