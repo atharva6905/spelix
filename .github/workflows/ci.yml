@@ -169,14 +169,17 @@ jobs:
             PREVIOUS_SHA=$(git rev-parse HEAD)
             echo "Pre-deploy SHA: $PREVIOUS_SHA"
             git pull origin main
-            docker compose -f docker-compose.prod.yml up -d --build
-            docker compose -f docker-compose.prod.yml exec -T backend uv run alembic upgrade head
-            for i in 1 2 3 4 5 6; do
-              sleep 10
-              curl -sf http://localhost:8000/health && echo "Health check passed" && exit 0
-              echo "Attempt $i failed, retrying..."
-            done
-            echo "Health check failed after 6 attempts — ROLLING BACK"
+            if timeout 1320 docker compose -f docker-compose.prod.yml up -d --build; then
+              docker compose -f docker-compose.prod.yml exec -T backend uv run alembic upgrade head
+              for i in 1 2 3 4 5 6; do
+                sleep 10
+                curl -sf http://localhost:8000/health && echo "Health check passed" && exit 0
+                echo "Attempt $i failed, retrying..."
+              done
+              echo "Health check failed after 6 attempts — ROLLING BACK"
+            else
+              echo "Primary build timed out or failed (exit $?) — ROLLING BACK"
+            fi
             git checkout "$PREVIOUS_SHA"
             docker compose -f docker-compose.prod.yml up -d --build
             echo "Rolled back to $PREVIOUS_SHA. Note: migrations were NOT downgraded — manual alembic downgrade may be required."
