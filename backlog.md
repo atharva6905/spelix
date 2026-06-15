@@ -27,6 +27,7 @@ Migrated 2026-05-30. Open/parked items now live as Issues; the detailed history 
 
 Closed 2026-06-06 via PR #194 (`1558d32`): #188, #189, #192 — see the small-items batch section below.
 Closed 2026-06-09: #190 (PR #200, `1843a7d`) and #185 (PR #201, `cd973a5`) — see the /ship-loop run 1 section below.
+Closed 2026-06-15 via PR #315 (`a8616ee`): **#206** (FR-RESL-05 — bar-path trajectory chart surfaced on the results page; persisted into `summary_json`, rendered via Recharts, graceful empty state for bench/legacy; mislabeled angle-plot comment fixed) — ship-loop run 15 (`sl-89c2`, T1). Same run: **#186** → `needs-human` (apt-pin defers to a snapshot-repo approach — no pre-merge image build means a stale pin breaks the prod deploy), **#207** → `needs-design` (srs-audit tracker of ~15 unverified findings — decompose via `/groom`), **#191** still open (deferred to a fresh session).
 
 **Not migrated** (deliberately): `D-068` (remove an unused `fireEvent` import — drop on next edit to that test),
 `D-AUDIT-L-03` (enable ufw on the droplet — manual server config, not a code change), and the three
