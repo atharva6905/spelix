@@ -512,6 +512,32 @@ describe("ResultsPage", () => {
     expect(screen.queryByTestId("bar-path-empty")).not.toBeInTheDocument();
   });
 
+  it("renders the bar-path chart from summary_json.bar_path (deadlift, R2c)", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        exercise_type: "deadlift",
+        exercise_variant: "conventional",
+        summary_json: {
+          bar_path: {
+            centroids: [
+              [0.5, 0.15],
+              [0.52, 0.5],
+              [0.48, 0.92],
+            ],
+            path_consistency: 0.94,
+          },
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-path-empty")).not.toBeInTheDocument();
+  });
+
   it("renders the bar-path empty state for bench (no tracker, summary null)", () => {
     mockUseAnalysisDetail.mockReturnValue({
       analysis: makeAnalysis({

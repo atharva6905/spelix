@@ -36,6 +36,12 @@ describe("BarPathChart", () => {
     expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
   });
 
+  it("renders the trajectory chart for deadlift data (R2c, #206)", () => {
+    render(<BarPathChart barPath={SAMPLE_BAR_PATH} exerciseType="deadlift" />);
+    expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-path-empty")).not.toBeInTheDocument();
+  });
+
   it("renders the empty state when barPath is null (bench / no tracker)", () => {
     render(<BarPathChart barPath={null} exerciseType="bench" />);
     expect(screen.getByTestId("bar-path-empty")).toBeInTheDocument();
