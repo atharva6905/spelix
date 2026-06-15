@@ -80,3 +80,6 @@ See [coaching-sex-aware-retrieval](coaching_sex_aware_retrieval.md) — Qdrant f
 
 ## Reviewed: issue #303 / roll back deploy on alembic migration failure (T2 CI) (2026-06-15) → PASS-on-inspection but **REVERTED — broke prod**
 - [Deploy migrate rollback #303](review_deploy_migrate_rollback_303.md) — ⚠️ **#305 false-rolled-back on the happy path (migrate gate runs before backend ready, post-`up -d` readiness race) → REVERTED #306**. BIG LESSON: a NEW gate on a readiness-dependent command (migrate/exec/DB-connect) right after `up -d` false-fails; needs readiness-retry + real-deploy validation, not just inspection. errexit-OFF nest-a-gate heuristic still valid; OBS-1 still open
+
+## Reviewed: issue #303 REDESIGN (Option 1, migrate retry loop) (2026-06-15) → PASS (0 findings, real-deploy validation still required)
+- [Deploy migrate rollback #303](review_deploy_migrate_rollback_303.md) (see "REDESIGN" section) — 5×retry migrate loop w/ 10s sleeps + `MIGRATED` flag gating health loop FIXES the #305 readiness race (heuristic (d) now satisfied); 3 if/3 fi balanced; quoting clean; ~26m worst case < 30m. MUST validate on real deploy per ADR-DEPLOY-01 — inspection can't exercise post-`up -d` timing.
