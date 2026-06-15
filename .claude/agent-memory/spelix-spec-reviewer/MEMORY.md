@@ -25,3 +25,4 @@
 
 - [Issue #300 review](review_issue_300.md) --- pin appleboy/ssh-action to SHA 0ff4204d (supply-chain, T2 CI; actions/* follow-up scoping acceptable): PASS, 2026-06-14
 - [Issue #299 review](review_issue_299.md) --- bound deploy build with `timeout 1320` so rollback retains budget (T2 CI; all 3 control-flow paths traced; migrate only on build success; diff confined to script body): PASS, 2026-06-14
+- [Issue #303 review](review_issue_303.md) --- nest alembic upgrade head in inner if-then (migrate-failure rollback gate, T2 CI; all 4 control-flow paths traced): PASS-on-inspection, 2026-06-15 — ⚠️ but **#305 broke prod (gate false-rolled-back on post-`up -d` backend-readiness race) → REVERTED #306**; #303 reopened needs-design. Spec-review traces control flow correctly but CANNOT catch prod-deploy timing — deploy-script changes need real-deploy validation.
