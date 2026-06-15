@@ -197,6 +197,72 @@ async def test_metric_keys_collected() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Test 4b: bar_path persisted into summary_json (FR-RESL-05, issue #206)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_bar_path_persisted_into_summary() -> None:
+    """A bar_path dict passed to compute_and_store lands in summary_json.
+
+    FR-RESL-05: the bar-path trajectory must survive the 7-day artifact purge
+    so the results page can render it from data. summary_json (JSONB) is the
+    retained store; the worker forwards pipeline_result.bar_path here.
+    """
+    analysis = _make_analysis(
+        confidence_score=0.88,
+        exercise_type="squat",
+        exercise_variant="high_bar",
+    )
+    rep_metrics = [_make_rep_metric({"hip_angle_min_deg": 85.0})]
+    service, _, _ = _make_service(analysis, rep_metrics)
+
+    bar_path = {
+        "centroids": [(0.50, 0.20), (0.51, 0.55), (0.49, 0.90)],
+        "ap_deviation_px": 0.02,
+        "vertical_range_px": 0.70,
+        "path_consistency": 0.97,
+    }
+
+    result = await service.compute_and_store(analysis.id, bar_path=bar_path)
+
+    assert result["bar_path"] is not None
+    assert result["bar_path"]["centroids"] == [
+        [0.50, 0.20],
+        [0.51, 0.55],
+        [0.49, 0.90],
+    ]
+    assert result["bar_path"]["path_consistency"] == pytest.approx(0.97)
+    assert analysis.summary_json["bar_path"] == result["bar_path"]
+
+
+@pytest.mark.asyncio
+async def test_bar_path_none_persists_null() -> None:
+    """When bar_path is None (e.g. bench, no tracker) summary carries null."""
+    analysis = _make_analysis(
+        confidence_score=0.71,
+        exercise_type="bench",
+        exercise_variant="flat",
+    )
+    service, _, _ = _make_service(analysis, [])
+
+    result = await service.compute_and_store(analysis.id, bar_path=None)
+
+    assert result["bar_path"] is None
+
+
+@pytest.mark.asyncio
+async def test_bar_path_default_is_none() -> None:
+    """Calling without bar_path keeps summary_json["bar_path"] null."""
+    analysis = _make_analysis(exercise_type="squat", exercise_variant="high_bar")
+    service, _, _ = _make_service(analysis, [])
+
+    result = await service.compute_and_store(analysis.id)
+
+    assert result["bar_path"] is None
+
+
+# ---------------------------------------------------------------------------
 # Test 5: analysis not found raises ValueError
 # ---------------------------------------------------------------------------
 

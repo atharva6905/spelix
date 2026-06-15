@@ -149,7 +149,12 @@ async def _run_pipeline(
         # Summary metrics (B-030): compute and store summary_json
         # ------------------------------------------------------------------ #
         summary_svc = SummaryService(repo, rep_metric_repo)
-        await summary_svc.compute_and_store(analysis_id)
+        # Persist bar_path into summary_json (FR-RESL-05, issue #206) so the
+        # results page can render the trajectory from retained data — the PDF
+        # plot artifact is purged after 7 days, summary_json is kept.
+        await summary_svc.compute_and_store(
+            analysis_id, bar_path=pipeline_result.bar_path
+        )
         await _write_heartbeat(redis)
 
         # ------------------------------------------------------------------ #

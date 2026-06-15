@@ -95,6 +95,25 @@ def _compute_consistency_metrics(
     return result
 
 
+def _normalise_bar_path(bar_path: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Coerce a bar-path dict into JSON-serialisable form for summary_json.
+
+    The CV pipeline returns ``centroids`` as a list of (x, y) tuples. JSONB
+    round-trips those as nested lists, so we normalise eagerly to keep the
+    in-memory return value identical to what the DB will hold (and what the
+    frontend will receive). Returns ``None`` unchanged for bench / no-tracker
+    cases (#180).
+    """
+    if not bar_path:
+        return None
+
+    normalised = dict(bar_path)
+    centroids = bar_path.get("centroids")
+    if centroids is not None:
+        normalised["centroids"] = [[float(x), float(y)] for x, y in centroids]
+    return normalised
+
+
 class SummaryService:
     """Compute and persist summary_json for a completed analysis.
 
@@ -114,13 +133,24 @@ class SummaryService:
         self._repo = repo
         self._rep_metric_repo = rep_metric_repo
 
-    async def compute_and_store(self, analysis_id: UUID) -> dict[str, Any]:
+    async def compute_and_store(
+        self,
+        analysis_id: UUID,
+        bar_path: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Compute summary_json from analysis + rep_metrics and write to DB.
 
         Parameters
         ----------
         analysis_id:
             UUID of the analysis to summarise.
+        bar_path:
+            Optional bar-path trajectory dict from the CV pipeline
+            (``centroids`` / ``ap_deviation_px`` / ``vertical_range_px`` /
+            ``path_consistency``). Persisted into summary_json so the results
+            page can render the trajectory (FR-RESL-05) from retained data
+            rather than the transient PDF artifact (issue #206). ``None`` for
+            bench (no real bar tracker yet, #180) — stored as null.
 
         Returns
         -------
@@ -159,6 +189,7 @@ class SummaryService:
             "quality_gate_warnings": warnings,
             "top_metric_keys": metric_keys,
             "consistency_metrics": consistency,
+            "bar_path": _normalise_bar_path(bar_path),
         }
 
         # 4. Write to analysis.summary_json
