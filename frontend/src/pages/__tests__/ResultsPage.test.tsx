@@ -63,6 +63,14 @@ vi.mock("@/lib/supabase", () => ({
   },
 }));
 
+// Recharts (BarPathChart) uses ResizeObserver internally — stub for jsdom.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+window.ResizeObserver = ResizeObserverStub;
+
 // ---------------------------------------------------------------------------
 // Fixture factories
 // ---------------------------------------------------------------------------
@@ -476,6 +484,49 @@ describe("ResultsPage", () => {
       "src",
       "https://cdn.example.com/plot.png",
     );
+  });
+
+  // Bar path trajectory (FR-RESL-05, issue #206)
+  it("renders the bar-path chart from summary_json.bar_path (squat)", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        exercise_type: "squat",
+        summary_json: {
+          bar_path: {
+            centroids: [
+              [0.5, 0.2],
+              [0.51, 0.55],
+              [0.49, 0.9],
+            ],
+            path_consistency: 0.96,
+          },
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("bar-path-chart")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-path-empty")).not.toBeInTheDocument();
+  });
+
+  it("renders the bar-path empty state for bench (no tracker, summary null)", () => {
+    mockUseAnalysisDetail.mockReturnValue({
+      analysis: makeAnalysis({
+        exercise_type: "bench",
+        exercise_variant: "flat",
+        summary_json: null,
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    renderResultsPage();
+
+    expect(screen.getByTestId("bar-path-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("bar-path-chart")).not.toBeInTheDocument();
   });
 
   // No coaching result

@@ -198,6 +198,41 @@ export interface RepMetricDetail {
   metrics_json: Record<string, unknown> | null;
 }
 
+// ---------------------------------------------------------------------------
+// Types — Bar path trajectory (FR-RESL-05, issue #206)
+//
+// Persisted into analyses.summary_json.bar_path by the worker
+// (SummaryService.compute_and_store) so the results page can render the
+// trajectory from retained data — the PDF bar-path plot artifact is purged
+// after 7 days, summary_json is kept indefinitely.
+//
+// `null` for bench (no real bar tracker yet, #180) and for legacy analyses
+// processed before #206 shipped — both degrade to a graceful empty state.
+// ---------------------------------------------------------------------------
+
+export interface BarPath {
+  /** Ordered (x, y) centroids normalised to [0, 1]; y grows downward (image coords). */
+  centroids: [number, number][];
+  ap_deviation_px?: number;
+  vertical_range_px?: number;
+  path_consistency: number;
+}
+
+/** Narrow summary_json.bar_path to BarPath | null without trusting the cast. */
+export function extractBarPath(
+  summaryJson: Record<string, unknown> | null | undefined,
+): BarPath | null {
+  const raw = summaryJson?.bar_path;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const candidate = raw as Partial<BarPath>;
+  if (!Array.isArray(candidate.centroids)) {
+    return null;
+  }
+  return candidate as BarPath;
+}
+
 export interface AnalysisDetail {
   id: string;
   status: AnalysisStatus;

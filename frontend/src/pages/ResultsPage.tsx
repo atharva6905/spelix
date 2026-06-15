@@ -12,8 +12,10 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { useAnalysisDetail } from "@/hooks/useAnalysisDetail";
 import type { CoachingIssue, Citation, RepMetricDetail } from "@/api/analyses";
+import { extractBarPath } from "@/api/analyses";
 import { parseWithCitations } from "@/components/CitationTooltip";
 import ChatPanel from "@/components/ChatPanel";
+import BarPathChart from "@/components/BarPathChart";
 import { AgentReasoningSidebar } from "@/components/AgentReasoningSidebar";
 import {
   getConfidenceCategory,
@@ -808,7 +810,8 @@ export default function ResultsPage() {
           <RepMetricsTable repMetrics={analysis.rep_metrics} />
         </div>
 
-        {/* Angle plot (FR-RESL-05) */}
+        {/* Joint-angle time-series plot (NOT FR-RESL-05 — that is the bar
+            path trajectory below). This is the per-rep joint angle plot. */}
         {analysis.plot_path && (
           <div className="rounded-lg bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-gray-900">
@@ -822,6 +825,17 @@ export default function ResultsPage() {
             />
           </div>
         )}
+
+        {/* Bar path trajectory (FR-RESL-05) — rendered from
+            summary_json.bar_path so it survives the 7-day artifact purge.
+            Bench has no real bar tracker yet (#180) → graceful empty state. */}
+        <div className="rounded-lg bg-white p-6 shadow-sm">
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Bar Path</h2>
+          <BarPathChart
+            barPath={extractBarPath(analysis.summary_json)}
+            exerciseType={analysis.exercise_type}
+          />
+        </div>
 
         {/* Download links (FR-RESL-08, FR-RESL-10–11) */}
         <div className="rounded-lg bg-white p-6 shadow-sm">
