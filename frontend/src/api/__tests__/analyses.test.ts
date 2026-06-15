@@ -9,6 +9,7 @@ import {
   getChatHistory,
   sendChatMessage,
   authHeaders,
+  extractBarPath,
 } from "@/api/analyses";
 import { isApiError } from "@/api/errors";
 
@@ -467,5 +468,104 @@ describe("sendChatMessage", () => {
     await expect(sendChatMessage("a1", "Hello")).rejects.toSatisfy(
       (e) => isApiError(e) && e.status === 429 && e.message === "Rate limited",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractBarPath — hardened validation (FR-RESL-05, issue #206)
+// ---------------------------------------------------------------------------
+
+describe("extractBarPath", () => {
+  test("returns null when summaryJson is null or undefined", () => {
+    expect(extractBarPath(null)).toBeNull();
+    expect(extractBarPath(undefined)).toBeNull();
+  });
+
+  test("returns null when bar_path is missing", () => {
+    expect(extractBarPath({ rep_count: 3 })).toBeNull();
+  });
+
+  test("returns null when bar_path is explicitly null", () => {
+    expect(extractBarPath({ bar_path: null })).toBeNull();
+  });
+
+  test("returns null when centroids is not an array", () => {
+    expect(
+      extractBarPath({ bar_path: { centroids: "nope", path_consistency: 1 } }),
+    ).toBeNull();
+  });
+
+  test("returns null when a centroid element is non-numeric", () => {
+    expect(
+      extractBarPath({
+        bar_path: { centroids: [["a", "b"]], path_consistency: 0.9 },
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null when a centroid contains NaN", () => {
+    expect(
+      extractBarPath({
+        bar_path: { centroids: [[0.5, NaN]], path_consistency: 0.9 },
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null when a centroid contains Infinity", () => {
+    expect(
+      extractBarPath({
+        bar_path: { centroids: [[0.5, Infinity]], path_consistency: 0.9 },
+      }),
+    ).toBeNull();
+  });
+
+  test("returns null when a centroid has the wrong arity", () => {
+    expect(
+      extractBarPath({
+        bar_path: { centroids: [[0.5]], path_consistency: 0.9 },
+      }),
+    ).toBeNull();
+  });
+
+  test("returns the BarPath for a valid trajectory", () => {
+    const result = extractBarPath({
+      bar_path: {
+        centroids: [
+          [0.5, 0.2],
+          [0.51, 0.9],
+        ],
+        path_consistency: 0.96,
+      },
+    });
+    expect(result).not.toBeNull();
+    expect(result?.centroids).toEqual([
+      [0.5, 0.2],
+      [0.51, 0.9],
+    ]);
+    expect(result?.path_consistency).toBe(0.96);
+  });
+
+  test("keeps empty centroids as a valid BarPath (NOT null)", () => {
+    const result = extractBarPath({
+      bar_path: { centroids: [], path_consistency: 1 },
+    });
+    expect(result).not.toBeNull();
+    expect(result?.centroids).toEqual([]);
+  });
+
+  test("keeps the trajectory even when path_consistency is non-finite (decision b)", () => {
+    const result = extractBarPath({
+      bar_path: { centroids: [[0.5, 0.5]], path_consistency: NaN },
+    });
+    expect(result).not.toBeNull();
+    expect(result?.centroids).toEqual([[0.5, 0.5]]);
+  });
+
+  test("keeps the trajectory even when path_consistency is missing (decision b)", () => {
+    const result = extractBarPath({
+      bar_path: { centroids: [[0.5, 0.5]] },
+    });
+    expect(result).not.toBeNull();
+    expect(result?.centroids).toEqual([[0.5, 0.5]]);
   });
 });
